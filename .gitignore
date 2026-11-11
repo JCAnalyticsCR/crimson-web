@@ -71,3 +71,6 @@ portal/e2e/.dist-compra/
 portal/test-results/
 portal/playwright-report/
 portal/e2e/informes/
+
+# peso de la tienda (O2-01d): mapa de trozos que deja el build para scripts/peso-tienda.mjs
+portal/.peso-tienda/

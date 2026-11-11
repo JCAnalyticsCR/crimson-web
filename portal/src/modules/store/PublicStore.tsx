@@ -19,6 +19,7 @@ import ProductPage from "./ProductPage";
 import { parseCarrito } from "./carritoCompartido";
 import StoreHome from "./StoreHome";
 import { bootStore } from "./boot";
+import { logoSrc } from "./logo";
 import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
@@ -294,7 +295,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
           <div className="sh-wrap">
             <div className="sh-head__row">
               <Link className="sh-logo" to={L("/")} aria-label={`${S.name}, volver a la tienda`}>
-                {S.logo_url ? <img src={S.logo_url} alt="" height={30} /> : <b>{S.name}</b>}
+                {S.logo_url ? <img src={logoSrc(S.logo_url)!} alt="" height={30} /> : <b>{S.name}</b>}
               </Link>
               <span className="ck-head__safe"><Ico d={IC.lock} size={16} />Pago seguro</span>
               <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => go({})}>Volver a la tienda</button>
@@ -316,7 +317,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         <div className="sh-wrap">
           <div className="sh-head__row">
             <Link className="sh-logo" to={L("/")} aria-label={`${S.name}, inicio de la tienda`}>
-              {S.logo_url ? <img src={S.logo_url} alt="" height={30} /> : <b>{S.name}</b>}
+              {S.logo_url ? <img src={logoSrc(S.logo_url)!} alt="" height={30} /> : <b>{S.name}</b>}
             </Link>
             <SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} />
             <div className="sh-head__actions">

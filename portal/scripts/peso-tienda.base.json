@@ -1,0 +1,11 @@
+{
+  "nota": "Peso inicial de la tienda (entrada + vitrina, JS y CSS, gzip nivel 9). scripts/peso-tienda.mjs falla si sube mas de 5 % sobre gzip_bytes. Registrar otra con --registrar solo a proposito.",
+  "gzip_bytes": 146918,
+  "bytes": 519020,
+  "archivos": 5,
+  "registrado": "2026-11-11",
+  "antes_O2_01d": {
+    "gzip_bytes": 172031,
+    "nota": "origin/main antes de separar el panel de la entrada: 168.0 KB gzip"
+  }
+}

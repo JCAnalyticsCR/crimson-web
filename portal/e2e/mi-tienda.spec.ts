@@ -3,11 +3,28 @@
    - No se puede despublicar con un solo clic: primero una ventana con el efecto escrito.
    - Escribir un titular y luego guardar un banner no pierde nada (antes, el guardado del titular reiniciaba el
      editor de banners y lo escrito ahi se perdia). */
+import { createHmac } from "node:crypto";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { expect, test } from "./soporte/compra";
 
 const ADMIN = "panel.e2e@example.com";
 const CLAVE = process.env.E2E_PANEL_PASSWORD || "";
+/* O2-01d: segundo administrador, con el 2FA activo (secreto TOTP al azar en cada corrida: playwright.compra.config.ts) */
+const ADMIN_2FA = "panel.2fa.e2e@example.com";
+const TOTP = process.env.E2E_PANEL_TOTP || "";
+
+/** Codigo TOTP de 6 digitos (RFC 6238, 30 s, SHA-1), el mismo que muestra la app de autenticacion. */
+function codigoTotp(secreto: string, paso = Math.floor(Date.now() / 30_000)): string {
+  const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const c of secreto.replace(/=+$/, "").toUpperCase()) bits += B32.indexOf(c).toString(2).padStart(5, "0");
+  const llave = Buffer.from((bits.match(/.{8}/g) || []).map((x) => parseInt(x, 2)));
+  const contador = Buffer.alloc(8);
+  contador.writeBigUInt64BE(BigInt(paso));
+  const h = createHmac("sha1", llave).update(contador).digest();
+  const o = h[h.length - 1] & 0xf;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
 /* el panel no vive en tienda.localhost (ese nombre monta la tienda): mismo servidor, por 127.0.0.1 */
 /* los rotulos del panel (Field) no van atados al campo: se busca el campo por el rotulo de su caja */
 const campo = (page: Page, rotulo: string, dentro = "") =>
@@ -74,5 +91,28 @@ test("[O1-11b] escribir un titular y luego guardar un banner no pierde nada", as
   expect(sc.headline).toBe(titular);
   expect(sc.banners.map((b) => [b.title, b.active])).toContainEqual(["Promo de prueba", false]);
   // sin scroll de lado a 768 px
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
+
+/* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
+   factor: correo y contrasena, el paso «Verificación en dos pasos», el codigo de la app y adentro del panel. */
+test("[O2-01d] inicio de sesión del panel con segundo factor (2FA)", async ({ page, baseURL }) => {
+  test.skip(!TOTP, "sin administrador con 2FA (API ya levantado aparte)");
+  const base = panel(baseURL);
+  await page.goto(`${base}/login`);
+  await page.locator('input[type="email"]').fill(ADMIN_2FA);
+  await page.locator('input[autocomplete="current-password"]').fill(CLAVE);
+  await page.locator("button.lg-go").click();
+  await expect(page.getByRole("heading", { name: "Verificación en dos pasos" })).toBeVisible();
+  // un codigo de una ventana de 30 s que no sea la que esta por vencer (el API acepta un paso a cada lado)
+  if (30 - (Math.floor(Date.now() / 1000) % 30) < 3) await page.waitForTimeout(3500);
+  await page.locator('input[autocomplete="one-time-code"]').fill(codigoTotp(TOTP));
+  await page.locator("button.lg-go").click();
+  await page.waitForURL((u) => !u.pathname.startsWith("/login"));
+  const hola = page.locator(".welcome");
+  if (await hola.waitFor({ timeout: 3000 }).then(() => true, () => false)) await hola.getByRole("button", { name: /Empezar/ }).click();
+  // el cascaron del panel (menu lateral con sus secciones) esta montado
+  await expect(page.getByRole("complementary").getByRole("link", { name: "Inicio" })).toBeAttached();
+  await expect(page.getByRole("heading", { name: "Verificación en dos pasos" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });

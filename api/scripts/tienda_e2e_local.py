@@ -98,12 +98,15 @@ def carpeta_de_datos(ruta: str | None) -> Path:
 
 
 PANEL_ADMIN = "panel.e2e@example.com"  # dominio reservado para ejemplos
+PANEL_ADMIN_2FA = "panel.2fa.e2e@example.com"  # O2-01d: el mismo administrador, con segundo factor
 
 
-def crear_admin_del_panel(SessionLocal, password: str) -> None:
+def crear_admin_del_panel(SessionLocal, password: str, totp_secret: str = "") -> None:
     """Administrador de la empresa de pruebas para las pruebas del panel (portal/e2e/mi-tienda.spec.ts). La contrasena
     la inventa Playwright al azar en cada corrida (E2E_PANEL_PASSWORD) y vive solo en la memoria de ese proceso y en
-    esta base desechable: no hay ninguna escrita en el repositorio."""
+    esta base desechable: no hay ninguna escrita en el repositorio.
+    Con totp_secret (E2E_PANEL_TOTP, tambien al azar en cada corrida) se crea ademas un segundo administrador con el 2FA
+    ya activo: el inicio de sesion con codigo es el arranque del panel (O2-01d, el panel va en su propio trozo)."""
     from sqlalchemy import select
 
     from app.core.security import hash_password
@@ -111,15 +114,20 @@ def crear_admin_del_panel(SessionLocal, password: str) -> None:
 
     with SessionLocal() as db:
         t = db.scalar(select(Tenant).where(Tenant.slug == "crimson"))
-        u = db.scalar(select(User).where(User.email == PANEL_ADMIN))
-        if u is None:
-            u = User(email=PANEL_ADMIN, full_name="Administrador de prueba", password_hash=hash_password(password))
-            db.add(u)
-            db.flush()
-        else:
-            u.password_hash = hash_password(password)
-        if t is not None and not db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == t.id)):
-            db.add(TenantUser(tenant_id=t.id, user_id=u.id, role_code="admin"))
+        for email, secreto in ((PANEL_ADMIN, ""), (PANEL_ADMIN_2FA, totp_secret)):
+            if email == PANEL_ADMIN_2FA and not secreto:
+                continue
+            u = db.scalar(select(User).where(User.email == email))
+            if u is None:
+                u = User(email=email, full_name="Administrador de prueba", password_hash=hash_password(password))
+                db.add(u)
+                db.flush()
+            else:
+                u.password_hash = hash_password(password)
+            if secreto:
+                u.totp_secret, u.totp_enabled, u.totp_last_step = secreto, True, None
+            if t is not None and not db.scalar(select(TenantUser).where(TenantUser.user_id == u.id, TenantUser.tenant_id == t.id)):
+                db.add(TenantUser(tenant_id=t.id, user_id=u.id, role_code="admin"))
         db.commit()
 
 
@@ -159,8 +167,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     panel_pw = os.environ.get("E2E_PANEL_PASSWORD") or ""  # se lee antes de limpiar el entorno
+    panel_totp = os.environ.get("E2E_PANEL_TOTP") or ""
     limpio = entorno_limpio(dict(os.environ), database_url, args.base_url)
     limpio.pop("E2E_PANEL_PASSWORD", None)
+    limpio.pop("E2E_PANEL_TOTP", None)
     os.environ.clear()
     os.environ.update(limpio)
     os.chdir(datos)
@@ -193,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[e2e-local] No arranca. {e}", file=sys.stderr, flush=True)
         return 2
     if panel_pw:
-        crear_admin_del_panel(SessionLocal, panel_pw)
+        crear_admin_del_panel(SessionLocal, panel_pw, panel_totp)
     estados = ", ".join(f"{c}={p['estado']}" for c, p in resumen["productos"].items())
     print(f"[e2e-local] Base lista ({settings.database_url.split('://')[0]}), tienda sembrada: {estados}", flush=True)
     if args.solo_preparar:

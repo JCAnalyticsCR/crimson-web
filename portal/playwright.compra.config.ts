@@ -30,6 +30,11 @@ if (!YA_LEVANTADA && !process.env.E2E_PANEL_PASSWORD) {
   const azar = Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join("");
   process.env.E2E_PANEL_PASSWORD = `Pn1-${azar}`;
 }
+/* O2-01d: secreto TOTP (base32, al azar en cada corrida) del segundo administrador de prueba, que entra con codigo 2FA */
+if (!YA_LEVANTADA && !process.env.E2E_PANEL_TOTP) {
+  const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  process.env.E2E_PANEL_TOTP = Array.from({ length: 32 }, () => B32[Math.floor(Math.random() * 32)]).join("");
+}
 const PORTAL = process.env.E2E_COMPRA_PORTAL === "dev"
   ? "npx vite --config vite.compra.config.ts"
   : "npx vite build --config vite.compra.config.ts && npx vite preview --config vite.compra.config.ts";
