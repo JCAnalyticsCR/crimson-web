@@ -8,13 +8,28 @@
       ultimas), incluido el estado «consultar». El mock solo conoce tres estados simplificados; aqui se reemplaza
       `availability` en cada respuesta por la de datos.ts.
 
-   Todo ocurre dentro del navegador: nada sale a un servidor. */
+   Todo ocurre dentro del navegador: nada sale a un servidor.
+
+   PERILLAS DE PRUEBA (window.__e2eAjustes, se fijan con page.addInitScript antes de cargar; ver AjustesE2e):
+   accion = la accion de Ajustes para lo que no se vende en linea (O1-02: «ninguna» quita el boton de WhatsApp);
+   retrasoItem = ms de espera de /item (O1-03: el desglose no se pinta con datos a medias);
+   fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda). */
 import { Catalog, productPath, productType, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
 import { installMockApi } from "../../src/demo/mockApi";
 import type { SnapProduct } from "../../src/modules/store/catalogFilter";
 import { CATALOGO, DISPONIBILIDAD } from "./datos";
 
 const SLUG = "crimson";
+
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number };
+const ajustes = (): AjustesE2e => (window as Window & { __e2eAjustes?: AjustesE2e }).__e2eAjustes || {};
+/** la disponibilidad de datos.ts, con la accion de las perillas para lo que no se vende en linea */
+function dispo(id: number) {
+  const d = DISPONIBILIDAD[id];
+  if (!d) return d;
+  const accion = ajustes().accion;
+  return accion && !d.disponible ? { ...d, accion } : { ...d };
+}
 const ETAG = '"e2e-1"';
 
 /** nombre + marca + modelo en minusculas y sin tildes (store_snapshot._sf) */
@@ -27,7 +42,7 @@ function snapshot() {
     id: p.id, path: productPath(p), name: p.name, brand: p.brand, model: null, code: p.code, category_id: p.cat,
     display_price: c.gross(p), web_featured: false, image: p.images[0] || null, type: productType(p) || null,
     created_ts: 1_760_000_000 + Number(p.mod) * 86_400 + i, // mas nuevo = `mod` mas alto, como el orden «Novedades» del mock
-    availability: { ...DISPONIBILIDAD[p.id] },
+    availability: dispo(p.id),
     sf: sf(p),
   }));
   const cuenta = (key: (p: RawProduct) => string | null) => {
@@ -51,8 +66,8 @@ function conDisponibilidad(x: unknown): unknown {
   const o = x as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(o)) out[k] = conDisponibilidad(v);
-  const d = typeof o.id === "number" ? DISPONIBILIDAD[o.id] : undefined;
-  if (d && o.availability && typeof o.availability === "object") out.availability = { ...d };
+  const d = typeof o.id === "number" ? dispo(o.id) : undefined;
+  if (d && o.availability && typeof o.availability === "object") out.availability = d;
   return out;
 }
 
@@ -72,6 +87,13 @@ export function instalarApiE2e() {
     const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(raw, location.href);
     const base = `/api/public/store/${SLUG}`;
+    if (url.origin === location.origin && url.pathname === "/api/public/store-domain") {
+      const a = ajustes();
+      if (a.fallarDominio && a.fallarDominio > 0) {
+        a.fallarDominio--;
+        return new Response(JSON.stringify({ detail: "no disponible" }), { status: 503, headers: { "Content-Type": "application/json" } });
+      }
+    }
     if (url.origin !== location.origin || !url.pathname.startsWith(base)) return mock(input, init);
     const sub = url.pathname.slice(base.length);
     const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
@@ -93,12 +115,14 @@ export function instalarApiE2e() {
       await pausa(200);
     }
 
+    if (method === "GET" && sub.startsWith("/item/") && ajustes().retrasoItem) await pausa(ajustes().retrasoItem!);
+
     const res = await mock(input, init);
     if (!res.ok || !(res.headers.get("Content-Type") || "").includes("json")) return res;
     const body: unknown = await res.json();
     // /availability?ids= devuelve la disponibilidad plana por id: { items: [{ id, state, label, ... }] }
     const fixed = method === "GET" && sub === "/availability" && body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)
-      ? { items: (body as { items: { id: number }[] }).items.map((it) => (DISPONIBILIDAD[it.id] ? { id: it.id, ...DISPONIBILIDAD[it.id] } : it)) }
+      ? { items: (body as { items: { id: number }[] }).items.map((it) => (DISPONIBILIDAD[it.id] ? { id: it.id, ...dispo(it.id) } : it)) }
       : conDisponibilidad(body);
     return new Response(JSON.stringify(fixed), { status: res.status, headers: res.headers });
   };

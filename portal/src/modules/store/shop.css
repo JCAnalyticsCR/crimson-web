@@ -236,3 +236,19 @@
 @media (prefers-reduced-motion: reduce) {
   .shop *, .shop *::before, .shop *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- O1-02: venta asistida en la ficha («por confirmar») ----------
+   Va aqui y no en vitrina.css (vedado hasta O2-07, que lo pliega alla). La zona de compra nunca ensancha la columna:
+   los botones parten renglon en vez de empujar todo fuera de la pantalla a 320 px. */
+.shop .vt-buybox { min-width: 0; }
+.shop .vt-buybox .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
+.shop .vt-buybox__hint { margin: -6px 0 0; font-size: 13px; color: var(--text-3); text-align: center; }
+.shop .vt-textlink { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; color: var(--ink); font-weight: 600; font-size: 15px; text-decoration: underline; text-underline-offset: 3px; }
+.shop .vt-textlink:hover { color: var(--crimson); }
+.shop .vt-stickybuy .vt-textlink { flex: 0 1 auto; text-align: right; }
+/* pastilla «Consultar» de la tarjeta: texto visible en vez del icono solo */
+.shop .vt-add.vt-add--pill { width: auto; min-width: 44px; padding: 0 12px; border-radius: 999px; gap: 6px; font-weight: 700; font-size: 13.5px; text-decoration: none; white-space: nowrap; }
+.shop .vt-acc__list .vt-add.vt-add--pill { width: auto; height: 40px; }
+.shop .vt-qty button[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
+/* con la pastilla de texto el pie de la tarjeta parte renglon en vez de montar «Consultar» sobre el precio */
+.shop .vt-card__foot:has(.vt-add--pill) { flex-wrap: wrap; row-gap: 8px; }

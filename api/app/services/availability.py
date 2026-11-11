@@ -70,7 +70,7 @@ DEFAULTS: dict = {
     "enabled": True,  # reservar al crear pedidos web (apagado: la tienda vende como siempre, sin control)
     "warehouse_ids": [],  # bodegas que alimentan la web; vacio = todas las de venta activas
     "quantity_display": "exacta",  # exacta | umbral | oculta (exacta = como la tienda de siempre)
-    "low_threshold": 3,  # "ultimas unidades" a partir de aqui
+    "low_threshold": 3,  # "pocas unidades" a partir de aqui (O1-02: tope de 3 al guardar, LOW_THRESHOLD_MAX)
     "backorder_enabled": True,  # vender bajo pedido lo que el proveedor tiene (con dato vigente)
     "backorder_lead": "3-5 días hábiles",  # plazo de "bajo pedido" que ve el cliente
     # dato del proveedor mas viejo -> "Consultar disponibilidad". 04/11 (decision del usuario): Eurocomp se sincroniza una
@@ -97,6 +97,12 @@ STATES: dict[str, str] = {
     "servicio": "Servicio",
 }
 SELLABLE_STATES = ("en_bodega", "bajo_pedido", "servicio")
+# Etiquetas de la TIENDA (audiencia publico) que no son las del panel (O1-02, venta asistida): lo que el proveedor tiene
+# con dato viejo no se le dice "Consultar disponibilidad" al cliente sino "por confirmar", y nunca con signos.
+PUBLIC_CONSULTAR = "Disponibilidad por confirmar"
+PUBLIC_CONSULTAR_SHORT = "Por confirmar"
+PUBLIC_POCAS = "Pocas unidades en bodega"
+LOW_THRESHOLD_MAX = 3  # el umbral de "pocas unidades" se limita a 3 al guardar (store_inventory.put_inv_settings)
 OPEN_REQUEST = ("borrador", "solicitada")  # solicitudes de compra de pedidos web que ya prometen existencia del proveedor
 # solicitud de un pedido web SIN pagar: aparta lo del proveedor mientras el pedido no vence, pero no avisa ni se compra
 # (la compra nace al cobrar: store_inventory.activate_requests la pasa a borrador)
@@ -409,10 +415,25 @@ def _public_label(state: str, own_free: Decimal, ultimas: bool, lead: str | None
         if mode == "exacta":
             return f"En bodega · {qty_text(own_free)} {'disponible' if own_free == 1 else 'disponibles'}"
         if mode == "umbral" and ultimas:
-            return "¡Últimas unidades!"
+            return PUBLIC_POCAS
         return STATES["en_bodega"]
     if state == "bajo_pedido":
         return f"Bajo pedido · entrega en {lead}" if lead else STATES["bajo_pedido"]
+    if state == "consultar":
+        return PUBLIC_CONSULTAR
+    return STATES[state]
+
+
+def _public_short(state: str, own_free: Decimal, ultimas: bool, cfg: dict) -> str:
+    """Etiqueta corta de la tarjeta de la tienda (label_short, O1-02). Con la cantidad exacta publicada y pocas unidades
+    dice cuantas hay ("2 en bodega"); sin cantidad publica, "Pocas unidades"."""
+    if state == "en_bodega":
+        if ultimas:
+            exact = (cfg.get("quantity_display") or "exacta") == "exacta"
+            return f"{qty_text(own_free)} en bodega" if exact else "Pocas unidades"
+        return STATES["en_bodega"]
+    if state == "consultar":
+        return PUBLIC_CONSULTAR_SHORT
     return STATES[state]
 
 
@@ -547,6 +568,7 @@ def availability_many(
         }
         if audience == "publico":
             exact = mode == "exacta"
+            row["label_short"] = _public_short(state, own_free, ultimas, cfg)  # aditivo: la tarjeta (O1-02)
             row["cantidad"] = _num(own_free) if (state == "en_bodega" and exact) else None
             row["max_qty"] = _num(max_qty) if (exact and max_qty is not None) else None
         elif audience == "aliado":

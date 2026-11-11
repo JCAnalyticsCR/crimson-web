@@ -18,21 +18,21 @@ export const FX = 512;
 /** Lo que el API manda en `availability` (routers/store_showcase.AVAIL_KEYS). */
 export type Dispo = {
   state: "en_bodega" | "bajo_pedido" | "consultar" | "agotado";
-  label: string; max_qty: number | null; ultimas: boolean; cantidad: number | null; disponible: boolean; accion: string | null; plazo: string | null;
+  label: string; label_short?: string; max_qty: number | null; ultimas: boolean; cantidad: number | null; disponible: boolean; accion: string | null; plazo: string | null;
 };
 const PLAZO = "3-5 días hábiles"; // DEFAULTS["backorder_lead"]
 const UMBRAL = 3; // DEFAULTS["low_threshold"]
 /** n propias en bodega y, si el proveedor tiene mas con dato vigente, `proveedor` unidades bajo pedido. */
 const enBodega = (n: number, proveedor = 0): Dispo => ({
-  state: "en_bodega", label: `En bodega · ${n} ${n === 1 ? "disponible" : "disponibles"}`, max_qty: n + proveedor,
+  state: "en_bodega", label: `En bodega · ${n} ${n === 1 ? "disponible" : "disponibles"}`, label_short: n <= UMBRAL ? `${n} en bodega` : "En bodega", max_qty: n + proveedor,
   ultimas: n <= UMBRAL, cantidad: n, disponible: true, accion: "comprar", plazo: null,
 });
 const bajoPedido = (proveedor: number): Dispo => ({
-  state: "bajo_pedido", label: `Bajo pedido · entrega en ${PLAZO}`, max_qty: proveedor, ultimas: false, cantidad: null, disponible: true, accion: "comprar", plazo: PLAZO,
+  state: "bajo_pedido", label: `Bajo pedido · entrega en ${PLAZO}`, label_short: "Bajo pedido", max_qty: proveedor, ultimas: false, cantidad: null, disponible: true, accion: "comprar", plazo: PLAZO,
 });
 /** «Por confirmar»: el proveedor tiene, pero el dato esta vencido. Es el estado de casi toda la tienda real hoy. */
-const CONSULTAR: Dispo = { state: "consultar", label: "Consultar disponibilidad", max_qty: 0, ultimas: false, cantidad: null, disponible: false, accion: "whatsapp", plazo: null };
-const AGOTADO: Dispo = { state: "agotado", label: "Agotado", max_qty: 0, ultimas: false, cantidad: null, disponible: false, accion: "whatsapp", plazo: null };
+const CONSULTAR: Dispo = { state: "consultar", label: "Disponibilidad por confirmar", label_short: "Por confirmar", max_qty: 0, ultimas: false, cantidad: null, disponible: false, accion: "whatsapp", plazo: null };
+const AGOTADO: Dispo = { state: "agotado", label: "Agotado", label_short: "Agotado", max_qty: 0, ultimas: false, cantidad: null, disponible: false, accion: "whatsapp", plazo: null };
 
 // ---------- fotos: un dibujo por producto, sin texto (el texto cambiaria con las fuentes de cada sistema) ----------
 type Forma = "camara" | "domo" | "caja" | "disco" | "red" | "energia" | "audio" | "cable";

@@ -166,6 +166,9 @@ def test_servicio_y_bajo_pedido_apagado(db_session):
     db_session.commit()
     r = _one(db_session, p, audience="publico")
     assert r["state"] == "consultar" and not r["disponible"] and r["accion"] == "whatsapp"
+    # O1-02: la tienda no le dice "Consultar disponibilidad" al cliente (el panel conserva su etiqueta)
+    assert r["label"] == "Disponibilidad por confirmar" and r["label_short"] == "Por confirmar"
+    assert "label_short" not in _one(db_session, p, audience="interno")
     t.settings = {**(t.settings or {}), "store_inventory": {"backorder_lead": "8 días"}}
     db_session.commit()
     r = _one(db_session, p, audience="publico")
@@ -198,7 +201,9 @@ def test_audiencias_publico_y_aliado_sin_proveedor_ni_costo(db_session):
     tt.settings = {**(tt.settings or {}), "store_inventory": {"quantity_display": "umbral", "low_threshold": 3}}
     db_session.commit()
     pub = _one(db_session, p, audience="publico")
-    assert pub["label"] == "¡Últimas unidades!" and pub["cantidad"] is None and pub["max_qty"] is None and pub["ultimas"]
+    # O1-02: sin signos ni urgencia inventada; la tarjeta no da numero porque el modo umbral no lo publica
+    assert pub["label"] == "Pocas unidades en bodega" and pub["cantidad"] is None and pub["max_qty"] is None and pub["ultimas"]
+    assert pub["label_short"] == "Pocas unidades"
 
 
 def test_un_solo_diccionario_de_estados():
@@ -222,3 +227,14 @@ def test_stock_bajo_no_marca_lo_que_se_vende_bajo_pedido(db_session):
     invsvc.move(db_session, t, None, bajo_pedido.id, main.id, "entrada", D(1))
     db_session.commit()
     assert bajo_pedido.id in {x["product_id"] for x in invsvc.low_stock(db_session, t)}
+
+
+def test_etiqueta_corta_de_la_tienda_o1_02():
+    """label_short (aditivo) de la tarjeta: con la cantidad exacta y pocas unidades dice cuantas hay."""
+    assert av._public_short("en_bodega", Decimal(2), True, {"quantity_display": "exacta"}) == "2 en bodega"
+    assert av._public_short("en_bodega", Decimal(9), False, {}) == "En bodega"
+    assert av._public_short("en_bodega", Decimal(2), True, {"quantity_display": "umbral"}) == "Pocas unidades"
+    assert av._public_short("consultar", Decimal(0), False, {}) == "Por confirmar"
+    assert av._public_short("agotado", Decimal(0), False, {}) == "Agotado"
+    assert av._public_label("consultar", Decimal(0), False, None, {}) == "Disponibilidad por confirmar"
+    assert "¡" not in av._public_label("en_bodega", Decimal(1), True, None, {"quantity_display": "umbral"})

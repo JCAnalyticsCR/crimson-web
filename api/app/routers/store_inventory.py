@@ -72,6 +72,9 @@ def put_inv_settings(data: StoreInventorySettingsIn, p: Principal = Depends(requ
         mine = set(db.scalars(select(Warehouse.id).where(Warehouse.tenant_id == t.id)))
         if not set(vals["warehouse_ids"]) <= mine:
             raise HTTPException(404, "Inventario no encontrado")
+    if vals.get("low_threshold") is not None:
+        # O1-02: "pocas unidades" es para pocas de verdad; mas alto el aviso se vuelve ruido (tope al guardar)
+        vals["low_threshold"] = min(vals["low_threshold"], sinv.LOW_THRESHOLD_MAX)
     if "card_keywords" in vals:
         vals["card_keywords"] = [k.strip().lower()[:30] for k in (vals["card_keywords"] or []) if k.strip()][:20]
     st = {**(t.settings or {})}

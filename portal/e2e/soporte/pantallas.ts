@@ -5,7 +5,7 @@ import { CATALOGO, PRODUCTOS, REF } from "../app/datos";
 import { expect, sembrarCarrito, sembrarCheckout, tiendaLista, type Linea } from "./tienda";
 import type { Page } from "@playwright/test";
 
-const prod = (id: number) => PRODUCTOS.find((p) => p.id === id)!;
+export const prod = (id: number) => PRODUCTOS.find((p) => p.id === id)!;
 export const rutaFicha = (id: number) => productPath(prod(id));
 /** linea de carrito con el precio que muestra la tienda (colones con IVA) */
 export const linea = (id: number, cantidad: number): Linea => {
@@ -59,6 +59,7 @@ export const PANTALLAS: Pantalla[] = [
   } },
   { id: "ficha-comprable", nombre: "ficha comprable (en bodega)", base: true, abrir: (page) => ficha(page, REF.comprable) },
   { id: "ficha-por-confirmar", nombre: "ficha por confirmar («consultar»)", base: true, abrir: (page) => ficha(page, REF.porConfirmar) },
+  { id: "ficha-agotada", nombre: "ficha agotada", base: false, abrir: (page) => ficha(page, REF.agotado) },
   { id: "carrito", nombre: "carrito abierto", base: true, abrir: async (page) => {
     await sembrarCarrito(page, CARRITO);
     await page.goto(CATEGORIA.ruta);

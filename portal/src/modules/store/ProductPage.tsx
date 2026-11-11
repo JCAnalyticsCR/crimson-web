@@ -5,7 +5,8 @@
    Si el snapshot está cargado, muestra nombre/foto/precio/disponibilidad al instante sin esperar /item. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
@@ -98,7 +99,15 @@ export default function ProductPage() {
   const shown = { ...d, display_price: price };
   const ask = d.price_on_request || !Number(price);
   const soldOut = cannotBuy(a);
-  const soldLabel = a?.state === "agotado" ? "Agotado" : "Consultar disponibilidad";
+  // O1-02, venta asistida: lo que no se vende en linea y no esta agotado («por confirmar») se pide por WhatsApp con un
+  // boton activo y el precio de referencia; nunca un boton apagado. accion = ninguna: solo la nota y el enlace.
+  const agotado = a?.state === "agotado";
+  const assist = soldOut && !agotado;
+  const act = assistAction(a, S.whatsapp);
+  const pedidoHref = act === "whatsapp" ? waLink(S.whatsapp, mensajePedido({ id: d.id, nombre: d.name, codigo: d.code, cantidad: qty, precio: price, moneda: d.display_currency, url })) : "";
+  const agotadoHref = S.whatsapp ? waLink(S.whatsapp, `Hola, ¿cuándo vuelven a tener ${d.name}${d.code ? ` (código ${d.code})` : ""}?
+${url}`) : "";
+  const contactHref = to(`/asesoria?producto=${d.id}&cantidad=${qty}`);
   const net = variant ? Number(price) / (1 + d.tax_rate / 100) : Number(d.net_price);
   const iva = Number(price) - net;
   const save = d.compare_display_price && Number(d.compare_display_price) > Number(price) ? Number(d.compare_display_price) - Number(price) : 0;
@@ -150,25 +159,40 @@ export default function ProductPage() {
           <div className="vt-buybox" id="comprar">
             {ask ? (
               <>
-                <p className="vt-buybox__note">Este equipo se cotiza según el proyecto (precio de distribuidor variable). Te respondemos el mismo día hábil.</p>
+                <p className="vt-buybox__note">Este equipo se cotiza según el proyecto. Escribinos y te pasamos el precio.</p>
                 {S.whatsapp && <a className="sh-btn sh-btn--wa sh-btn--block" href={waLink(S.whatsapp, `Hola ${S.name}, quiero precio de: ${d.name} (${d.code})\n${url}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir precio por WhatsApp</a>}
                 <Link className="sh-btn sh-btn--block" to={to(`/asesoria?producto=${d.id}&cantidad=${qty}`)}>Solicitar cotización</Link>
+              </>
+            ) : assist ? (
+              <>
+                {act === "whatsapp" && (
+                  <div className="vt-buy">
+                    <Qty value={qty} max={maxQty} onChange={setQty} />
+                    <a className="sh-btn sh-btn--wa vt-buy__add vt-buy__wa" href={pedidoHref} target="_blank" rel="noopener noreferrer" aria-describedby="vt-wa-hint"><Ico d={IC.wa} />Pedir por WhatsApp</a>
+                  </div>
+                )}
+                {act === "whatsapp" && <p className="vt-buybox__hint" id="vt-wa-hint">Se abre WhatsApp</p>}
+                <p className="vt-buybox__note">Lo traemos del distribuidor. Precio de referencia: te confirmamos precio final, existencia y fecha de entrega antes de que pagués.</p>
+                <Link className="vt-textlink" to={contactHref}>Prefiero que me contacten</Link>
+              </>
+            ) : agotado ? (
+              <>
+                {S.whatsapp ? <a className="vt-textlink" href={agotadoHref} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} size={16} />Consultar por WhatsApp</a> : <Link className="vt-textlink" to={contactHref}>Prefiero que me contacten</Link>}
               </>
             ) : (
               <>
                 <div className="vt-buy">
                   <Qty value={qty} max={maxQty} onChange={setQty} />
-                  <button className="sh-btn sh-btn--crimson vt-buy__add" data-done={added} onClick={add} disabled={soldOut}>
-                    <Ico d={added ? IC.check : IC.bag} />{soldOut ? soldLabel : added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
+                  <button className="sh-btn sh-btn--crimson vt-buy__add" data-done={added} onClick={add}>
+                    <Ico d={added ? IC.check : IC.bag} />{added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
                   </button>
                 </div>
                 {a && (a.state === "disponible" || a.state === "ultimas") && a.cantidad != null && a.cantidad > 0 && a.cantidad < 999 ? <p className="vt-buybox__note">Quedan {a.cantidad} en bodega{a.max_qty && a.max_qty > a.cantidad ? `; ${a.max_qty - a.cantidad} más bajo pedido` : ""}.</p> : null}
-                {soldOut && <p className="vt-buybox__note">No lo podemos vender en línea en este momento: escribinos y te confirmamos disponibilidad y plazo.</p>}
                 {inCart && <button className="sh-btn sh-btn--block vt-buy__go" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
                 <Link className="vt-install" to={installHref}>
                   <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Técnicos de Crimson · te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />
                 </Link>
-                {S.whatsapp && <a className={`sh-btn ${soldOut ? "sh-btn--wa" : "sh-btn--ghost"} sh-btn--block`} href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />{soldOut ? "Consultar disponibilidad por WhatsApp" : "Consultar por WhatsApp"}</a>}
+                {S.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar por WhatsApp</a>}
               </>
             )}
             <div className="vt-buybox__tools">
@@ -227,8 +251,14 @@ export default function ProductPage() {
       <div className="vt-stickybuy" aria-hidden={false}>
         <div><PriceTag p={shown} /></div>
         {ask ? <a className="sh-btn sh-btn--crimson" href="#comprar">Pedir precio</a>
+          : assist ? (act === "whatsapp"
+            ? <a className="sh-btn sh-btn--wa" href={pedidoHref} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir por WhatsApp</a>
+            : <Link className="vt-textlink" to={contactHref}>Prefiero que me contacten</Link>)
+          : agotado ? (S.whatsapp
+            ? <a className="sh-btn sh-btn--ghost" href={agotadoHref} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar</a>
+            : <Link className="vt-textlink" to={contactHref}>Prefiero que me contacten</Link>)
           : inCart && !added ? <button className="sh-btn" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>
-            : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add} disabled={soldOut}><Ico d={added ? IC.check : IC.bag} />{soldOut ? (a?.state === "agotado" ? "Agotado" : "Sin existencias") : added ? "Agregado" : "Agregar"}</button>}
+            : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add}><Ico d={added ? IC.check : IC.bag} />{added ? "Agregado" : "Agregar"}</button>}
       </div>
 
       {zoom && <Lightbox imgs={imgs} start={photo} name={d.name} onClose={(i) => { setPhoto(i); setZoom(false); }} />}
@@ -240,7 +270,9 @@ function Qty({ value, onChange, max }: { value: number; onChange: (n: number) =>
   const clamp = (n: number) => Math.max(1, Math.min(max, n || 1));
   return (
     <span className="sh-qty vt-qty">
-      <button type="button" onClick={() => onChange(clamp(value - 1))} aria-label="Quitar uno" disabled={value <= 1}>−</button>
+      {/* en el minimo se marca con aria-disabled y no con disabled: sigue en el orden del teclado y la zona de compra
+          nunca muestra un boton apagado (O1-02); clamp ya impide bajar de 1 */}
+      <button type="button" onClick={() => onChange(clamp(value - 1))} aria-label="Quitar uno" aria-disabled={value <= 1}>−</button>
       <input inputMode="numeric" value={value} onChange={(e) => onChange(clamp(Number(e.target.value.replace(/\D/g, ""))))} aria-label="Cantidad" />
       <button type="button" onClick={() => onChange(clamp(value + 1))} aria-label="Agregar uno" disabled={value >= max}>+</button>
     </span>

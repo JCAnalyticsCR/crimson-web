@@ -75,6 +75,7 @@ from . import reservations as rsv
 from .availability import (  # noqa: F401
     DEFAULTS,
     KEY,
+    LOW_THRESHOLD_MAX,
     RESERVED_REQUEST,
     SELLABLE_STATES,
     STATES,

@@ -538,7 +538,7 @@ def _categories(db: Session, tid: int) -> list[Category]:
     return list(db.scalars(select(Category).where(Category.tenant_id == tid, Category.show_on_web).order_by(Category.name)))
 
 
-AVAIL_KEYS = ("state", "label", "max_qty", "ultimas", "cantidad", "disponible", "accion", "plazo")
+AVAIL_KEYS = ("state", "label", "label_short", "max_qty", "ultimas", "cantidad", "disponible", "accion", "plazo")
 
 
 def _avail(row: dict | None) -> dict:

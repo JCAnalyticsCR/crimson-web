@@ -10,7 +10,6 @@ import { cargarTodo, expect, medirAncho, test } from "./soporte/tienda";
 
 /** pantalla -> anchos en que falla hoy, tarea dueña y que se ve */
 const CONOCIDOS: Record<string, { anchos: number[]; tarea: string; nota: string }> = {
-  "ficha-por-confirmar": { anchos: [320, 360, 375], tarea: "O1-02", nota: "ficha por confirmar: el botón «Consultar disponibilidad» no parte renglón y ensancha la columna; todo queda cortado a la derecha" },
   "ficha-comprable": { anchos: [320], tarea: "O1-03", nota: "ficha comprable a 320 px: cantidad + «Agregar al carrito» no caben y la columna queda cortada a la derecha" },
   "checkout-pago": { anchos: [320], tarea: "O1-10a", nota: "checkout, paso de pago a 320 px: el botón «Aplicar» del cupón queda cortado" },
   "checkout-confirmar": { anchos: [320, 360, 375], tarea: "O1-10a", nota: "checkout, paso de confirmar: «Atrás» + «Confirmar pedido · total» no caben y el botón queda cortado" },

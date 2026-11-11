@@ -8,7 +8,7 @@ import type { Avail, VProd } from "./storeKit";
 // ── Tipos del snapshot (contrato JSON en api/app/services/store_snapshot.py) ─
 
 export type SnapAvail = {
-  state: string; label: string;
+  state: string; label: string; label_short?: string | null;
   accion: string | null; max_qty: number | null; plazo: string | null;
 };
 
@@ -326,6 +326,8 @@ export function snapToVProd(p: SnapProduct, currency: string, cats: SnapCategory
   const avail: Avail = {
     state: p.availability.state,
     label: p.availability.label,
+    label_short: p.availability.label_short ?? null,
+    accion: p.availability.accion ?? null,
     max_qty: p.availability.max_qty,
     blocked: p.availability.state === "agotado" || p.availability.state === "consultar",
     disponible: p.availability.state === "en_bodega" || p.availability.state === "bajo_pedido",

@@ -12,7 +12,7 @@ import {
 } from "../catalogFilter";
 
 const sinTildes = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-const LABEL: Record<string, string> = { en_bodega: "En bodega", bajo_pedido: "Bajo pedido", consultar: "Consultar disponibilidad", agotado: "Agotado" };
+const LABEL: Record<string, string> = { en_bodega: "En bodega", bajo_pedido: "Bajo pedido", consultar: "Disponibilidad por confirmar", agotado: "Agotado" };
 
 function prod(id: number, o: Partial<Omit<SnapProduct, "availability">> & { state?: string }): SnapProduct {
   const { state = "en_bodega", ...rest } = o;
@@ -254,7 +254,7 @@ describe("snapToVProd", () => {
   it("solo en bodega y bajo pedido se pueden comprar; consultar y agotado quedan bloqueados", () => {
     expect(snapToVProd(P1, "CRC", CATS).availability).toMatchObject({ state: "en_bodega", blocked: false, disponible: true });
     expect(snapToVProd(P2, "CRC", CATS).availability).toMatchObject({ state: "bajo_pedido", blocked: false, disponible: true });
-    expect(snapToVProd(P3, "CRC", CATS).availability).toMatchObject({ state: "consultar", label: "Consultar disponibilidad", blocked: true, disponible: false });
+    expect(snapToVProd(P3, "CRC", CATS).availability).toMatchObject({ state: "consultar", label: "Disponibilidad por confirmar", accion: "whatsapp", blocked: true, disponible: false });
     expect(snapToVProd(P4, "CRC", CATS).availability).toMatchObject({ state: "agotado", blocked: true, disponible: false });
   });
 

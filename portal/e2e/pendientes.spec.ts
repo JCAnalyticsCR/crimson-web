@@ -10,8 +10,8 @@ import { expect, test, tiendaLista } from "./soporte/tienda";
 const abrir = (id: string) => PANTALLAS.find((p) => p.id === id)!.abrir;
 const px = (s: string) => Number.parseFloat(s);
 
-test.fixme("[O1-02] ficha por confirmar: ningún botón apagado y la barra fija nunca dice «Sin existencias»", async ({ page }) => {
-  // hoy: «Consultar disponibilidad» deshabilitado en la zona de compra y, en celular, barra fija con «Sin existencias»
+test("[O1-02] ficha por confirmar: ningún botón apagado y la barra fija nunca dice «Sin existencias»", async ({ page }) => {
+  // antes: «Consultar disponibilidad» deshabilitado en la zona de compra y, en celular, barra fija con «Sin existencias»
   await abrir("ficha-por-confirmar")(page);
   await expect(page.locator(".vt-buybox button:disabled")).toHaveCount(0);
   await expect(page.locator(".vt-stickybuy")).not.toContainText("Sin existencias");

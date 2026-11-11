@@ -103,7 +103,7 @@ def test_disponibilidad_propio_proveedor_agotado_y_bodegas_web(client, auth, db_
     assert av[str(a["id"])]["estado"] == "en_bodega" and av[str(a["id"])]["mensaje"] == "En bodega" and av[str(a["id"])]["disponible"]
     assert av[str(a["id"])]["cantidad"] is None  # modo umbral: no se publica el numero
     assert av[str(b["id"])]["estado"] == "bajo_pedido" and av[str(b["id"])]["plazo"] == "3-5 días hábiles" and av[str(b["id"])]["disponible"]
-    assert av[str(c["id"])]["estado"] == "consultar" and av[str(c["id"])]["mensaje"] == "Consultar disponibilidad" and not av[str(c["id"])]["disponible"]
+    assert av[str(c["id"])]["estado"] == "consultar" and av[str(c["id"])]["mensaje"] == "Disponibilidad por confirmar" and not av[str(c["id"])]["disponible"]
     assert av[str(d["id"])]["estado"] == "agotado" and av[str(d["id"])]["accion"] == "whatsapp" and not av[str(d["id"])]["disponible"]
     # nada interno en lo publico
     assert not ({"propio", "proveedor", "reservado", "libre", "proveedor_al"} & set(av[str(b["id"])]))
@@ -122,7 +122,11 @@ def test_disponibilidad_propio_proveedor_agotado_y_bodegas_web(client, auth, db_
     rsv.confirm(db_session, res, None)
     _cfg(client, quantity_display="umbral", low_threshold=3)
     one = _avail(client, a["id"]).json()[str(a["id"])]
-    assert one["mensaje"] == "¡Últimas unidades!" and one["ultimas"] and one["cantidad"] is None
+    assert one["mensaje"] == "Pocas unidades en bodega" and one["ultimas"] and one["cantidad"] is None
+    # O1-02: el umbral se limita a 3 al guardar
+    _cfg(client, low_threshold=50)
+    assert client.get("/store/inventory/settings").json()["low_threshold"] == 3
+    _cfg(client, low_threshold=3)
     # sin stock libre pero con proveedor viejo: consultar, y ya no se vende en linea (sell_when_unknown se ignora)
     _cfg(client, sell_when_unknown=True)
     assert _avail(client, c["id"]).json()[str(c["id"])]["disponible"] is False

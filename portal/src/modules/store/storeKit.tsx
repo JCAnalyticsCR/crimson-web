@@ -23,11 +23,14 @@
      las pruebas de pantalla (portal/e2e). Un campo nuevo que la vitrina necesite tiene que poder faltar sin romper. */
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { mensajePedido } from "./pedidoWa";
 
 /** La disponibilidad viene del API (services/availability, audiencia publico): state en_bodega | bajo_pedido |
     consultar | agotado | servicio, con "ultimas", la cantidad (solo si la tienda la publica) y max_qty (tope en linea).
-    blocked: no se puede comprar en linea (disponible === false): se ofrece "Consultar por WhatsApp". */
-export type Avail = { state: string; label: string; max_qty?: number | null; blocked?: boolean; cantidad?: number | null; ultimas?: boolean; disponible?: boolean };
+    blocked: no se puede comprar en linea (disponible === false): se ofrece "Consultar por WhatsApp".
+    accion (O1-02): lo que se ofrece cuando no se compra en linea (whatsapp | avisarme | ninguna; comprar si se vende).
+    label_short: la etiqueta corta de la tarjeta (aditiva en el API; si falta, el mapa de respaldo SHORT). */
+export type Avail = { state: string; label: string; label_short?: string | null; accion?: string | null; max_qty?: number | null; blocked?: boolean; cantidad?: number | null; ultimas?: boolean; disponible?: boolean };
 export type Variant = { id: number; name: string; price: string | number; display_price?: string | number };
 export type VProd = {
   id: number; code: string; name: string; brand: string | null; model?: string | null; image: string | null; images: string[];
@@ -59,6 +62,8 @@ export function useStore(): StoreCtx {
 
 export const money = (v: string | number, cur = "CRC") =>
   new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).format(Number(v) || 0);
+/** direccion completa de una ruta de la tienda (para mensajes que se mandan fuera de la pagina) */
+export const absUrl = (path: string) => (typeof location !== "undefined" ? `${location.origin}${path}` : path);
 export const waLink = (phone: string, text: string) => `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
 export const calm = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 export const safeStore = {
@@ -162,9 +167,11 @@ const NORM: Record<string, string> = {
   agotado: "agotado", out: "agotado", out_of_stock: "agotado", sin_stock: "agotado",
   servicio: "servicio", consultar: "consultar",
 };
-const LABEL: Record<string, string> = { disponible: "Disponible", ultimas: "Últimas unidades", bajo_pedido: "Bajo pedido", agotado: "Agotado", consultar: "Consultar disponibilidad", servicio: "Servicio" };
-const SHORT: Record<string, string> = { ...LABEL, consultar: "Consultar stock" };
-type InvEntry = { estado?: string; state?: string; status?: string; label?: string; available?: number; quantity?: number; cantidad?: number | string | null; ultimas?: boolean; disponible?: boolean; max_qty?: number | string | null; blocked?: boolean };
+/* Respaldo si el API no manda la etiqueta (version vieja o mock): el texto lo pone el API (availability._public_label y
+   _public_short, O1-02); aca solo se repite por si el campo falta. */
+const LABEL: Record<string, string> = { disponible: "Disponible", ultimas: "Pocas unidades en bodega", bajo_pedido: "Bajo pedido", agotado: "Agotado", consultar: "Disponibilidad por confirmar", servicio: "Servicio" };
+const SHORT: Record<string, string> = { ...LABEL, ultimas: "Pocas unidades", consultar: "Por confirmar" };
+type InvEntry = { estado?: string; state?: string; status?: string; label?: string; label_short?: string | null; accion?: string | null; available?: number; quantity?: number; cantidad?: number | string | null; ultimas?: boolean; disponible?: boolean; max_qty?: number | string | null; blocked?: boolean };
 function normInv(e: InvEntry | undefined): Avail | null {
   if (!e) return null;
   // un solo diccionario de estados en el API; aca solo se traduce a la estetica de la vitrina (en_bodega -> disponible/ultimas)
@@ -173,7 +180,7 @@ function normInv(e: InvEntry | undefined): Avail | null {
   if (s === "disponible" && e.ultimas) s = "ultimas";
   const qty = e.cantidad != null && e.cantidad !== "" ? Number(e.cantidad) : null;
   const max = e.max_qty != null && e.max_qty !== "" ? Number(e.max_qty) : (s === "disponible" || s === "ultimas" ? (e.available ?? e.quantity ?? qty ?? null) : null);
-  return { state: s, label: e.label || LABEL[s], max_qty: max ?? null, blocked: e.disponible === false || !!e.blocked || s === "agotado" || s === "consultar", cantidad: qty, ultimas: !!e.ultimas, disponible: e.disponible };
+  return { state: s, label: e.label || LABEL[s], label_short: e.label_short || null, accion: e.accion ?? null, max_qty: max ?? null, blocked: e.disponible === false || !!e.blocked || s === "agotado" || s === "consultar", cantidad: qty, ultimas: !!e.ultimas, disponible: e.disponible };
 }
 /** la disponibilidad que trae una tarjeta del catalogo (o la de /availability ya normalizada) en la forma de la vitrina */
 export const normAvail = (a?: Avail | null): Avail | null => (a ? normInv(a as unknown as InvEntry) || a : null);
@@ -202,8 +209,20 @@ export function useAvailability(ids: number[]): Record<number, Avail> {
 export function AvailBadge({ a: raw, compact = false }: { a?: Avail | null; compact?: boolean }) {
   const a = normAvail(raw);
   if (!a || a.state === "servicio") return null;
-  return <span className="vt-avail" data-s={a.state}>{compact ? SHORT[a.state] || a.label : a.label}</span>;
+  return <span className="vt-avail" data-s={a.state}>{compact ? shortLabel(a) : a.label}</span>;
 }
+/** etiqueta de la tarjeta: la del API; si falta, «{N} en bodega» con pocas unidades y cantidad publicada, o el respaldo */
+function shortLabel(a: Avail): string {
+  if (a.label_short) return a.label_short;
+  if (a.state === "ultimas" && a.cantidad != null && a.cantidad > 0) return `${a.cantidad} en bodega`;
+  return SHORT[a.state] || a.label;
+}
+/** que ofrece la tienda cuando no se compra en linea (O1-02): whatsapp, o nada. «avisarme» se porta como whatsapp hasta
+    que exista el aviso (O2-10). Sin numero de WhatsApp en la tienda no hay boton que ofrecer. */
+export const assistAction = (a: Avail | null | undefined, whatsapp?: string | null): "whatsapp" | "ninguna" => {
+  if (!whatsapp) return "ninguna";
+  return a?.accion === "ninguna" ? "ninguna" : "whatsapp";
+};
 /** no se puede comprar en linea: agotado, dato del proveedor viejo ("consultar") o el API dice que no es vendible */
 export const cannotBuy = (raw?: Avail | null) => {
   const a = normAvail(raw);
@@ -260,9 +279,9 @@ export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: 
           {ask ? (
             <Link className="vt-add vt-add--ask" to={to(p.path)} aria-label={`Consultar precio de ${p.name}`}><Ico d={IC.chat} /></Link>
           ) : noBuy ? (
-            ctx.store.whatsapp
-              ? <a className="vt-add vt-add--ask" href={waLink(ctx.store.whatsapp, `Hola ${ctx.store.name}, quiero consultar la disponibilidad de: ${p.name}${p.code ? ` (${p.code})` : ""}`)} target="_blank" rel="noopener noreferrer" aria-label={`Consultar por WhatsApp: ${p.name}`} title="Consultar por WhatsApp"><Ico d={IC.wa} /></a>
-              : <Link className="vt-add vt-add--ask" to={to(p.path)} aria-label={`Consultar disponibilidad de ${p.name}`}><Ico d={IC.chat} /></Link>
+            assistAction(a, ctx.store.whatsapp) === "whatsapp"
+              ? <a className="vt-add vt-add--ask vt-add--pill" href={waLink(ctx.store.whatsapp, a?.state === "agotado" ? `Hola, ¿cuándo vuelven a tener ${p.name}${p.code ? ` (código ${p.code})` : ""}?` : mensajePedido({ id: p.id, nombre: p.name, codigo: p.code, cantidad: 1, precio: p.display_price, moneda: p.display_currency, url: absUrl(to(p.path)) }))} target="_blank" rel="noopener noreferrer" aria-label={`Consultar ${p.name} por WhatsApp`}><Ico d={IC.wa} size={16} />Consultar</a>
+              : <Link className="vt-add vt-add--ask vt-add--pill" to={to(p.path)} aria-label={`Ver ${p.name}`}>Ver</Link>
           ) : p.variants?.length ? (
             <Link className="vt-add" to={to(p.path)} aria-label={`Ver opciones de ${p.name}`}><Ico d={IC.next} /></Link>
           ) : (
