@@ -529,25 +529,11 @@ def showcase_product_get(pid: int, p: Principal = Depends(require("catalog", "ve
 
 @router.put("/store/showcase/products/{pid}")
 def showcase_product_put(pid: int, data: ProductShowcaseIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    from ..services import store_catalog as scat
+
     pr = _own_product(db, p.tenant.id, pid)
-    patch = data.model_dump(exclude_unset=True)
-    if "compare_price" in patch:
-        pr.compare_price = patch["compare_price"] or None
-    if "datasheet_url" in patch:
-        pr.datasheet_url = patch["datasheet_url"] or None
-    if "specs" in patch:
-        pr.specs = patch["specs"] or None
-    hand = [k for k in WEB_EDITABLE if k in patch]
-    for k in hand:
-        v = patch[k]
-        setattr(pr, k, (v or None) if isinstance(v, str) or v is None else v)
-    if "web_manual" in patch and patch["web_manual"] is not None:
-        pr.web_manual = bool(patch["web_manual"])
-    elif any(k in patch for k in ("web_name", "web_subtitle", "web_type", "web_description")):
-        pr.web_manual = True  # lo escribio una persona: ningun lote lo pisa
-    if hand or "web_manual" in patch:
-        sv.bump_catalog_version(db, p.tenant)
-    audit(db, p.tenant.id, p.user.id, "update_showcase", "product", pr.id, {"campos": sorted(patch)}, ip=p.ip)
+    # O4-04: misma escritura que Mi Tienda -> Catalogo (permisos por campo, bitacora y marca del catalogo)
+    scat.apply(db, p, pr, data.model_dump(exclude_unset=True), desde="vitrina", action="update_showcase")
     db.commit()
     return showcase_product_get(pid, p, db)
 

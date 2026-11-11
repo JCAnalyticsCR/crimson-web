@@ -68,6 +68,7 @@ from .routers import public_quotes as public_quotes_router
 from .routers import report_board as report_board_router
 from .routers import scope_items as scope_items_router
 from .routers import settings as settings_router
+from .routers import store_web as store_web_router
 from .routers import store_inventory as store_inventory_router
 from .routers import store_panel as store_panel_router
 from .routers import ventas3 as ventas3_router
@@ -167,6 +168,7 @@ def create_app() -> FastAPI:
     app.include_router(store_catalog.router)  # O3-11: Contenido por aprobar
     app.include_router(store_showcase.pub)
     app.include_router(store_panel_router.router)  # Mi Tienda por secciones: resumen e historial (Ola 4)
+    app.include_router(store_web_router.router)  # Mi Tienda -> Catalogo: cuadricula, cajon y lote (O4-04, O4-05)
     app.include_router(store_seo.seo)
     app.include_router(reception.router)
     app.include_router(accounting.router)

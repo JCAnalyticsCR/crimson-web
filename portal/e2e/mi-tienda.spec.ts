@@ -65,6 +65,16 @@ async function token(servidor: APIRequestContext): Promise<string> {
 }
 
 const sinScrollDeLado = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+/* si hay scroll de lado, que elementos se salen (para el mensaje de la prueba) */
+const seSalen = (page: Page) => page.evaluate(() => {
+  const w = document.documentElement.clientWidth;
+  return [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > w + 1).slice(0, 8)
+    .map((e) => `${e.tagName.toLowerCase()}${e.className && typeof e.className === "string" ? `.${e.className.trim().split(/\s+/).join(".")}` : ""}`).join(" | ");
+});
+async function sinScroll(page: Page, donde = "") {
+  const extra = await sinScrollDeLado(page);
+  expect(extra, `${donde} se sale: ${extra > 0 ? await seSalen(page) : ""}`).toBeLessThanOrEqual(0);
+}
 
 test.beforeEach(() => {
   test.skip(!CLAVE, "sin administrador de prueba (API ya levantado aparte): ver playwright.compra.config.ts");
@@ -105,7 +115,7 @@ test("[O1-11b/O4-02] titular y banner en la misma sesión: un solo guardado, nad
   const sc = (await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { headline: string; banners: { title: string; active: boolean }[] };
   expect(sc.headline).toBe(titular);
   expect(sc.banners.map((b) => [b.title, b.active])).toContainEqual(["Promo de prueba", false]);  // nace inactivo (O1-04)
-  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
+  await sinScroll(page);
 });
 
 test("[O4-02] deshacer, cambio de sección protegido, copia local y 409", async ({ page, baseURL, servidor }, info) => {
@@ -154,7 +164,7 @@ test("[O4-02] el historial restaura sin tocar la publicación", async ({ page, b
   await page.locator(".modal").getByRole("button", { name: "Restaurar" }).click();
   await expect.poll(async () => ((await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { subline: string }).subline).toBe("Bajada original");
   expect(((await (await servidor.get("/api/store", { headers: h })).json()) as { published: boolean }).published).toBe(true);
-  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
+  await sinScroll(page);
 });
 
 test("[O4-01] cada sección tiene su dirección y recargar deja en la misma", async ({ page, baseURL }, info) => {
@@ -198,7 +208,7 @@ test("[O4-01] ninguna sección tiene scroll de lado", async ({ page, baseURL }) 
     await ir(page, ruta);
     await expect(page.locator(".mt-hub__body")).toBeVisible();
     await page.waitForLoadState("networkidle");
-    expect(await sinScrollDeLado(page), ruta).toBeLessThanOrEqual(0);
+    await sinScroll(page, ruta);
   }
   // a 375 px el menu es un selector; a 768, la fila de fichas
   const w = page.viewportSize()?.width || 0;
@@ -221,7 +231,44 @@ test("[O4-03] el resumen dice qué falta y lleva a corregirlo", async ({ page, b
     await fila.getByRole("link", { name: "Corregir" }).click();
     await expect(page).toHaveURL((u) => u.pathname + u.search === falta.to);
   }
-  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
+  await sinScroll(page);
+});
+
+test("[O4-04] catálogo en cuadrícula con filtros y la ficha web en un cajón", async ({ page, baseURL, servidor }) => {
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  const lista = (await (await servidor.get("/api/store/catalog", { headers: h })).json()) as { total: number; items: { id: number; name: string }[]; faltas: { key: string; n: number }[] };
+  expect(lista.total).toBeGreaterThan(0);
+  await entrar(page, panel(baseURL), "/mi-tienda/catalogo");
+  const sinFoto = lista.faltas.find((f) => f.key === "sin_descripcion")!;
+  const chip = page.getByRole("group", { name: "Filtros de calidad" }).getByRole("button", { name: new RegExp(`^Sin descripción ${sinFoto.n}`) });
+  await chip.click();
+  await expect(page).toHaveURL(/falta=sin_descripcion/);
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await chip.click();  // quitar el filtro
+  const primero = lista.items[0];
+  await page.locator(".cw-card").filter({ hasText: primero.name }).first().getByRole("link").click();
+  await expect(page).toHaveURL(new RegExp(`/mi-tienda/catalogo/${primero.id}`));
+  const cajon = page.getByRole("dialog", { name: `Ficha web: ${primero.name}` });
+  await expect(cajon).toBeVisible();
+  await expect(cajon.locator(".vt-card")).toBeVisible();  // la tarjeta real de la tienda
+  await cajon.getByRole("tab", { name: "Google" }).click();
+  await expect(cajon.getByLabel("Vista previa en Google")).toBeVisible();
+  await expect(cajon.getByText(/de 60 caracteres/)).toBeVisible();
+  await cajon.getByRole("tab", { name: "Nombre y textos" }).click();
+  const texto = `Descripción de prueba ${Date.now() % 100000}`;
+  await cajon.locator(".field").filter({ has: page.locator('label:text-is("Descripción para la tienda")') }).locator("textarea").fill(texto);
+  const barra = cajon.getByRole("region", { name: "Cambios sin guardar" });
+  await expect(barra).toContainText("1 cambio sin guardar");
+  await barra.getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(async () => ((await (await servidor.get(`/api/store/catalog/${primero.id}`, { headers: h })).json()) as { description_store: string }).description_store).toBe(texto);
+  await sinScroll(page);
+  await page.keyboard.press("Escape");
+  await expect(cajon).toBeHidden();
+  await expect(page).toHaveURL(/\/mi-tienda\/catalogo$/);
+  // la tabla apilada en tablet y celular, sin scroll de lado
+  await page.getByRole("button", { name: "Tabla" }).click();
+  await expect(page.locator("table.cw-table")).toBeVisible();
+  await sinScroll(page);
 });
 
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo

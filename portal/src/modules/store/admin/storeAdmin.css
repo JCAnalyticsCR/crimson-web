@@ -81,3 +81,48 @@
 .trust-row { grid-template-columns: 160px minmax(0, 1fr) minmax(0, 2fr) auto; align-items: end; }
 @media (max-width: 900px) { .trust-row { grid-template-columns: minmax(0, 1fr); } }
 
+/* ---------- catalogo (O4-04) ---------- */
+.cw-filters { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cw-filters .input, .cw-filters .select { min-height: 44px; }
+.cw-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cw-chip { min-height: 36px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--hair-2); background: var(--surface); color: var(--text); font-size: 12.5px; cursor: pointer; }
+.cw-chip b { font-variant-numeric: tabular-nums; margin-left: 4px; }
+.cw-chip.is-on { border-color: var(--crimson); background: var(--crimson-soft); font-weight: 600; }
+.cw-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: 10px; }
+.cw-card { position: relative; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface); min-width: 0; }
+.cw-card.is-sel { border-color: var(--crimson); box-shadow: 0 0 0 1px var(--crimson); }
+.cw-card__sel { position: absolute; top: 8px; left: 8px; width: 22px; height: 22px; z-index: 1; }
+.cw-card__link { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px; color: var(--text); text-decoration: none; min-width: 0; }
+.cw-card__img { display: grid; place-items: center; aspect-ratio: 1; background: #f3f1ee; border-radius: 8px; overflow: hidden; }
+.cw-card__img { min-width: 0; }
+.cw-card__img img { width: 100%; height: 100%; max-width: 100%; object-fit: contain; }
+.cw-card__name { font-size: 13.5px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.cw-card__row { display: flex; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.cw-card__row .badge { white-space: normal; max-width: 100%; }
+.cw-card__price { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cw-card__price small { font-weight: 400; color: var(--text-2); font-size: 12px; }
+.cw-card__faltas { font-size: 12px; color: var(--warn); }
+.cw-pages { justify-content: center; }
+@media (max-width: 900px) { .cw-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .cw-filters > :first-child { grid-column: 1 / -1; } }
+@media (max-width: 480px) { .cw-filters { grid-template-columns: minmax(0, 1fr); } .cw-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* cajon de la ficha web: a la derecha en escritorio, pantalla completa en tablet y celular */
+.pw-bg { position: fixed; inset: 0; z-index: 50; background: rgba(10, 8, 14, .45); display: flex; justify-content: flex-end; }
+.pw { width: min(720px, 100%); height: 100%; background: var(--bg, #f6f2ee); display: flex; flex-direction: column; box-shadow: -20px 0 50px -30px rgba(0, 0, 0, .5); }
+.pw__head { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--hair); background: var(--surface); }
+.pw__title { margin: 2px 0 0; font-size: 17px; overflow-wrap: anywhere; }
+.pw__body { flex: 1; overflow: auto; padding: 14px 16px 24px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.pw__body > * { min-width: 0; }
+.pw .savebar { position: sticky; left: auto; right: auto; width: auto; margin: 0 12px 12px; }
+.pw-tabs { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.pw-tabs .btn { flex: 0 0 auto; min-height: 40px; }
+.pw-check { font-size: 13px; display: flex; gap: 6px; align-items: center; min-height: 44px; }
+.pw-spec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; }
+.pw-card { min-height: 0; max-width: 280px; padding: 12px; border-radius: 12px; overflow: hidden; }
+@media (max-width: 768px) { .pw { width: 100%; } }
+
+/* vista previa de Google (solo muestra) */
+.serp { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 10px; background: #fff; font-family: Arial, Helvetica, sans-serif; color: #202124; max-width: 600px; }
+.serp__url { font-size: 12px; color: #4d5156; overflow-wrap: anywhere; }
+.serp__title { font-size: 18px; color: #1a0dab; line-height: 1.3; overflow-wrap: anywhere; }
+.serp__desc { font-size: 13.5px; color: #4d5156; line-height: 1.45; overflow-wrap: anywhere; }

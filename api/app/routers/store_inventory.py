@@ -216,16 +216,13 @@ def web_product(pid: int, data: WebProductIn, p: Principal = Depends(require("ca
     pr = db.get(Product, pid)
     if not pr or pr.tenant_id != p.tenant.id:
         raise HTTPException(404, "Producto no encontrado")
-    vals = data.model_dump(exclude_unset=True)
-    # O1-11b: publicar o despublicar en la tienda es de quien tiene catalog.publicar (el administrador, pedido 21/10),
-    # como en /products/{id}/web; con catalog.editar se cambian destacado y precio web, no la publicacion
-    if "show_on_web" in vals and vals["show_on_web"] is not None and bool(vals["show_on_web"]) != bool(pr.show_on_web) and not p.can("catalog", "publicar"):
-        raise HTTPException(403, "Solo el administrador publica o despublica productos en la tienda")
-    for k, v in vals.items():
-        if k != "web_price" and v is None:
-            continue
-        setattr(pr, k, v)
-    audit(db, p.tenant.id, p.user.id, "web", "product", pr.id, {k: str(v) for k, v in vals.items()}, ip=p.ip)
+    from ..services import store_catalog as scat
+
+    # O4-04: la escritura es la del servicio unico (services/store_catalog.apply): publicar o despublicar exige
+    # catalog.publicar (el administrador, O1-11b) y solo si CAMBIA; precio web, catalog.precios; guardian de margen,
+    # bitacora con antes y despues y una marca del catalogo. null en web_price = vuelve al precio de siempre.
+    vals = {k: v for k, v in data.model_dump(exclude_unset=True).items() if k == "web_price" or v is not None}
+    scat.apply(db, p, pr, vals, desde="inventario_web", action="web")
     db.commit()
     a = sinv.availability(db, p.tenant, [pr.id], public=False).get(pr.id, {})
     return {

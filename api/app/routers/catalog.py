@@ -481,16 +481,11 @@ class WebIn(BaseModel):
 def toggle_web(pid: int, data: WebIn, p: Principal = Depends(require("catalog", "publicar")), db: Session = Depends(get_db)):
     """Publica o quita el producto de la tienda desde la lista, sin abrir la ficha. Solo el administrador (catalog.publicar
     no lo tiene ningun otro rol): ventas e inventario editan la ficha pero no deciden que se vende en linea."""
+    from ..services import store_catalog as scat
+
     pr = _own(db, Product, pid, p.tenant.id)
-    antes = bool(pr.show_on_web)
-    pr.show_on_web = data.show_on_web
-    _margin_recheck(db, p, pr)
-    _sv_cache.bump_catalog_version(db, p.tenant)
-    if antes != bool(data.show_on_web):
-        audit(
-            db, p.tenant.id, p.user.id, "publish" if data.show_on_web else "unpublish", "product", pr.id, {"code": pr.code}, ip=p.ip,
-            before={"show_on_web": antes}, after={"show_on_web": bool(data.show_on_web)},
-        )  # fmt: skip
+    # O4-04: la escritura es la del servicio unico (guardian de margen, bitacora con antes y despues, marca del catalogo)
+    scat.apply(db, p, pr, {"show_on_web": data.show_on_web}, desde="productos", action="publish" if data.show_on_web else "unpublish")
     db.commit()
     db.refresh(pr)
     return _product_out(pr, p)
