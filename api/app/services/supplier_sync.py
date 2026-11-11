@@ -43,6 +43,7 @@ from ..providers.sirett import SirettClient, SirettError, image_url
 from . import product_names
 from . import supplier_catalog as sc
 from . import supplier_lists as sl
+from .brands import canonical_brand
 from .documents import audit
 
 log = logging.getLogger("crimson.suppliers")
@@ -109,7 +110,7 @@ def to_row(n: int, i: dict, why: str) -> sl.Row:
         code=(i.get("codigo") or "").strip() or None,
         name=(corta or desc)[:300] or (i.get("codigo") or ""),
         description=desc + (f"\n{i['caracteristicas'].strip()}" if (i.get("caracteristicas") or "").strip() else ""),
-        brand=sc.detect_brand(desc, default=marca.title() if marca else None),
+        brand=canonical_brand(sc.detect_brand(desc, default=marca or None)),  # O3-02: la grafia oficial
         model=((i.get("modelo") or "").strip() or sc.extract_model(desc) or None),
         category=sl._pretty(i.get("FamiliaPadre")),
         subcategory=sl._pretty(i.get("familia")),
@@ -740,7 +741,7 @@ def product_from_item(
         cost=cost_v,
         cost_currency=it.currency or "USD",
         margin_pct=margin,
-        brand=it.brand,
+        brand=canonical_brand(it.brand),  # O3-02: el alta nace con la marca oficial
         model=it.model,
         supplier_id=it.supplier_id,
         supplier_sku=it.code,

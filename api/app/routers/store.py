@@ -633,6 +633,7 @@ def _prod_pub(
         "name": p.name,
         # O3-01: el nombre que ve el cliente (comercial aprobado o el de siempre); "name" sigue siendo el fiscal
         "display_name": ctext.shown_name(p),
+        "public_code": ctext.public_code(p),  # O3-02: el que ve el cliente (code sigue siendo el propio)
         "price": sinv.web_price(p),
         "currency": p.currency,
         "featured": bool(p.web_featured),
@@ -641,7 +642,7 @@ def _prod_pub(
         "images": [i.get("url") for i in (p.images or [])],
         "category_id": p.category_id,
         "category": (cats or {}).get(p.category_id),
-        "brand": p.brand,
+        "brand": ctext.shown_brand(p),
         "tax_rate": rate,
         "item_type": p.item_type,
         "variants": [{**v, "price": v["price"] if v["price"] is not None else sinv.web_price(p)} for v in (variants or [])],

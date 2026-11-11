@@ -30,6 +30,7 @@ from ..services import category_paths
 from ..services import product_typing as pt
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
+from ..services.brands import brand_key, canonical_brand
 from ..services.documents import audit
 from ..services.email_layout import cta
 from ..services.fx import FxMissing
@@ -661,7 +662,7 @@ class Ctx:
         out.update(
             {
                 "path": sv.product_path(p),
-                "model": p.model,
+                "model": ctext.shown_model(p),
                 "type": self.dtype(p),
                 "compare_display_price": cmp,
                 "price_on_request": price <= 0,
@@ -818,7 +819,8 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
             if p.category_id not in images and p.images and p.price and Decimal(str(p.price)) > 0:
                 images[p.category_id] = (p.images[0] or {}).get("url")
         if p.brand:
-            brands[p.brand] = brands.get(p.brand, 0) + 1
+            b_ = canonical_brand(p.brand)
+            brands[b_] = brands.get(b_, 0) + 1
     # O1-05: conteos por categoria, por marca y total del snapshot (lo que la tienda lista), los mismos de /store
     from ..services.store_snapshot import counts as snapshot_counts
 
@@ -843,7 +845,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     # ninguno, la portada va sin producto ni precio
     hero = next((by_id[i] for i in sc["hero"] if i in by_id and by_id[i] in pool and i in sellable and kit_price(by_id[i]) > 0 and by_id[i].images), None)
     # O1-04 c: «Marcas» solo con las de seguridad, redes y respaldo (con al menos un producto en esas familias)
-    fam_brands = {p.brand for p in prods if p.brand and p.category_id in ctx.cat_chain and pt.functional_family(ctx.cat_chain[p.category_id][1])}
+    fam_brands = {canonical_brand(p.brand) for p in prods if p.brand and p.category_id in ctx.cat_chain and pt.functional_family(ctx.cat_chain[p.category_id][1])}
     brands = {b: n for b, n in brands.items() if b in fam_brands}
     kits = []
     photo_prods = _kit_products(db, t.id, sc["kits"])
@@ -971,10 +973,12 @@ def catalog(
 
     disp = {p.id: _gross(ctx.pricer.of(p, p.price), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
     av = {p.id: (stock_all.get(p.id) or {}).get("state") for p in prods}
-    brands_sel = {b.lower() for b in (brand or []) if b}
+    # O3-02: la marca se compara en version compacta (una direccion vieja con «Tp Link» sigue filtrando TP-Link)
+    brands_sel = {brand_key(b) for b in (brand or []) if b}
+    bshown = {p.id: canonical_brand(p.brand) for p in prods}
 
     def keep(p: Product, skip: str = "") -> bool:
-        if skip != "brand" and brands_sel and (p.brand or "").lower() not in brands_sel:
+        if skip != "brand" and brands_sel and brand_key(p.brand) not in brands_sel:
             return False
         if skip != "type" and type and types[p.id] != type:
             return False
@@ -995,7 +999,7 @@ def catalog(
     facet_brand: dict[str, int] = {}
     for p in prods:
         if p.brand and keep(p, "brand"):
-            facet_brand[p.brand] = facet_brand.get(p.brand, 0) + 1
+            facet_brand[bshown[p.id]] = facet_brand.get(bshown[p.id], 0) + 1
     facet_type: dict[str, int] = {}
     for p in prods:
         if types[p.id] and keep(p, "type"):

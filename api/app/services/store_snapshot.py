@@ -116,6 +116,8 @@ def build(db: Session, t, ctx) -> bytes:
     )
     from ..services import store_search
     from ..services import store_showcase as sv
+    from ..services.brands import canonical_brand
+    from ..services.catalog_text import public_code, shown_model
 
     prods = _published_light(db, t.id)
     stock_all = _stock_map(db, t.id, prods)
@@ -143,8 +145,8 @@ def build(db: Session, t, ctx) -> bytes:
                 "id": p.id,
                 "path": sv.product_path(p),
                 "name": p.name,
-                "brand": p.brand,
-                "model": p.model,
+                "brand": canonical_brand(p.brand),  # O3-02: grafia oficial (el filtro no repite marcas)
+                "model": shown_model(p),
                 "code": p.code or "",
                 "category_id": p.category_id,
                 "display_price": float(price_with_tax),
@@ -159,6 +161,9 @@ def build(db: Session, t, ctx) -> bytes:
                 "sf": sv.search_text(p, ctx.cat_name.get(p.category_id), ctx.dtype(p)),
             }
         )
+        pc = public_code(p)
+        if pc != (p.code or ""):
+            items[-1]["public_code"] = pc  # O3-02: el codigo que ve el cliente, solo si difiere del propio
         if p.web_name and p.web_name.strip() and p.web_name.strip() != p.name:
             # O3-01: nombre comercial aprobado (solo si hay: el snapshot no crece para el resto)
             items[-1]["display_name"] = p.web_name.strip()
@@ -195,7 +200,8 @@ def build(db: Session, t, ctx) -> bytes:
     brands_count: dict[str, int] = {}
     for p in pool:
         if p.brand:
-            brands_count[p.brand] = brands_count.get(p.brand, 0) + 1
+            b_ = canonical_brand(p.brand)
+            brands_count[b_] = brands_count.get(b_, 0) + 1
     brands = [{"name": b, "count": n} for b, n in sorted(brands_count.items(), key=lambda x: -x[1])]
 
     # tipos

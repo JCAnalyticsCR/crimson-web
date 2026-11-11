@@ -198,16 +198,16 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         product_ld = {
             "@type": "Product",
             "name": shown,
-            "sku": p.code,
+            "sku": ctext.public_code(p),  # O3-02: nunca «EUR-...»
             "description": desc[:500],
             "image": [_abs(base, u) for u in (c["images"][:5] or ([c["image"]] if c["image"] else []))],
             "category": c.get("category") or c.get("type") or None,
             "offers": offer,
         }
         if p.brand:
-            product_ld["brand"] = {"@type": "Brand", "name": p.brand}
-        if p.model:
-            product_ld["mpn"] = p.model
+            product_ld["brand"] = {"@type": "Brand", "name": ctext.shown_brand(p)}
+        if ctext.shown_model(p):
+            product_ld["mpn"] = ctext.shown_model(p)
         if p.gtin:
             product_ld["gtin"] = p.gtin
         title, description = _product_title(p, shown, name, c, price), _product_description(p, c, price, desc)
@@ -340,7 +340,7 @@ def _product_description(p: Product, c: dict, price: Decimal, desc: str) -> str:
     if p.seo_description and p.seo_description.strip():
         return p.seo_description.strip()
     if p.web_name and p.web_name.strip():
-        head = " ".join(x for x in (c.get("type"), p.brand, c.get("model")) if x) or ctext.shown_name(p)
+        head = " ".join(x for x in (c.get("type"), ctext.shown_brand(p), c.get("model")) if x) or ctext.shown_name(p)
         precio = f" a {_money(price, c['display_currency'])} con IVA" if price > 0 else ""
         avail = (c.get("availability") or {}).get("label") or ""
         return f"{head}{precio}." + (f" {avail.rstrip('.')}." if avail else "") + " Envío a todo Costa Rica y factura electrónica."

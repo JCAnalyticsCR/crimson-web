@@ -17,6 +17,8 @@ from datetime import date
 from decimal import Decimal
 
 from ..models import Product
+from .brands import canonical_brand
+from .catalog_text import clean_model
 from .store_seo import availability_schema, breadcrumb_ld, esc, head_html, ld_json  # noqa: F401 (SEO: vive en store_seo, O1-01)
 
 # ---------------------------------------------------------------- contenido por defecto (editable en Mi Tienda)
@@ -369,9 +371,11 @@ def derive_specs(p: Product, shown: str | None = None) -> dict[str, str]:
     if t:
         out["Tipo"] = t
     if p.brand:
-        out["Marca"] = p.brand
+        out["Marca"] = canonical_brand(p.brand) if shown is not None else p.brand  # O3-02: grafia oficial en la ficha
     if p.model:
-        out["Modelo"] = p.model
+        m_ = clean_model(p.model) if shown is not None else p.model
+        if m_:
+            out["Modelo"] = m_
     cam = t.startswith("Cámara") or t in ("Videoportero", "Dashcam")
     rec = t.startswith("Grabador")
     if cam or rec:

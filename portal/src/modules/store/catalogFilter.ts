@@ -258,13 +258,14 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
     });
   }
 
-  const brandsLow = new Set(brandsParam.filter(Boolean).map((b) => b.toLowerCase()));
+  // O3-02: la marca se compara en version compacta, como el API (una direccion vieja con «Tp Link» sigue sirviendo)
+  const brandsLow = new Set(brandsParam.filter(Boolean).map((b) => compact(b.replace(/&/g, "and"))));
 
   // Replica keep(p, skip) del backend
   function keep(p: SnapProduct, skip = ""): boolean {
     if (
       skip !== "brand" && brandsLow.size > 0 &&
-      !brandsLow.has((p.brand ?? "").toLowerCase())
+      !brandsLow.has(compact((p.brand ?? "").replace(/&/g, "and")))
     ) return false;
     if (skip !== "type" && tipo && p.type !== tipo) return false;
     if (skip !== "price") {
