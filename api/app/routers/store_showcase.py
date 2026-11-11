@@ -26,6 +26,7 @@ from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
 from ..services import catalog_text as ctext
+from ..services import category_paths
 from ..services import product_typing as pt
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
@@ -699,7 +700,7 @@ def _cat_tree(ctx: Ctx, counts: dict[int, int], images: dict[int, str]) -> list[
             "count": total(c),
             "image": images.get(c.id),
             "children": subs,
-        }
+        } | ({"description": c.description} if c.description else {})  # O3-07a: el snapshot la lleva (antes nula)
 
     return sorted((node(c) for c in kids.get(None, []) if total(c)), key=lambda n: -n["count"])
 
@@ -950,9 +951,8 @@ def catalog(
 
     cat_obj = None
     if category:
-        cid = next((i for i, s in ctx.cat_slug.items() if s == category), None) or (
-            int(category) if category.isdigit() and int(category) in ctx.cat_name else None
-        )
+        # O3-07a: el slug vigente, el id o un slug viejo (alias de una categoria renombrada)
+        cid = category_paths.resolve(db, t.id, ctx.cats, category)[0]
         if not cid:
             raise HTTPException(404, "Categoría no encontrada")
         cat_obj = next(c for c in ctx.cats if c.id == cid)

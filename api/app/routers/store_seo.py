@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..models import Product, Tenant
 from ..services import catalog_text as ctext
-from ..services import fygaro_legacy
+from ..services import category_paths, fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of
 from ..services.store_seo import BUYABLE_STATES, boot_html, organization_ld, schema_availability
@@ -228,7 +228,8 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
     if head == "c" and len(parts) > 1:
         cats = _categories(db, t.id)
         slugs = sv.category_slugs(cats)
-        cid = next((i for i, s in slugs.items() if s == parts[1]), None)
+        # O3-07a: una direccion vieja (alias) da la canonica de la vigente (respaldo del 301 de nginx)
+        cid = category_paths.resolve(db, t.id, cats, parts[1])[0]
         cat = next((c for c in cats if c.id == cid), None)
         if not cat:
             return meta | {"title": f"Categoría no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
@@ -599,7 +600,13 @@ def seo_exists(
         ok = bool(p and p.tenant_id == t.id and p.show_on_web and p.active)
     elif len(parts) >= 2 and parts[0] == "c":
         cats = _categories(db, t.id)
-        ok = parts[1] in set(sv.category_slugs(cats).values()) or (parts[1].isdigit() and any(c.id == int(parts[1]) for c in cats))
+        cid, alias = category_paths.resolve(db, t.id, cats, parts[1])
+        ok = cid is not None
+        if alias:
+            # O3-07a: direccion vieja de una categoria renombrada -> 401 con el destino; nginx responde 301 (ver
+            # portal/nginx.conf, @tienda_movida). auth_request solo deja pasar 2xx, 401 y 403.
+            dest = f"/c/{sv.category_slugs(cats)[cid]}"
+            return Response(status_code=401, headers={"X-Store-Redirect": dest, "Cache-Control": "no-store"})
     return Response(status_code=204 if ok else 403, headers={"Cache-Control": "no-store"})
 
 

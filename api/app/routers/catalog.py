@@ -17,6 +17,7 @@ from ..models import Category, Customer, Product, ProductTax, Supplier, Supplier
 from ..schemas.crm import (
     CategoryIn,
     CategoryOut,
+    CategoryRenameIn,
     CustomerIn,
     CustomerOut,
     Page,
@@ -26,7 +27,7 @@ from ..schemas.crm import (
     TaxOut,
 )
 from ..services import cabys as cabys_svc
-from ..services import pricing
+from ..services import category_paths, pricing
 from ..services import store_showcase as _sv_cache
 from ..services import supplier_catalog as supcat
 from ..services.documents import audit
@@ -271,6 +272,22 @@ def categories(p: Principal = Depends(require("catalog", "ver")), db: Session = 
 def create_category(data: CategoryIn, p: Principal = Depends(require("catalog", "crear")), db: Session = Depends(get_db)):
     c = Category(tenant_id=p.tenant.id, **data.model_dump())
     db.add(c)
+    category_paths.assign(db, c)  # O3-07a: la direccion queda guardada desde que nace
+    _sv_cache.bump_catalog_version(db, p.tenant)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.patch("/categories/{cid}", response_model=CategoryOut)
+def rename_category(cid: int, data: CategoryRenameIn, p: Principal = Depends(require("catalog", "editar")), db: Session = Depends(get_db)):
+    """Renombrar (O3-07a): si la direccion /c/ cambia, la vieja queda como alias y responde 301 a la nueva."""
+    c = db.get(Category, cid)
+    if not c or c.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Categoría no encontrada")
+    before = c.name
+    old = category_paths.rename(db, c, data.name.strip())
+    audit(db, p.tenant.id, p.user.id, "rename", "category", c.id, {"antes": before, "despues": c.name, "alias": old}, ip=p.ip)
     _sv_cache.bump_catalog_version(db, p.tenant)
     db.commit()
     db.refresh(c)

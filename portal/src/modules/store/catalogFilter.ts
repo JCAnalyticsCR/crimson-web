@@ -32,6 +32,8 @@ export type SnapProduct = {
 export type SnapCategory = {
   id: number; name: string; slug: string;
   parent_id: number | null; count: number;
+  /** O3-07a: descripcion de la categoria y direcciones viejas (renombrada); solo viajan si hay */
+  description?: string | null; aliases?: string[];
 };
 
 export type SnapShowcase = {
@@ -86,7 +88,7 @@ export type CatalogResult = {
   currency: string;
   category: {
     id: number; name: string; slug: string;
-    description: null;
+    description: string | null;
     parent: { name: string; path: string } | null;
     children: { name: string; path: string }[];
   } | null;
@@ -198,6 +200,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
 
   const catById = new Map(snap.categories.map((c) => [c.id, c]));
   const catBySlug = new Map(snap.categories.map((c) => [c.slug, c]));
+  for (const c of snap.categories) for (const a of c.aliases || []) if (!catBySlug.has(a)) catBySlug.set(a, c); // O3-07a
 
   // Mapa hijo → padre para el árbol
   const childrenOf = new Map<number | null, SnapCategory[]>();
@@ -355,7 +358,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
     const parentCat = catObj.parent_id != null ? catById.get(catObj.parent_id) : null;
     categoryInfo = {
       id: catObj.id, name: catObj.name, slug: catObj.slug,
-      description: null,
+      description: catObj.description ?? null,
       parent: parentCat ? { name: parentCat.name, path: `/c/${parentCat.slug}` } : null,
       children: (childrenOf.get(catObj.id) ?? []).map((c) => ({
         name: c.name, path: `/c/${c.slug}`,

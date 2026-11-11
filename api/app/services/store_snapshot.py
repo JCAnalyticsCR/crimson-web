@@ -175,6 +175,21 @@ def build(db: Session, t, ctx) -> bytes:
 
     # arbol de categorias (mismo que showcase)
     cat_tree = _cat_tree(ctx, counts, {})
+    # O3-07a: direcciones viejas de categorias renombradas (la vitrina las resuelve sin pedir nada)
+    from . import category_paths
+
+    old: dict[int, list[str]] = {}
+    for s_, cid in category_paths.aliases(db, t.id).items():
+        old.setdefault(cid, []).append(s_)
+
+    def _with_aliases(nodes: list) -> None:
+        for n_ in nodes:
+            if n_["id"] in old:
+                n_["aliases"] = sorted(old[n_["id"]])
+            _with_aliases(n_.get("children") or [])
+
+    if old:
+        _with_aliases(cat_tree)
 
     # marcas
     brands_count: dict[str, int] = {}

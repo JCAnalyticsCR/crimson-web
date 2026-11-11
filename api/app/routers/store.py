@@ -687,6 +687,9 @@ def store_home(slug: str, db: Session = Depends(get_db)):
     pricer = Pricer(db, t)
     pages = db.scalars(select(StorePage).where(StorePage.tenant_id == t.id, StorePage.published).order_by(StorePage.position)).all()
     cats = db.scalars(select(Category).where(Category.tenant_id == t.id, Category.show_on_web).order_by(Category.name)).all()
+    from ..services.store_showcase import category_slugs
+
+    cat_slugs = category_slugs(list(cats))
     # O1-05: los conteos son los del snapshot ya armado (lo que la tienda lista, sin los ocultos); esta llamada bloquea
     # toda la tienda y nunca recalcula disponibilidad. Sin snapshot guardado, el conteo de publicados de antes.
     from ..services.store_snapshot import counts as snapshot_counts
@@ -724,8 +727,9 @@ def store_home(slug: str, db: Session = Depends(get_db)):
             {
                 "id": c.id,
                 "name": c.name,
+                "slug": cat_slugs.get(c.id),  # O3-07a: la direccion guardada (la vitrina ya no la calcula del nombre)
                 "count": total(c),
-                "subcategories": [{"id": k.id, "name": k.name, "count": total(k)} for k in kids.get(c.id, []) if total(k)],
+                "subcategories": [{"id": k.id, "name": k.name, "slug": cat_slugs.get(k.id), "count": total(k)} for k in kids.get(c.id, []) if total(k)],
             }
             for c in cats
             if (c.parent_id is None or c.parent_id not in shown) and total(c)

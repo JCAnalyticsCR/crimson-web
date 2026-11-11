@@ -13,7 +13,7 @@ from .accounting import (
 )
 from .allies import AllyAgreement, AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote, ScopeItem
 from .base import TenantMixin, TimestampMixin
-from .catalog import Category, Product, ProductPriceHistory, ProductTax, Supplier, Tax
+from .catalog import Category, CategorySlugAlias, Product, ProductPriceHistory, ProductTax, Supplier, Tax
 from .core import (
     AccessRequest,
     AuditLog,
@@ -116,6 +116,7 @@ __all__ = [
     "Product",
     "ProductPriceHistory",
     "Category",
+    "CategorySlugAlias",
     "Tax",
     "ProductTax",
     "Supplier",

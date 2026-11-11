@@ -55,6 +55,11 @@ class CategoryIn(BaseModel):
 class CategoryOut(CategoryIn):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    slug: str | None = None  # O3-07a: direccion /c/<slug> de la tienda
+
+
+class CategoryRenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
 
 
 class ProductIn(BaseModel):

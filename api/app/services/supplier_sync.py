@@ -672,6 +672,7 @@ def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
     Smart Home no tenía ninguna y sus productos quedaban fuera del menú de la tienda). 23/10: una subfamilia nueva de
     una familia que ya existe entra como hija suya (antes caía en la categoría padre)."""
     from ..models import Category
+    from . import category_paths
 
     def find(name: str, parent_id: int | None | bool = False) -> Category | None:
         q = select(Category).where(Category.tenant_id == tid, func.lower(Category.name) == name.lower())
@@ -690,6 +691,7 @@ def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
         parent = Category(tenant_id=tid, name=it.category[:120], show_on_web=True)
         db.add(parent)
         db.flush()
+        category_paths.assign(db, parent)  # O3-07a: direccion /c/ guardada desde que nace
     if not it.subcategory:
         return parent.id
     child = find(it.subcategory, parent.id)
@@ -697,6 +699,7 @@ def _suggest_cat(db: Session, tid: int, it: SupplierItem) -> int | None:
         child = Category(tenant_id=tid, name=it.subcategory[:120], parent_id=parent.id, show_on_web=True)
         db.add(child)
         db.flush()
+        category_paths.assign(db, child)
     return child.id
 
 

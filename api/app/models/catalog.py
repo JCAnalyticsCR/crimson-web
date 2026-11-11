@@ -31,6 +31,29 @@ class Category(TenantMixin, Base):
     # margen sobre la venta de la categoria (Catalogo -> Margenes). Lo heredan subcategorias y productos sin margen
     # propio: producto -> categoria mas cercana -> general (Ajustes). Solo lo ve quien ve costos.
     margin_pct: Mapped[float | None] = mapped_column(Numeric(6, 2))
+    # tienda (O3-07a): la direccion /c/<slug> queda guardada (antes se calculaba del nombre: renombrar daba 404). Al
+    # renombrar, el slug viejo pasa a category_slug_alias y responde 301 al vigente. Lo demas es el texto de la pagina
+    # de la categoria (titulo para buscadores, H1, introduccion, guia, imagen para compartir y orden en el menu).
+    slug: Mapped[str | None] = mapped_column(String(80))
+    position: Mapped[int | None] = mapped_column(Integer)
+    image_url: Mapped[str | None] = mapped_column(String(500))
+    seo_title: Mapped[str | None] = mapped_column(String(120))
+    seo_description: Mapped[str | None] = mapped_column(String(200))
+    h1: Mapped[str | None] = mapped_column(String(120))
+    intro: Mapped[str | None] = mapped_column(Text)
+    guide: Mapped[str | None] = mapped_column(Text)
+
+
+class CategorySlugAlias(TenantMixin, Base):
+    """Direccion vieja de una categoria (O3-07a): /c/<slug> responde 301 a la direccion vigente de category_id."""
+
+    __tablename__ = "category_slug_alias"
+    __table_args__ = (UniqueConstraint("tenant_id", "slug", name="uq_category_slug_alias"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80))
+    category_id: Mapped[int] = mapped_column(ForeignKey("category.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Supplier(ArchiveMixin, TenantMixin, Base):

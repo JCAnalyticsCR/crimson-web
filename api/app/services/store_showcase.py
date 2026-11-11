@@ -260,15 +260,11 @@ def product_id_from_ref(ref: str) -> int | None:
 
 
 def category_slugs(cats: list) -> dict[int, str]:
-    """slug por categoria; si dos se llaman igual, la segunda lleva el id"""
-    out, seen = {}, set()
-    for c in sorted(cats, key=lambda c: c.id):
-        s = slugify(c.name, 60)
-        if s in seen:
-            s = f"{s}-{c.id}"
-        seen.add(s)
-        out[c.id] = s
-    return out
+    """slug por categoria (O3-07a): el guardado en category.slug; sin el, el del nombre (si dos se llaman igual, la
+    segunda lleva el id). Ver services/category_paths."""
+    from . import category_paths
+
+    return category_paths.slugs(cats)
 
 
 # ---------------------------------------------------------------- especificaciones deducidas

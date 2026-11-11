@@ -168,10 +168,11 @@ export function slugify(s: string, limit = 60): string {
   if (t.length > limit) { const cut = t.slice(0, limit); t = cut.includes("-") ? cut.slice(0, cut.lastIndexOf("-")) : cut; }
   return t || "producto";
 }
-export function catSlugs(cats: { id: number; name: string }[]): Record<number, string> {
+export function catSlugs(cats: { id: number; name: string; slug?: string | null }[]): Record<number, string> {
   const out: Record<number, string> = {};
   const seen = new Set<string>();
-  [...cats].sort((a, b) => a.id - b.id).forEach((c) => { let s = slugify(c.name); if (seen.has(s)) s = `${s}-${c.id}`; seen.add(s); out[c.id] = s; });
+  /* O3-07a: la direccion guardada del API manda (renombrar ya no la mueve); sin ella, la del nombre como antes */
+  [...cats].sort((a, b) => a.id - b.id).forEach((c) => { let s = c.slug || slugify(c.name); if (!c.slug && seen.has(s)) s = `${s}-${c.id}`; seen.add(s); out[c.id] = s; });
   return out;
 }
 /** O2-03: mientras el cajon del carrito o la hoja de filtros estan abiertos, Tab y Mayus+Tab giran dentro de ellos; al
