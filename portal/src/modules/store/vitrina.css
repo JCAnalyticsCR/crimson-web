@@ -183,42 +183,36 @@
 .vt-empty span { max-width: 52ch; }
 .vt-empty__actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
 
-/* ---------- portada: hero "centro de monitoreo" ---------- */
-.vt-hero { background: var(--ink); color: #f4f1ee; position: relative; overflow: hidden; }
-/* rejilla de monitor + brillo carmesi: textura estatica (cero peticiones, nada se mueve) */
-.vt-hero::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
-  background: linear-gradient(rgba(255, 255, 255, .035) 1px, transparent 1px) 0 0 / 100% 44px, linear-gradient(90deg, rgba(255, 255, 255, .035) 1px, transparent 1px) 0 0 / 44px 100%;
-  -webkit-mask-image: radial-gradient(70% 90% at 75% 30%, #000, transparent 75%); mask-image: radial-gradient(70% 90% at 75% 30%, #000, transparent 75%); }
-.vt-hero__grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: clamp(24px, 4vw, 72px); align-items: center; padding-block: clamp(32px, 6vw, 88px); }
-.vt-hero__copy { display: grid; gap: 16px; align-content: start; }
-.vt-hero .sh-eyebrow { color: var(--on-night-2); }
-.vt-hero h1 { font-family: var(--font); font-weight: 700; font-size: var(--fs-7); line-height: .97; letter-spacing: -.02em; margin: 0; max-width: 16ch; text-wrap: balance; }
-.vt-hero h1 em { font-style: normal; }
-.vt-hero p { margin: 0; color: var(--muted-dark); font-size: var(--fs-3); max-width: 50ch; line-height: 1.55; }
-.vt-hero__cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-.vt-hero__cta .sh-btn { min-height: 50px; padding-inline: 24px; font-size: var(--fs-2); }
-.vt-btn--line { background: transparent; color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .35); }
-@media (hover: hover) { .vt-btn--line:hover { background: #fff !important; color: var(--ink); } }
-/* ancla de precio (el kit mas chico): el alto queda reservado aunque todavia no haya llegado */
-.vt-hero__deal { min-height: 58px; }
-.vt-hero__deal a { display: inline-grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "tag title go" "tag price go"; align-items: center; column-gap: 12px; padding: 7px 14px 7px 7px; border-radius: var(--r-2); border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .04); max-width: 100%; transition: border-color var(--dur-micro), background var(--dur-micro); }
-.vt-hero__deal .sh-meta { grid-area: tag; align-self: stretch; display: grid; place-items: center; padding: 0 10px; border-radius: var(--r-1); background: #fff; color: var(--ink); font-size: var(--fs-0); }
-.vt-hero__deal b { grid-area: title; font-size: var(--fs-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vt-hero__deal a > span:not(.sh-meta) { grid-area: price; font-size: var(--fs-1); color: var(--muted-dark); }
-.vt-hero__deal strong { color: #fff; font-variant-numeric: tabular-nums; }
-.vt-hero__deal svg { grid-area: go; color: var(--on-night); }
-@media (hover: hover) { .vt-hero__deal a:hover { border-color: rgba(255, 255, 255, .5); background: rgba(255, 255, 255, .06); } }
-.vt-hero__facts { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted-dark); }
-.vt-hero__facts span { display: inline-flex; align-items: center; gap: 8px; }
-.vt-wall { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; background: #0d0c10; border-radius: var(--r-2); border: 1px solid var(--hair-dark); box-shadow: var(--e-2); }
-.vt-wall__cell { aspect-ratio: 4 / 3; border-radius: var(--r-1); }
-.vt-wall__cell > img { padding: 10%; }
-.vt-wall__cell--empty { background: #1a1820; }
+/* ---------- portada (O2-08): hero sobre noche liso, una promesa, un producto real y un solo llamado ---------- */
+.vt-hero { background: var(--night); color: var(--on-night); }
+.vt-hero__grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: clamp(20px, 4vw, 64px); align-items: center; padding-block: clamp(28px, 6vw, 88px); }
+.vt-hero__grid:not(:has(.vt-hero__prod)) { grid-template-columns: minmax(0, 1fr); }
+.vt-hero__copy { display: grid; gap: 14px; align-content: start; }
+.vt-hero h1 { font-weight: 700; font-size: var(--fs-7); line-height: var(--lh-display); letter-spacing: -.02em; margin: 0; max-width: 16ch; text-wrap: balance; }
+.vt-hero p { margin: 0; color: var(--on-night-2); font-size: var(--fs-3); max-width: 50ch; line-height: 1.5; }
+.vt-hero__cta { display: flex; gap: 8px 20px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.vt-hero__cta .sh-btn { min-height: 52px; padding-inline: 26px; font-size: var(--fs-2); }
+.vt-hero__link { display: inline-flex; align-items: center; min-height: 44px; color: #fff; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+.shop .vt-hero p.vt-hero__facts { font-size: var(--fs-1); }
+/* el producto de portada: grande, con marca, nombre y precio; visible tambien en celular */
+.shop .vt-hero__prod { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; border-radius: var(--r-2); background: var(--surface); color: var(--ink); overflow: hidden; border: 1px solid var(--line-night); }
+.vt-hero__img { position: relative; display: block; aspect-ratio: 4 / 3; min-height: 0; overflow: hidden; background: var(--tile); }
+.vt-hero__img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 6%; mix-blend-mode: multiply; }
+.vt-hero__ptxt { display: grid; gap: 4px; padding: 14px 16px 16px; }
+.vt-hero__brand { font-size: var(--fs-0); color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.vt-hero__ptxt b { font-size: var(--fs-3); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vt-hero__ptxt .vt-price b { font-size: var(--fs-5); }
+@media (hover: hover) { .vt-hero__prod:hover b:not(.vt-price b) { text-decoration: underline; text-underline-offset: 3px; } }
 @media (max-width: 899px) {
-  .vt-hero__grid { grid-template-columns: minmax(0, 1fr); padding-block: 26px 28px; }
-  .vt-wall { display: none; }
-  .vt-hero__cta .sh-btn { flex: 1 1 150px; }
-  .vt-hero__deal a { display: grid; }
+  .vt-hero__grid { grid-template-columns: minmax(0, 1fr); padding-block: 22px 26px; gap: 16px; }
+  .vt-hero h1 { font-size: clamp(1.75rem, 1.2rem + 3vw, 2.25rem); }
+  .vt-hero p { font-size: var(--fs-2); }
+  .vt-hero__cta .sh-btn { min-height: 48px; }
+  /* en celular el producto va en fila: foto chica y datos, para que titular, boton y precio quepan arriba */
+  .shop .vt-hero__prod { grid-template-columns: 112px minmax(0, 1fr); align-items: center; }
+  .vt-hero__img { aspect-ratio: 1; height: 100%; }
+  .vt-hero__ptxt { padding: 10px 12px; }
+  .vt-hero__ptxt .vt-price b { font-size: var(--fs-4); }
 }
 
 /* ---------- sellos ---------- */
@@ -247,17 +241,20 @@
 @media (max-width: 520px) { .vt-more { font-size: var(--fs-1); } }
 
 /* banners */
-.vt-banners { display: grid; grid-template-columns: 1.4fr 1fr; grid-auto-rows: minmax(140px, auto); gap: 14px; padding-top: 24px; }
-.vt-banner { position: relative; display: block; border-radius: var(--r-2); overflow: hidden; background: var(--ink); color: #fff; min-height: 140px; isolation: isolate; }
-.vt-banner--main { grid-row: span 2; min-height: 300px; }
+.vt-banners { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-top: 24px; }
+.vt-banners[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vt-banners[data-n="3"] { grid-template-columns: 1.4fr 1fr; grid-template-rows: repeat(2, minmax(150px, auto)); }
+.vt-banners[data-n="3"] > :first-child { grid-row: span 2; }
+.vt-banner { position: relative; display: block; border-radius: var(--r-2); overflow: hidden; background: var(--night); color: #fff; min-height: 180px; isolation: isolate; aspect-ratio: 2 / 1; }
+.vt-banners[data-n="3"] .vt-banner { aspect-ratio: auto; }
 .vt-banner img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; }
-.vt-banner::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 30%, rgba(13, 12, 16, .82)); }
-.vt-banner--plain { background: linear-gradient(135deg, var(--ink), #2b1018); }
+.vt-banner::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 35%, rgba(13, 12, 16, .85)); }
+.vt-banner--plain { background: var(--night-2); }
 .vt-banner__txt { position: absolute; left: 18px; right: 18px; bottom: 16px; display: grid; gap: 4px; }
-.vt-banner__txt b { font-family: var(--font); font-size: var(--fs-5); letter-spacing: -.02em; line-height: 1.05; }
-.vt-banner__txt span { color: rgba(255, 255, 255, .8); font-size: var(--fs-1); }
+.vt-banner__txt b { font-size: var(--fs-5); letter-spacing: -.02em; line-height: 1.1; }
+.vt-banner__txt span { color: rgba(255, 255, 255, .85); font-size: var(--fs-1); }
 .vt-banner__txt em { font-style: normal; font-weight: 700; font-size: var(--fs-1); color: #fff; text-decoration: underline; text-underline-offset: 3px; }
-@media (max-width: 767px) { .vt-banners { grid-template-columns: minmax(0, 1fr); } .vt-banner--main { grid-row: auto; min-height: 220px; } }
+@media (max-width: 767px) { .vt-banners, .vt-banners[data-n] { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; } .vt-banners[data-n="3"] > :first-child { grid-row: auto; } .vt-banners[data-n="3"] .vt-banner { aspect-ratio: 2 / 1; } }
 
 /* categorias: la misma iconografia para todas (las fotos del catalogo no son parejas) */
 .vt-cats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr)); gap: 12px; }
@@ -265,6 +262,10 @@
 .vt-cat { width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px 12px 12px; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-2); min-height: 78px; transition: border-color var(--dur-micro), box-shadow var(--dur-micro); }
 .vt-cat__ico { width: 52px; height: 52px; border-radius: var(--r-2); display: grid; place-items: center; background: var(--vt-tile); color: var(--ink); transition: background var(--dur-micro), color var(--dur-micro); }
 .vt-cat__ico .sh-icon { width: 25px; height: 25px; stroke-width: 1.8; }
+.vt-cat__ico img { width: 100%; height: 100%; object-fit: contain; padding: 6px; mix-blend-mode: multiply; }
+.vt-cat__ico:has(img) { overflow: hidden; }
+.vt-morecats { margin: 14px 0 0; font-size: var(--fs-1); color: var(--text-2); line-height: 2; }
+.vt-morecats a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; display: inline-flex; min-height: 44px; align-items: center; }
 .vt-cat__txt { display: grid; gap: 4px; min-width: 0; }
 .vt-cat__txt b { font-family: var(--font); font-size: var(--fs-3); letter-spacing: -.01em; line-height: 1.12; overflow-wrap: anywhere; }
 .vt-cat__txt .sh-meta { font-size: var(--fs-0); }
@@ -333,6 +334,8 @@
 .vt-kit__terms { font-size: var(--fs-0); line-height: 1.45; color: var(--muted-dark); }
 /* O1-04 h: un solo kit ocupa el ancho completo; en escritorio, foto a la izquierda y datos a la derecha */
 .vt-kits__list[data-n="1"] { grid-template-columns: minmax(0, 1fr); }
+.vt-kits__list[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 900px) { .vt-kits__list[data-n="3"] { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(300px, calc((100% - 32px) / 3)); overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; padding-bottom: 8px; } .vt-kits__list[data-n="3"] > li { scroll-snap-align: start; } }
 @media (min-width: 768px) {
   .vt-kits__list[data-n="1"] .vt-kit { flex-direction: row; }
   .vt-kits__list[data-n="1"] .vt-kit__img { flex: 0 0 52%; margin: 8px 0 8px 8px; aspect-ratio: 16 / 10; }
@@ -344,7 +347,7 @@
 }
 /* movil y tableta: los kits deslizan de lado (cada tarjeta casi a pantalla completa) */
 @media (max-width: 899px) {
-  .vt-kits__list { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: min(82vw, 340px); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--pad); margin-inline: calc(var(--pad) * -1); padding: 2px var(--pad) 8px; scrollbar-width: none; }
+  .vt-kits__list:not([data-n="1"]) { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: min(82vw, 340px); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--pad); margin-inline: calc(var(--pad) * -1); padding: 2px var(--pad) 8px; scrollbar-width: none; }
   .vt-kits__list::-webkit-scrollbar { display: none; }
   .vt-kits__list > li { scroll-snap-align: start; }
   .vt-kit__price strong { font-size: var(--fs-5); }
@@ -360,10 +363,9 @@
 @media (max-width: 520px) { .vt-band .sh-btn, .vt-advice__cta, .vt-advice__cta .sh-btn { width: 100%; } }
 
 /* marcas */
-.vt-brands { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
-.vt-brands a { min-height: 44px; display: inline-flex; align-items: center; gap: 10px; padding: 0 16px; border-radius: var(--r-pill); border: 1px solid var(--hair-2); background: var(--surface); font-weight: 700; font-size: var(--fs-1); }
-.vt-brands i { font-style: normal; font-family: var(--font); font-size: var(--fs-0); color: var(--text-3); }
-@media (hover: hover) { .vt-brands a:hover { border-color: var(--ink); } }
+.vt-brands { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0 20px; }
+.vt-brands a { min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; font-size: var(--fs-2); color: var(--ink); }
+@media (hover: hover) { .vt-brands a:hover { text-decoration: underline; text-underline-offset: 3px; } }
 
 /* ---------- catalogo ---------- */
 .vt-cathead { display: grid; gap: 6px; padding: 6px 0 10px; }

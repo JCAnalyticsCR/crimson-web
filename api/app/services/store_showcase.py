@@ -132,6 +132,8 @@ def showcase_cfg(store: dict) -> dict:
     return {
         "banners": sc.get("banners") or [],
         "featured": [int(x) for x in (sc.get("featured") or []) if str(x).isdigit()],
+        # O2-08: producto de portada elegido en el panel y hasta 5 de respaldo, en orden
+        "hero": [int(x) for x in (sc.get("hero") or []) if str(x).isdigit()][:6],
         "kits": sc.get("kits") if sc.get("kits") is not None else DEFAULT_KITS,
         "trust": sc.get("trust") or DEFAULT_TRUST,
         "pages": {**DEFAULT_PAGES, **{k: v for k, v in (sc.get("pages") or {}).items() if v}},

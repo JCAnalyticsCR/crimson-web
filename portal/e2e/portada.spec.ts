@@ -32,3 +32,39 @@ test("[O1-04] sin relleno: ni «Lo más pedido», ni «Cam · en vivo», ni «Ma
   const parpadean = await page.evaluate(() => [...document.querySelectorAll("main *")].filter((el) => !el.closest(".vt-hero") && getComputedStyle(el).animationName !== "none" && getComputedStyle(el).animationIterationCount === "infinite").map((el) => el.className));
   expect(parpadean).toEqual([]);
 });
+
+test("[O2-08] a 375x812 caben en la primera pantalla el titular, el botón y el producto con su precio", async ({ page }) => {
+  test.skip(page.viewportSize()!.width !== 375, "criterio a 375 px");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await tiendaLista(page);
+  const hero = page.locator(".vt-hero");
+  for (const el of [hero.getByRole("heading", { level: 1 }), hero.getByRole("link", { name: "Armá tu sistema" }), hero.locator(".vt-hero__prod .vt-price")]) {
+    const b = (await el.boundingBox())!;
+    expect(b.y + b.height).toBeLessThanOrEqual(812);
+  }
+  // un solo llamado rojo en el hero y la imagen del producto es la LCP (prioridad alta, sin lazy, con medidas)
+  await expect(hero.locator(".sh-btn--crimson")).toHaveCount(1);
+  const img = hero.locator(".vt-hero__prod img");
+  await expect(img).toHaveAttribute("fetchpriority", "high");
+  await expect(img).toHaveAttribute("loading", "eager");
+  await expect(img).toHaveAttribute("width", /\d+/);
+});
+
+test("[O2-08] sin producto comprable la portada va sin producto ni precio, y un solo botón rojo en toda la página", async ({ page }) => {
+  await fijar(page, { sinHeroe: true });
+  await page.goto("/");
+  await tiendaLista(page);
+  await expect(page.locator(".vt-kits .vt-kit:not(.vt-kit--skel)").first()).toBeVisible();
+  await expect(page.locator(".vt-hero__prod")).toHaveCount(0);
+  await expect(page.locator(".vt-hero .vt-price")).toHaveCount(0);
+  await expect(page.locator("main .sh-btn--crimson")).toHaveCount(1);
+});
+
+test("[O2-08] con «reducir movimiento» nada se anima en la portada", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await tiendaLista(page);
+  const animadas = await page.evaluate(() => [...document.querySelectorAll("main *")].filter((el) => getComputedStyle(el).animationName !== "none" && parseFloat(getComputedStyle(el).animationDuration) > 0.01).length);
+  expect(animadas).toBe(0);
+});

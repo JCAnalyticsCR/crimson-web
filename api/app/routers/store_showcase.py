@@ -143,6 +143,8 @@ class ShowcaseIn(BaseModel):
     ga4_id: str | None = Field(None, max_length=40)
     banners: list[BannerIn] | None = Field(None, max_length=12)
     featured: list[int] | None = Field(None, max_length=24)
+    # O2-08: producto de portada y hasta 5 de respaldo (el primero comprable manda)
+    hero: list[int] | None = Field(None, max_length=6)
     kits: list[KitIn] | None = Field(None, max_length=8)
     trust: list[TrustIn] | None = Field(None, max_length=6)
     faq: list[FaqIn] | None = Field(None, max_length=40)
@@ -245,7 +247,8 @@ def _admin_out(t: Tenant, db: Session) -> dict:
     cfg = store_cfg(t)
     sc = sv.showcase_cfg(cfg)
     ids = sc["featured"]
-    prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_(ids)))} if ids else {}
+    hero_ids = sc["hero"]
+    prods = {p.id: p for p in db.scalars(select(Product).where(Product.tenant_id == t.id, Product.id.in_([*ids, *hero_ids])))} if ids or hero_ids else {}
     published = _published(db, t.id)
     av = availability_many(db, t, list({*prods.values(), *published}), audience="publico")
     pool = [p for p in published if not (av.get(p.id) or {}).get("ocultar")]
@@ -338,6 +341,18 @@ def _admin_out(t: Tenant, db: Session) -> dict:
             for i in ids
             if i in prods
         ],
+        "hero_products": [
+            {
+                "id": i,
+                "name": prods[i].name,
+                "code": prods[i].code,
+                "show_on_web": prods[i].show_on_web,
+                "state": (av.get(i) or {}).get("state"),
+                "label": (av.get(i) or {}).get("label"),
+            }
+            for i in hero_ids
+            if i in prods
+        ],
         "kits_preview": kits_preview,
         "slug": t.slug,
         "domain": cfg.get("domain"),
@@ -363,6 +378,9 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     if "featured" in patch:
         own = set(db.scalars(select(Product.id).where(Product.tenant_id == t.id, Product.id.in_(patch["featured"] or [])))) if patch["featured"] else set()
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
+    if "hero" in patch:
+        own = set(db.scalars(select(Product.id).where(Product.tenant_id == t.id, Product.id.in_(patch["hero"] or [])))) if patch["hero"] else set()
+        patch["hero"] = [i for i in dict.fromkeys(patch["hero"] or []) if i in own][:6]
     warnings: list[str] = []
     if "banners" in patch:
         # O1-04 d: se sanea en vez de rechazar (el editor manda la lista completa; un 422 bloquearia todo cambio): el
@@ -789,6 +807,9 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     if not featured:
         featured = sv.default_featured([p for p in pool if p.id in sellable and kit_price(p) > 0], prefer=sellable, type_of=ctx.dtype)
     fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
+    # O2-08: el producto de portada es el primero de la lista del panel que se pueda comprar ya, con precio y foto; si
+    # ninguno, la portada va sin producto ni precio
+    hero = next((by_id[i] for i in sc["hero"] if i in by_id and by_id[i] in pool and i in sellable and kit_price(by_id[i]) > 0 and by_id[i].images), None)
     # O1-04 c: «Marcas» solo con las de seguridad, redes y respaldo (con al menos un producto en esas familias)
     fam_brands = {p.brand for p in prods if p.brand and p.category_id in ctx.cat_chain and pt.functional_family(ctx.cat_chain[p.category_id][1])}
     brands = {b: n for b, n in brands.items() if b in fam_brands}
@@ -821,7 +842,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
             }
         )
     # Carga completa para los productos que se renderizan como tarjeta (featured + fresh).
-    _render_ids = list({p.id for p in featured[:8]} | {p.id for p in fresh})
+    _render_ids = list({p.id for p in featured[:8]} | {p.id for p in fresh} | ({hero.id} if hero else set()))
     _full = {p.id: p for p in _load_full(db, _render_ids)}
     response.headers["ETag"] = _etag
     response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
@@ -835,6 +856,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
         "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1]))[:14]],
         "featured": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in featured[:8]],
         "featured_source": featured_source,
+        "hero": ctx.card(_full.get(hero.id, hero), stock.get(hero.id)) if hero else None,
         "fresh": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in fresh],
         "kits": kits,
         "product_count": snap_n["n"] if snap_n is not None else len(prods),

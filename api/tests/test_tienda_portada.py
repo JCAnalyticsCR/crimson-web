@@ -152,3 +152,21 @@ def test_reglas_puras():
     assert sv.public_faq([{"q": "¿Cómo pago?", "a": "x"}, {"q": "Otra", "a": "y"}], []) == [{"q": "Otra", "a": "y"}]
     soporte = N(title="Soporte técnico", text="WhatsApp de lunes a viernes")
     assert sv.public_trust([vars(soporte)], None) == [vars(soporte)]  # ya trae su horario
+
+
+def test_producto_de_portada_cae_al_siguiente_comprable_o_a_ninguno(client, auth, db_session):
+    """O2-08: el panel guarda el elegido y hasta 5 de respaldo; la portada muestra el primero comprable."""
+    _publicar(client)
+    prods = _tienda(db_session)
+    _existencia(client, prods["CAM-B"].id)
+    orden = [prods["CAM-A"].id, prods["CAM-B"].id]
+    r = client.put("/store/showcase", json={"hero": orden})
+    assert r.status_code == 200 and r.json()["hero"] == orden
+    assert [x["code"] for x in r.json()["hero_products"]] == ["CAM-A", "CAM-B"]
+    h = client.get(f"{S}/showcase").json()
+    assert h["hero"]["code"] == "CAM-B"  # CAM-A no se puede comprar: manda el siguiente
+    _existencia(client, prods["CAM-A"].id)
+    assert client.get(f"{S}/showcase").json()["hero"]["code"] == "CAM-A"  # el elegido vuelve apenas es comprable
+    assert client.put("/store/showcase", json={"hero": [prods["CAM-C"].id]}).status_code == 200  # sin precio
+    assert client.get(f"{S}/showcase").json()["hero"] is None
+    assert client.put("/store/showcase", json={"hero": [999999]}).json()["hero"] == []  # ajeno o inexistente

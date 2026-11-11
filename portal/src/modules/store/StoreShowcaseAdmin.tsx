@@ -29,6 +29,8 @@ type Trust = { icon: string; title: string; text: string };
 type Faq = { q: string; a: string };
 type Showcase = {
   headline: string; subline: string; seo_description: string; banners: Banner[]; featured: number[]; kits: Kit[]; trust: Trust[];
+  /* O2-08 (aditivo: un API viejo no lo manda): producto de portada y hasta 5 de respaldo */
+  hero?: number[]; hero_products?: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
   faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string };
   /* state/label: disponibilidad de la funcion unica (lo que ve el cliente) */
   featured_products: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
@@ -78,10 +80,11 @@ export default function StoreShowcaseAdmin() {
           {tab === "Portada" && (
             <div style={{ display: "grid", gap: 12 }}>
               <div className="grid-2">
-                <Field label="Titular de la portada" hint="Vacío = “Equipo profesional de seguridad, listo para instalar.”"><input className="input" defaultValue={d.headline} maxLength={120} onBlur={(e) => e.target.value !== d.headline && save({ headline: e.target.value })} /></Field>
+                <Field label="Titular de la portada" hint="Vacío = “Protegé tu casa o negocio con equipo profesional.” (propuesta, a aprobar)"><input className="input" defaultValue={d.headline} maxLength={120} onBlur={(e) => e.target.value !== d.headline && save({ headline: e.target.value })} /></Field>
                 <Field label="Bajada"><input className="input" defaultValue={d.subline} maxLength={300} onBlur={(e) => e.target.value !== d.subline && save({ subline: e.target.value })} /></Field>
               </div>
               <Field label="Descripción para Google y WhatsApp (portada)"><input className="input" defaultValue={d.seo_description} maxLength={300} onBlur={(e) => e.target.value !== d.seo_description && save({ seo_description: e.target.value })} /></Field>
+              <HeroEditor ids={d.hero || []} items={d.hero_products || []} onSave={(hero) => save({ hero })} onDirty={onDirty} />
               <BannersEditor value={d.banners} onSave={(banners) => save({ banners })} onDirty={onDirty} />
               <TrustEditor value={d.trust} onSave={(trust) => save({ trust })} onDirty={onDirty} />
             </div>
@@ -140,7 +143,7 @@ function useDraft<T>(value: T, key: string, onDirty?: OnDirty): [T, (v: T) => vo
   useEffect(() => () => onDirty?.(key, false), [key, onDirty]);
   return [draft, setDraft, () => { adopt.current = true; }];
 }
-const SECCION: Record<string, string> = { banners: "Banners", trust: "Sellos de confianza", featured: "Productos destacados", faq: "Preguntas frecuentes" };
+const SECCION: Record<string, string> = { banners: "Banners", trust: "Sellos de confianza", featured: "Productos destacados", hero: "Producto de portada", faq: "Preguntas frecuentes" };
 
 /** O1-04 d: sin imagen, o con el titulo vacio o «Nuevo banner»: la tienda no lo pinta (y el API lo guarda inactivo) */
 const incompleto = (b: Banner) => !b.image.trim() || ["", "nuevo banner"].includes(b.title.trim().toLowerCase());
@@ -242,6 +245,32 @@ function FeaturedEditor({ ids, items, onSave, onDirty }: { ids: number[]; items:
         <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
           <span className="meta" style={{ width: 22 }}>{i + 1}</span>
           <span style={{ flex: 1, minWidth: 0 }}>{p.name} <span className="meta">{p.code}</span>{!p.show_on_web && <span className="badge badge--muted" style={{ marginLeft: 6 }}>no publicado</span>}{p.state && <span style={{ marginLeft: 6 }} title={p.label || undefined}><AvailBadge a={{ state: p.state, label: p.label || "" }} /></span>}{p.state && !vendible(p.state) && <span className="meta" style={{ marginLeft: 6, color: "var(--warn)" }}>no se puede comprar en línea</span>}</span>
+          <button className="btn btn--ghost btn--sm" onClick={() => move(i, -1)} aria-label="Subir">↑</button>
+          <button className="btn btn--ghost btn--sm" onClick={() => move(i, 1)} aria-label="Bajar">↓</button>
+          <button className="x" onClick={() => setList(list.filter((x) => x.id !== p.id))} aria-label="Quitar"><Icon d={I.x} size={14} /></button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** O2-08: el producto grande de la portada. Se guarda el elegido y hasta 5 de respaldo: la tienda muestra el primero
+    que se pueda comprar ya, con precio y foto; si ninguno, la portada va sin producto ni precio. */
+function HeroEditor({ ids, items, onSave, onDirty }: { ids: number[]; items: NonNullable<Showcase["hero_products"]>; onSave: (v: number[]) => void; onDirty?: OnDirty }) {
+  const [list, setList, guardando] = useDraft(items, "hero", onDirty);
+  const move = (i: number, dir: -1 | 1) => { const b = [...list]; const j = i + dir; if (j < 0 || j >= b.length) return; [b[i], b[j]] = [b[j], b[i]]; setList(b); };
+  return (
+    <div style={{ display: "grid", gap: 8 }} data-editor="hero">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontSize: 13 }}>Producto de portada</b>
+        <button className="btn btn--crimson btn--sm" onClick={() => { guardando(); onSave(list.map((x) => x.id)); }} disabled={JSON.stringify(list.map((x) => x.id)) === JSON.stringify(ids)}><Icon d={I.check} />Guardar producto de portada</button>
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Elija el producto que va grande en la portada y, si quiere, hasta 5 de respaldo en orden. La tienda muestra el primero que se pueda comprar en línea, con precio y foto; si ninguno se puede comprar, la portada va sin producto.</p>
+      <ProductPicker onPick={(p) => !list.some((x) => x.id === p.id) && list.length < 6 && setList([...list, { id: p.id, name: p.name, code: p.code, show_on_web: p.show_on_web, state: p.availability?.state, label: p.availability?.label_publico || p.availability?.label }])} />
+      {list.map((p, i) => (
+        <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+          <span className="meta" style={{ width: 70 }}>{i === 0 ? "Elegido" : `Respaldo ${i}`}</span>
+          <span style={{ flex: 1, minWidth: 0 }}>{p.name} <span className="meta">{p.code}</span>{!p.show_on_web && <span className="badge badge--muted" style={{ marginLeft: 6 }}>no publicado</span>}{p.state && !vendible(p.state) && <span className="meta" style={{ marginLeft: 6, color: "var(--warn)" }}>no se puede comprar en línea</span>}</span>
           <button className="btn btn--ghost btn--sm" onClick={() => move(i, -1)} aria-label="Subir">↑</button>
           <button className="btn btn--ghost btn--sm" onClick={() => move(i, 1)} aria-label="Bajar">↓</button>
           <button className="x" onClick={() => setList(list.filter((x) => x.id !== p.id))} aria-label="Quitar"><Icon d={I.x} size={14} /></button>

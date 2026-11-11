@@ -24,7 +24,9 @@ const SLUG = "crimson";
 
 /* portadaTras (O1-04 j): ms entre el snapshot y /showcase; -1 = al azar entre 0 y 60 ms (alrededor de la ventana de la
    carrera de StoreHome). Sin la perilla: 200 ms, el orden fijo de las capturas. */
-export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e; portadaTras?: number };
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e; portadaTras?: number; sinHeroe?: boolean };
+/** O2-08: el producto de portada de la tienda de pruebas (una camara en bodega) */
+const HEROE = 70;
 /** O1-09: lo que manda el API real en shipping_public (perilla `envio`; sin ella la tienda no muestra la franja) */
 export type ShipE2e = { free_from: number | null; rates: { name: string; zone: string | null; area: string; amount: number; lead?: string | null }[]; pickup: { address: string; hours?: string } | null; invoice?: boolean };
 
@@ -166,6 +168,14 @@ export function instalarApiE2e() {
     const fixed = method === "GET" && sub === "/availability" && body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)
       ? { items: (body as { items: { id: number }[] }).items.map((it) => (DISPONIBILIDAD[it.id] ? { id: it.id, ...dispo(it.id) } : it)) }
       : conDisponibilidad(body);
+    /* O2-08: el producto de portada (api: el primero comprable de la lista del panel). El mock de la demo no lo conoce:
+       aqui va una camara en bodega del catalogo ficticio, salvo la perilla sinHeroe */
+    if (method === "GET" && sub === "/showcase" && fixed && typeof fixed === "object" && !("hero" in fixed)) {
+      type Tarjeta = { id: number; display_price?: number | string; image?: string | null; availability?: { disponible?: boolean } };
+      const f = fixed as { featured?: Tarjeta[]; fresh?: Tarjeta[]; hero?: unknown };
+      const todas = [...(f.featured || []), ...(f.fresh || [])];
+      f.hero = ajustes().sinHeroe ? null : todas.find((x) => x.id === HEROE) ?? todas.find((x) => x.availability?.disponible && Number(x.display_price) > 0 && x.image) ?? null;
+    }
     return new Response(JSON.stringify(fixed), { status: res.status, headers: res.headers });
   };
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
