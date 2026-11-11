@@ -30,7 +30,7 @@ def test_sin_tocar_nada_la_portada_queda_igual_y_reordenar_la_cambia(client, aut
     assert [s["key"] for s in sc["sections"]] == HOY
     pub = client.get(f"{S}/showcase").json()
     visibles = [k for k, _, vis in sv.PORTADA_SECTIONS if vis]
-    assert [s["key"] for s in pub["sections"]] == visibles  # las nuevas («listos», «coleccion») nacen ocultas
+    assert [s["key"] for s in pub["sections"]] == visibles  # la nueva («coleccion») nace oculta
     nuevo = [
         {"key": "categorias", "visible": True, "title": ""},
         {"key": "hero", "visible": True, "title": ""},
@@ -97,3 +97,24 @@ def test_coleccion_por_regla_se_actualiza_sola_y_404_real(client, auth, db_sessi
     assert client.put("/store/showcase", json={"collections": [barata, {**barata}]}).status_code == 422
     assert client.put("/store/showcase", json={"collections": [barata]}).status_code == 200
     assert client.get(f"{S}/collections/baratas").json()["n"] == 0  # 1 500 + IVA no entra
+
+
+def test_pagina_de_coleccion_seo_exists_y_sitemap(client, auth, db_session):
+    H = {"X-Store-Host": "tienda.ejemplo.com"}
+    assert client.put("/store", json={"kind": "tienda", "published": True, "domain": "tienda.ejemplo.com"}).status_code == 200
+    col = {"slug": "listo-para-entregar", "title": "Listo para entregar", "text": "En bodega hoy.", "rule": {"stock_only": True}}
+    assert client.put("/store/showcase", json={"collections": [col]}).status_code == 200
+    # nginx (auth_request): existe -> 204; no existe -> 403 (404 real con la vitrina)
+    assert client.get("/public/seo/exists/coleccion/listo-para-entregar", headers=H).status_code == 204
+    assert client.get("/public/seo/exists/coleccion/no-existe", headers=H).status_code == 403
+    head = client.get("/public/seo/head/coleccion/listo-para-entregar", headers=H).text
+    assert "<title>Listo para entregar" in head and head.count("application/ld+json") == 1 and "CollectionPage" in head
+    assert 'href="https://tienda.ejemplo.com/coleccion/listo-para-entregar"' in head
+    assert "https://tienda.ejemplo.com/coleccion/listo-para-entregar" in client.get("/public/seo/sitemap.xml", headers=H).text
+    r = client.get(f"{S}/collections/listo-para-entregar").json()
+    assert r["seo"]["title"].startswith("Listo para entregar")
+    # apagada: fuera del sitemap y 404
+    col["active"] = False
+    assert client.put("/store/showcase", json={"collections": [col]}).status_code == 200
+    assert "/coleccion/" not in client.get("/public/seo/sitemap.xml", headers=H).text
+    assert client.get("/public/seo/exists/coleccion/listo-para-entregar", headers=H).status_code == 403

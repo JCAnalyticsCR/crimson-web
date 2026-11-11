@@ -339,6 +339,13 @@ test("[O4-07] portada ordenable con teclado, categorías y colecciones por regla
   await page.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Guardar y publicar" }).click();
   await expect.poll(orden).toEqual([antes[1], antes[0], ...antes.slice(2)]);
   await sinScroll(page, "portada");
+  // la tienda publica aplica el orden: los sellos antes del hero
+  const tienda = await page.context().newPage();
+  await tienda.goto(`${baseURL}/`);
+  await expect(tienda.locator(".vt-hero")).toBeVisible();
+  // el orden llega con /showcase (el snapshot del navegador se rearma despues): se espera a que se aplique
+  await expect.poll(() => tienda.evaluate(() => { const s = document.querySelector(".vt-trust"); const h = document.querySelector(".vt-hero"); return !!s && !!h && !!(s.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
+  await tienda.close();
   await page.getByRole("button", { name: "Deshacer" }).click();
   await expect.poll(orden).toEqual(antes);
 
@@ -371,6 +378,11 @@ test("[O4-06] apariencia con vista previa en vivo y aviso de contraste", async (
   await expect.poll(async () => ((await (await servidor.get("/api/store", { headers: h })).json()) as { theme?: { accent?: string } }).theme?.accent).toBe("#1d4ed8");
   const slug = ((await (await servidor.get("/api/store", { headers: h })).json()) as { slug: string }).slug;
   expect(((await (await servidor.get(`/api/public/store/${slug}`)).json()) as { store: { theme: { accent: string } } }).store.theme.accent).toBe("#1d4ed8");
+  // la tienda publica lo aplica como variable de .shop
+  const tienda = await page.context().newPage();
+  await tienda.goto(`${baseURL}/`);
+  await expect(tienda.locator("div.shop").first()).toHaveAttribute("style", /--crimson: #1d4ed8/);
+  await tienda.close();
   await servidor.put("/api/store", { headers: h, data: { theme: { accent: "#e2233a" }, primary: "#e2233a" } });
 });
 

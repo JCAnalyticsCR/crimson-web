@@ -47,6 +47,8 @@ export type SnapShowcase = {
     link?: string; cta?: string; active?: boolean;
   }>;
   trust: Array<{ icon: string; title: string; text: string }>;
+  /** O4-07 (aditivo): secciones visibles de la portada, en orden y con titulo propio */
+  sections?: Array<{ key: string; title: string }>;
 };
 
 export type Snapshot = {

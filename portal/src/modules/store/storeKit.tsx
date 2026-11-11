@@ -55,7 +55,7 @@ export function businessLines(b?: Business | null): string[] {
   const contacto = [t(b.phone) && `Tel. ${t(b.phone)}`, t(b.email), t(b.hours)].filter(Boolean).join(" · ");
   return [quien, contacto].filter(Boolean);
 }
-export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean };
+export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean; /** O4-06: tema de Mi Tienda -> Apariencia (null = el de hoy) */ theme?: Theme | null };
 
 /** Envio visible antes del checkout (O1-09, GET /public/store/{slug} -> shipping_public). Todo derivado de Mi Tienda;
     montos con IVA en la moneda de la tienda. Aditivo: un API viejo no lo manda y no se muestra nada. */
@@ -589,4 +589,67 @@ export function Prose({ text }: { text: string }) {
       })}
     </div>
   );
+}
+
+// ---------- tema (O4-06) ----------
+/* Tema de la tienda (O4-06): lo que el administrador elige en Mi Tienda -> Apariencia, como variables CSS del
+   contenedor .shop (los tokens de shop.css, Ola 2: --crimson, --crimson-press, --r-1, --r-2, --paper, --paper-2,
+   --font). Modulo puro: lo usan la vista previa del panel y la tienda publica (PublicStore), y se prueba en Vitest
+   (__tests__/tema.test.ts).
+
+   Solo se emite lo que DIFIERE de la tienda de hoy: con el tema por defecto (o sin tema, API viejo) themeVars devuelve
+   {} y la tienda queda exactamente igual (las capturas base no cambian). */
+
+export type Theme = {
+  /** clasico = Arial (el de hoy); crimson = Archivo, solo si el dueno lo aprueba (O2-04) */
+  preset?: "clasico" | "crimson";
+  accent?: string;
+  /** radio de campos y fotos, en px (0 a 16); el de tarjetas y paneles va en proporcion (8 -> 14, el de hoy) */
+  radius?: number;
+  /** fondo de pagina: crema (el de hoy) o blanco */
+  background?: "crema" | "blanco";
+};
+
+export const THEME_DEFAULT: Required<Theme> = { preset: "clasico", accent: "#e2233a", radius: 8, background: "crema" };
+const HEX = /^#[0-9a-fA-F]{6}$/;
+const FONDOS = { crema: { bg: "#f7f5f2", bg2: "#efebe6" }, blanco: { bg: "#ffffff", bg2: "#f4f4f5" } };
+
+function rgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const lin = (c: number) => { const s = c / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+export function luminance(hex: string): number {
+  const [r, g, b] = rgb(hex);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+/** contraste WCAG entre dos colores (1 a 21) */
+export function contrast(a: string, b: string): number {
+  const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m);
+  return Math.round(((x + 0.05) / (y + 0.05)) * 100) / 100;
+}
+/** el color de acento lleva texto blanco (botones): AA pide 4,5 */
+export const accentOk = (accent: string) => HEX.test(accent) && contrast(accent, "#ffffff") >= 4.5;
+
+/** un tono mas oscuro (hover) */
+export function darker(hex: string, f = 0.86): string {
+  const [r, g, b] = rgb(hex).map((c) => Math.max(0, Math.round(c * f)));
+  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** variables CSS del tema para el contenedor .shop; {} con el tema por defecto o sin tema (la tienda queda como hoy) */
+export function themeVars(t?: Theme | null): Record<string, string> {
+  if (!t) return {};
+  const out: Record<string, string> = {};
+  if (t.accent && HEX.test(t.accent) && t.accent.toLowerCase() !== THEME_DEFAULT.accent) {
+    out["--crimson"] = t.accent;
+    out["--crimson-press"] = darker(t.accent);
+  }
+  if (typeof t.radius === "number" && t.radius >= 0 && t.radius <= 16 && t.radius !== THEME_DEFAULT.radius) {
+    out["--r-1"] = `${t.radius}px`;
+    out["--r-2"] = `${Math.round((t.radius * 14) / 8)}px`;
+  }
+  if (t.background === "blanco") { out["--paper"] = FONDOS.blanco.bg; out["--paper-2"] = FONDOS.blanco.bg2; }
+  if (t.preset === "crimson") out["--font"] = "Archivo, Arial, Helvetica, sans-serif";
+  return out;
 }

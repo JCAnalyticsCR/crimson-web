@@ -132,7 +132,7 @@ class ThemeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     preset: str = Field("clasico", pattern="^(clasico|crimson)$")
     accent: str = Field("#e2233a", pattern=r"^#[0-9a-fA-F]{6}$")
-    radius: int = Field(6, ge=0, le=16)
+    radius: int = Field(8, ge=0, le=16)  # 8 = el de hoy (shop.css --r-1)
     background: str = Field("crema", pattern="^(crema|blanco)$")
 
 

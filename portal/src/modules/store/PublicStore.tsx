@@ -20,7 +20,7 @@ import { parseCarrito } from "./carritoCompartido";
 import StoreHome from "./StoreHome";
 import { bootStore } from "./boot";
 import { logoSrc } from "./logo";
-import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, themeVars, type Business, type Theme, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import { conNombreVisible } from "./storeNames";
 import "./vitrina.css";
@@ -31,11 +31,12 @@ const InfoPage = lazy(() => import("./StorePages").then((m) => ({ default: m.Inf
 const ComparePage = lazy(() => import("./StorePages").then((m) => ({ default: m.ComparePage })));
 const BlockPage = lazy(() => import("./StorePages").then((m) => ({ default: m.BlockPage })));
 const NotFound = lazy(() => import("./StorePages").then((m) => ({ default: m.NotFound })));
+const ColeccionPage = lazy(() => import("./ColeccionPage"));  // O4-07
 
 type Cat = { id: number; name: string; count: number };
 type Home = {
   /* legal_on (O2-01a): el arranque del HTML no trae los textos legales, solo si existen; el texto llega con /store */
-  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean; legal_on?: { privacy?: boolean; terms?: boolean } };
+  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean; legal_on?: { privacy?: boolean; terms?: boolean }; theme?: Theme | null };
   nav: { slug: string; title: string }[];
   categories: Cat[];
   product_count?: number;
@@ -287,7 +288,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
   return (
     <StoreProvider value={ctx}>
-    <div className="shop">{/* la familia de toda la tienda vive en un solo token: --font (shop.css, O2-04) */}
+    <div className="shop" style={themeVars(S.theme)}>{/* la familia de toda la tienda vive en un solo token: --font (shop.css, O2-04); O4-06: el tema de Mi Tienda -> Apariencia, {} con el de hoy */}
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
       {/* O1-10c: en el checkout la cabecera se reduce a logo, «Pago seguro» y «Volver a la tienda» (sin buscador ni
           menu: nada que saque a la persona a mitad de la compra) */}
@@ -367,6 +368,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
               <Route index element={<StoreHome />} />
               <Route path="catalogo" element={<CategoryPage key="all" mode="all" />} />
               <Route path="c/:cat" element={<CategoryPage key="cat" mode="category" />} />
+              <Route path="coleccion/:slug" element={<ColeccionPage />} />
               <Route path="buscar" element={<CategoryPage key="search" mode="search" />} />
               <Route path="p/:ref" element={<ProductPage />} />
               <Route path="arma-tu-sistema" element={<KitBuilder />} />

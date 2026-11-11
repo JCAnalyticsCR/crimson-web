@@ -5,7 +5,7 @@
    tienda (featured_source) y cada kit dice que es solo equipo y si su precio es de referencia.
    Cuando el snapshot está disponible, las secciones de categorías, marcas, destacados y novedades se muestran
    al instante (sin esperar /showcase). Los kits, el producto de portada y la info de páginas siguen viniendo de /showcase. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { AvailBadge, Grid, IC, Ico, KitPhotos, PriceTag, ProductCard, Skeleton, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, quitarRetiro, sinRetiro, type KitPhoto, type SeoBlock, type VProd } from "./storeKit";
 import { snapToVProd } from "./catalogFilter";
@@ -26,7 +26,11 @@ type Showcase = {
   hero?: VProd | null;
   product_count: number; currency: string; info: { kind: string; title: string; path: string }[];
   seo?: SeoBlock | null;
+  /** O4-07 (aditivo): secciones visibles en orden, con titulo propio (vacio = el de siempre) */
+  sections?: { key: string; title: string }[];
 };
+/** orden de hoy (el mismo valor por defecto que el API, services/store_showcase.PORTADA_SECTIONS) */
+const ORDEN_PORTADA = ["hero", "sellos", "banners", "kits", "listos", "categorias", "seleccion", "recientes", "marcas", "asesoria"];
 
 const TRUST_IC: Record<string, string> = { shield: IC.shield, tool: IC.tool, truck: IC.truck, doc: IC.doc, chat: IC.chat, clock: IC.clock };
 const isExternal = (u: string) => /^https?:\/\//.test(u);
@@ -129,6 +133,7 @@ function showcaseFromSnap(snap: import("./catalogFilter").Snapshot): Showcase {
     product_count: snap.n,
     currency: snap.currency,
     info: [], // /showcase trae los enlaces de páginas legales
+    sections: snap.showcase.sections, // O4-07
   };
 }
 
@@ -194,8 +199,11 @@ export default function StoreHome() {
   const otras = (d?.categories || []).filter((c) => !mosaico.includes(c));
   const sellos = (d?.trust || []).map((t) => (S.kind === "tienda" && sinRetiro(ctx.shipping) ? { ...t, title: quitarRetiro(t.title), text: quitarRetiro(t.text) } : t)).filter((t) => ctx.trustOk || sinCandado(t));
   const banners = (d?.banners || []).slice(0, 3);
+  const secciones = d?.sections ?? null;
+  const titulo = (k: string, def: string) => secciones?.find((x) => x.key === k)?.title?.trim() || def;
+  const errorBlock = err ? <div className="sh-wrap vt-empty"><b>No pudimos cargar la portada.</b><Link className="sh-btn sh-btn--ghost" to={to("/catalogo")}>Ver el catálogo</Link></div> : null;
 
-  return (
+  const B_hero = (
     <>
       {/* ---------- hero: una promesa, un producto real y un solo llamado (O2-08). Fondo noche liso ---------- */}
       <section className="vt-hero" aria-labelledby="vt-title" data-producto={hero ? "si" : undefined}>
@@ -224,7 +232,10 @@ export default function StoreHome() {
           )}
         </div>
       </section>
-
+    </>
+  );
+  const B_sellos = (
+    <>
       {/* ---------- sellos: icono de linea en tinta y dato concreto; garantia y devoluciones solo con el candado ---------- */}
       {!d && (
         <section className="vt-trust" aria-hidden="true">
@@ -239,8 +250,11 @@ export default function StoreHome() {
         </section>
       )}
 
-      {err && <div className="sh-wrap vt-empty"><b>No pudimos cargar la portada.</b><Link className="sh-btn sh-btn--ghost" to={to("/catalogo")}>Ver el catálogo</Link></div>}
-
+      {errorBlock}
+    </>
+  );
+  const B_banners = (
+    <>
       {/* ---------- banners administrables: la rejilla se adapta a la cantidad; solo el primero carga de inmediato ---------- */}
       {banners.length > 0 && (
         <section className="sh-wrap vt-banners" aria-label="Destacados" data-n={banners.length}>
@@ -258,7 +272,10 @@ export default function StoreHome() {
           })}
         </section>
       )}
-
+    </>
+  );
+  const B_kits = (
+    <>
       {/* ---------- kits: los productos estrella. 1 a ancho completo, 2 en dos columnas, 3 o más en riel. Mientras
            carga, el espacio queda reservado: lo de abajo no salta. ---------- */}
       {!llego && !err && (
@@ -273,7 +290,7 @@ export default function StoreHome() {
         <section className="vt-kits" aria-labelledby="vt-kits">
           <div className="sh-wrap">
             <div className="vt-sec__head vt-sec__head--dark">
-              <div><span className="sh-eyebrow">Kits listos para instalar</span><h2 id="vt-kits">Sistemas completos, armados por necesidad</h2></div>
+              <div><span className="sh-eyebrow">Kits listos para instalar</span><h2 id="vt-kits">{titulo("kits", "Sistemas completos, armados por necesidad")}</h2></div>
               <Link to={to("/arma-tu-sistema")} className="vt-more">Armar el mío</Link>
             </div>
             <ul className="vt-kits__list" data-n={Math.min(d.kits.length, 3)}>
@@ -303,20 +320,26 @@ export default function StoreHome() {
           </div>
         </section>
       )}
-
+    </>
+  );
+  const B_listos = (
+    <>
       {/* ---------- listos para entrega: solo existencia propia y solo con 4 o más ---------- */}
       {listos.length > 0 && (
         <section className="sh-wrap vt-sec" aria-labelledby="vt-ready">
-          <div className="vt-sec__head"><div><h2 id="vt-ready">Listos para entrega</h2></div><Link to={to("/catalogo?disp=inmediata")} className="vt-more">Ver todo en bodega</Link></div>
+          <div className="vt-sec__head"><div><h2 id="vt-ready">{titulo("listos", "Listos para entrega")}</h2></div><Link to={to("/catalogo?disp=inmediata")} className="vt-more">Ver todo en bodega</Link></div>
           <ul className="vt-grid vt-grid--rail">
             {listos.map((p) => <li key={p.id}><ProductCard p={p} avail={avail[p.id]} badge={enBodega(avail[p.id] || p.availability)} /></li>)}
           </ul>
         </section>
       )}
-
+    </>
+  );
+  const B_categorias = (
+    <>
       {/* ---------- categorias: las principales como mosaico con su foto; las chicas en una linea ---------- */}
       <section className="sh-wrap vt-sec" aria-labelledby="vt-cats">
-        <div className="vt-sec__head"><div><h2 id="vt-cats">Comprá por categoría</h2></div><Link to={to("/catalogo")} className="vt-more">Ver todo</Link></div>
+        <div className="vt-sec__head"><div><h2 id="vt-cats">{titulo("categorias", "Comprá por categoría")}</h2></div><Link to={to("/catalogo")} className="vt-more">Ver todo</Link></div>
         <ul className="vt-cats" aria-busy={!d}>
           {!d ? Array.from({ length: 4 }, (_, i) => <li key={i}><div className="vt-cat vt-cat--skel"><span className="vt-cat__ico sh-skel" /><span className="vt-cat__txt"><span className="sh-skel" style={{ height: 16, width: "70%" }} /><span className="sh-skel" style={{ height: 10, width: "45%" }} /></span></div></li>) : (mosaico.length ? mosaico : (d.categories || []).slice(0, 4)).map((c) => (
             <li key={c.id}>
@@ -331,43 +354,55 @@ export default function StoreHome() {
           <p className="vt-morecats"><span>Más categorías:</span> {otras.map((c, i) => <span key={c.id}>{i > 0 && " · "}<Link to={to(c.path)}>{c.name}</Link></span>)}</p>
         )}
       </section>
-
+    </>
+  );
+  const B_seleccion = (
+    <>
       {/* ---------- destacados (O1-04 a): el titulo dice quien los eligio. Sin nada comprable, la seccion no sale ---------- */}
       {(!d || d.featured.length > 0) && (
         <section className="sh-wrap vt-sec" aria-labelledby="vt-feat">
           <div className="vt-sec__head">
-            {!d ? <div><h2 id="vt-feat">Destacados</h2></div>
-              : d.featured_source === "manual" ? <div><span className="sh-eyebrow">Elegidos por nuestro equipo</span><h2 id="vt-feat">Selección {S.name}</h2></div>
-                : <div><h2 id="vt-feat">Del catálogo</h2></div>}
+            {!d ? <div><h2 id="vt-feat">{titulo("seleccion", "Destacados")}</h2></div>
+              : d.featured_source === "manual" ? <div><span className="sh-eyebrow">Elegidos por nuestro equipo</span><h2 id="vt-feat">{titulo("seleccion", `Selección ${S.name}`)}</h2></div>
+                : <div><h2 id="vt-feat">{titulo("seleccion", "Del catálogo")}</h2></div>}
             <Link to={to("/catalogo")} className="vt-more">Ver todo</Link>
           </div>
           {d ? <Grid items={d.featured} avail={avail} rail /> : <Skeleton n={4} rail />}
         </section>
       )}
-
+    </>
+  );
+  const B_recientes = (
+    <>
       {/* ---------- novedades ---------- */}
       {d && d.fresh.length > 0 && (
         <section className="sh-wrap vt-sec" aria-labelledby="vt-new">
-          <div className="vt-sec__head"><div><h2 id="vt-new">Recién agregados al catálogo</h2></div><Link to={to("/catalogo?orden=recent")} className="vt-more">Ver más</Link></div>
+          <div className="vt-sec__head"><div><h2 id="vt-new">{titulo("recientes", "Recién agregados al catálogo")}</h2></div><Link to={to("/catalogo?orden=recent")} className="vt-more">Ver más</Link></div>
           <Grid items={d.fresh} avail={avail} rail />
         </section>
       )}
-
+    </>
+  );
+  const B_marcas = (
+    <>
       {/* ---------- marcas, como texto ---------- */}
       {d && d.brands.length > 0 && (
         <section className="sh-wrap vt-sec" aria-labelledby="vt-brands">
-          <div className="vt-sec__head"><h2 id="vt-brands">Marcas</h2></div>
+          <div className="vt-sec__head"><h2 id="vt-brands">{titulo("marcas", "Marcas")}</h2></div>
           <ul className="vt-brands">
             {d.brands.map((b) => <li key={b.name}><Link to={to(`/catalogo?marca=${encodeURIComponent(b.name)}`)}>{b.name}</Link></li>)}
           </ul>
         </section>
       )}
-
+    </>
+  );
+  const B_asesoria = (
+    <>
       {/* ---------- una sola banda de asesoria ---------- */}
       <section className="sh-wrap vt-sec">
         <div className="vt-advice">
           <div>
-            <h2>¿Proyecto grande o a la medida?</h2>
+            <h2>{titulo("asesoria", "¿Proyecto grande o a la medida?")}</h2>
             <p>Condominios, bodegas, oficinas, control de acceso o redes completas: un asesor de Crimson visita, mide y te entrega una propuesta sin costo.</p>
           </div>
           <div className="vt-advice__cta">
@@ -376,6 +411,18 @@ export default function StoreHome() {
           </div>
         </div>
       </section>
+    </>
+  );
+  /* O4-07: secciones de la portada en el orden de Mi Tienda -> Portada (`sections` de /showcase o del snapshot: solo las
+     visibles, con su titulo propio). Sin `sections` (API viejo) o sin cambios del dueno, el orden de siempre. */
+  const bloques: Record<string, ReactNode> = { hero: B_hero, sellos: B_sellos, banners: B_banners, kits: B_kits, listos: B_listos, categorias: B_categorias, seleccion: B_seleccion, recientes: B_recientes, marcas: B_marcas, asesoria: B_asesoria };
+  const orden = secciones && secciones.length ? secciones.map((x) => x.key).filter((k) => k in bloques) : [...ORDEN_PORTADA];
+  if (!orden.includes("sellos") && err) orden.splice(1, 0, "error");
+  bloques.error = errorBlock;
+
+  return (
+    <>
+      {orden.map((k) => <Fragment key={k}>{bloques[k]}</Fragment>)}
     </>
   );
 }

@@ -1,21 +1,24 @@
 /* O4-06: el tema elegido en Apariencia se vuelve variables CSS de .shop; sin tema, nada cambia; el acento con poco
    contraste con texto blanco se detecta antes de guardar. */
 import { describe, expect, it } from "vitest";
-import { accentOk, contrast, themeVars } from "../theme";
+import { THEME_DEFAULT, accentOk, contrast, themeVars } from "../theme";
 
 describe("tema de la tienda", () => {
-  it("sin tema la tienda queda como hoy", () => {
+  it("sin tema, o con el tema por defecto, la tienda queda como hoy", () => {
     expect(themeVars(undefined)).toEqual({});
     expect(themeVars(null)).toEqual({});
+    expect(themeVars(THEME_DEFAULT)).toEqual({});
+    expect(themeVars({ preset: "clasico", accent: "#E2233A", radius: 8, background: "crema" })).toEqual({});
   });
 
   it("acento, radio y fondo se vuelven variables de .shop", () => {
     const v = themeVars({ accent: "#1d4ed8", radius: 10, background: "blanco" });
     expect(v["--crimson"]).toBe("#1d4ed8");
-    expect(v["--crimson-soft"]).toBe("rgba(29, 78, 216, .10)");
-    expect(v["--r"]).toBe("10px");
-    expect(v["--bg"]).toBe("#ffffff");
-    expect(v["--serif"]).toBeUndefined();  // Archivo solo con el tema Crimson aprobado
+    expect(v["--crimson-press"]).toMatch(/^#[0-9a-f]{6}$/);
+    expect(v["--r-1"]).toBe("10px");
+    expect(v["--r-2"]).toBe("18px");
+    expect(v["--paper"]).toBe("#ffffff");
+    expect(v["--font"]).toBeUndefined();  // Archivo solo con el tema Crimson aprobado
   });
 
   it("valores fuera de rango no se aplican", () => {

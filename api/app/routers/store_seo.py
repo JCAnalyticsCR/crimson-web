@@ -263,6 +263,28 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
                 ],
             },
         }
+    if head == "coleccion" and len(parts) > 1:
+        # O4-07: coleccion por regla. Un solo JSON-LD (el del servidor), como la categoria
+        col = sv.active_collection(cfg, parts[1])
+        if not col:
+            return meta | {"title": f"Colección no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
+        url = f"{base}/coleccion/{col['slug']}"
+        desc = (col.get("text") or "").strip() or f"{col['title']} en {name}: precios con IVA, disponibilidad real y envío a todo Costa Rica."
+        return meta | {
+            "title": f"{col['title']} · {name}",
+            "description": desc,
+            "canonical": url,
+            "image": brand_img,
+            "image_alt": name,
+            "ld": {
+                "@context": "https://schema.org",
+                "@graph": [
+                    {"@type": "CollectionPage", "name": col["title"], "url": url, "isPartOf": {"@type": "WebSite", "url": base + "/"}},
+                    sv.breadcrumb_ld(base, [("Tienda", "/"), (col["title"], f"/coleccion/{col['slug']}")]),
+                    org,
+                ],
+            },
+        }
     simple = {
         "catalogo": ("Catálogo completo", "Todos los productos: cámaras, grabadores, redes, control de acceso, UPS y herramientas, con precio e IVA incluido."),
         "arma-tu-sistema": (
@@ -587,6 +609,8 @@ def _sitemap(db: Session, t: Tenant, base: str) -> str:
 
     urls: list[tuple[str, str | None]] = [(base + "/", None), (base + "/catalogo", None), (base + "/arma-tu-sistema", None), (base + "/asesoria", None)]
     urls += [(f"{base}/c/{slug}", None) for slug in dict.fromkeys(cats(snap.get("categories") or []))]
+    # O4-07: colecciones por regla activas (Mi Tienda -> Categorias), cada una con su pagina /coleccion/<slug>
+    urls += [(f"{base}/coleccion/{c['slug']}", None) for c in sv.showcase_cfg(store_cfg(t)).get("collections") or [] if c.get("active", True)]
     legal = store_cfg(t).get("legal") or {}
     for k in sv.INFO_KINDS:
         if (k == "terminos" and not legal.get("terms")) or (k == "privacidad" and not legal.get("privacy")):
@@ -618,6 +642,8 @@ def seo_exists(
         pid = sv.product_id_from_ref(parts[1])
         p = db.get(Product, pid) if pid else None
         ok = bool(p and p.tenant_id == t.id and p.show_on_web and p.active)
+    elif len(parts) >= 2 and parts[0] == "coleccion":
+        ok = sv.active_collection(store_cfg(t), parts[1]) is not None  # O4-07
     elif len(parts) >= 2 and parts[0] == "c":
         cats = _categories(db, t.id)
         cid, alias = category_paths.resolve(db, t.id, cats, parts[1])

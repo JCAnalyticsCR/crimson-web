@@ -14,9 +14,9 @@ export type Seccion = { key: string; visible: boolean; title: string };
 type Portada = { headline: string; subline: string; banners: Banner[]; trust: Trust[]; sections: Seccion[] };
 /* O4-07: nombres de las secciones de la portada (mismo orden por defecto que el API, services/store_showcase) */
 const SECCIONES: Record<string, string> = {
-  hero: "Portada principal", sellos: "Sellos de confianza", banners: "Banners", kits: "Kits por necesidad", categorias: "Categorías",
-  seleccion: "Selección (destacados)", configurador: "Armá tu sistema", recientes: "Recién agregados", marcas: "Marcas", asesoria: "Asesoría",
-  listos: "Listos para entregar", coleccion: "Colección",
+  hero: "Portada principal", sellos: "Sellos de confianza", banners: "Banners", kits: "Kits por necesidad", listos: "Listos para entrega",
+  categorias: "Categorías", seleccion: "Selección (destacados)", recientes: "Recién agregados", marcas: "Marcas", asesoria: "Asesoría",
+  coleccion: "Colección",
 };
 export const PORTADA_LABELS: Record<string, string> = { headline: "Titular", subline: "Bajada", banners: "Banners", trust: "Sellos", sections: "Secciones de la portada" };
 const ICONOS: [string, string][] = [["shield", "Escudo"], ["tool", "Herramienta"], ["truck", "Camión"], ["doc", "Documento"], ["chat", "Conversación"], ["clock", "Reloj"]];

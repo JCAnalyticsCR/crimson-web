@@ -128,20 +128,20 @@ ENVIRONMENTS = {"casa": "Casa", "negocio": "Negocio", "condominio": "Condominio"
 TIMELINES = {"inmediato": "Inmediato", "semanas": "Próximas semanas", "evaluacion": "En evaluación", "futuro": "A futuro"}
 
 
-# O4-07: secciones de la portada en el orden de hoy (StoreHome.tsx). Sin tocar nada, la portada es identica: las que hoy
-# no existen («Listos para entregar» y «Colección») nacen ocultas.
+# O4-07: secciones de la portada en el orden de hoy (StoreHome.tsx, Ola 2). Sin tocar nada, la portada es identica: la
+# que hoy no existe («Colección») nace oculta. Cada seccion sigue con sus propias reglas (p. ej. «Listos para entrega»
+# solo sale con 4 o mas en bodega).
 PORTADA_SECTIONS: list[tuple[str, str, bool]] = [
     ("hero", "Portada principal", True),
     ("sellos", "Sellos de confianza", True),
     ("banners", "Banners", True),
     ("kits", "Kits por necesidad", True),
+    ("listos", "Listos para entrega", True),
     ("categorias", "Categorías", True),
     ("seleccion", "Selección", True),
-    ("configurador", "Armá tu sistema", True),
     ("recientes", "Recién agregados", True),
     ("marcas", "Marcas", True),
     ("asesoria", "Asesoría", True),
-    ("listos", "Listos para entregar", False),
     ("coleccion", "Colección", False),
 ]
 SECTION_KEYS = {k for k, _, _ in PORTADA_SECTIONS}
@@ -160,6 +160,11 @@ def portada_sections(saved) -> list[dict]:
         if k not in vistos:
             out.append({"key": k, "visible": vis, "title": ""})
     return out
+
+
+def active_collection(store: dict, slug: str) -> dict | None:
+    """La coleccion activa con esa direccion, o None (404 real)."""
+    return next((c for c in showcase_cfg(store).get("collections") or [] if c.get("slug") == slug and c.get("active", True)), None)
 
 
 def collection_products(items: list[dict], rule: dict, cat_ids: set[int] | None) -> list[dict]:

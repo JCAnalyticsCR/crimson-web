@@ -27,11 +27,10 @@ from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
 from ..services import catalog_fichas as cfichas
 from ..services import catalog_text as ctext
-from ..services import category_paths
+from ..services import category_paths, store_history
 from ..services import family_filters as ff
 from ..services import product_typing as pt
 from ..services import store_ranking as ranking
-from ..services import store_history
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.brands import brand_key, canonical_brand
@@ -1794,8 +1793,7 @@ def collection_public(slug: str, cslug: str, response: Response, db: Session = D
     from ..services import store_snapshot
 
     t = _tenant(db, slug)
-    sc = sv.showcase_cfg(store_cfg(t))
-    col = next((c for c in sc["collections"] if c.get("slug") == cslug and c.get("active", True)), None)
+    col = sv.active_collection(store_cfg(t), cslug)
     if not col:
         raise HTTPException(404, "Colección no encontrada")
     gz, _ver = store_snapshot.get_or_rebuild(db, t.id)
@@ -1815,8 +1813,22 @@ def collection_public(slug: str, cslug: str, response: Response, db: Session = D
         walk(data.get("categories"), False)
         cat_ids.add(rule["category_id"])
     prods = sv.collection_products(data.get("products") or [], rule, cat_ids)
+    # las tarjetas, como el catalogo (la misma de la vitrina): la pagina no necesita el snapshot ni el filtro
+    ids = [int(x["id"]) for x in prods[:96]]
+    full = {p.id: p for p in _load_full(db, ids)}
+    ctx = Ctx(db, t)
+    stock = _stock_map(db, t.id, list(full.values()))
+    cards = [ctx.card(full[i], stock.get(i)) for i in ids if i in full]
     response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=120"
-    return {"slug": col["slug"], "title": col["title"], "text": col.get("text") or "", "n": len(prods), "products": prods[:96], "currency": data.get("currency")}
+    return {
+        "slug": col["slug"],
+        "title": col["title"],
+        "text": col.get("text") or "",
+        "n": len(prods),
+        "products": cards,
+        "currency": data.get("currency"),
+        "seo": _seo(db, t, f"/coleccion/{col['slug']}"),  # un solo JSON-LD: el del servidor (O1-06)
+    }
 
 
 @pub.get("/sitemap.xml")

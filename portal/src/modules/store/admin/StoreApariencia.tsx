@@ -63,7 +63,7 @@ export default function StoreApariencia() {
               <p className={ratio >= 4.5 ? "meta" : "mt-warn"} style={{ textTransform: "none", margin: 0 }} role={ratio >= 4.5 ? undefined : "alert"}>
                 Contraste con texto blanco: {ratio.toLocaleString("es-CR")} a 1 {ratio >= 4.5 ? "(se lee bien)" : "(menos de 4,5: el texto de los botones cuesta leerlo; elija un tono más oscuro)"}
               </p>
-              <Field label="Bordes" hint="Radio de marcos y botones."><select className="select" value={th.radius} onChange={(e) => setTh({ radius: Number(e.target.value) })}>{[[0, "Rectos"], [4, "Apenas redondeados"], [6, "Redondeados (el de hoy)"], [10, "Más redondeados"], [16, "Muy redondeados"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+              <Field label="Bordes" hint="Radio de marcos y botones."><select className="select" value={th.radius} onChange={(e) => setTh({ radius: Number(e.target.value) })}>{[[0, "Rectos"], [4, "Apenas redondeados"], [8, "Redondeados (el de hoy)"], [12, "Más redondeados"], [16, "Muy redondeados"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
               <Field label="Fondo de página"><select className="select" value={th.background} onChange={(e) => setTh({ background: e.target.value as "crema" | "blanco" })}><option value="crema">Crema (el de hoy)</option><option value="blanco">Blanco</option></select></Field>
             </div>
           </Card>
