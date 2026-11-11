@@ -364,6 +364,75 @@ def seo_boot(path: str = "", host: str | None = Query(None, max_length=200), x_s
     return PlainTextResponse(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})
 
 
+def body_html(db: Session, t: Tenant, path: str, pagina: int = 1) -> str:
+    """O2-01b: el cuerpo de la ruta (services/store_ssr.py) si su tipo esta encendido en settings.store.ssr_body; vacio
+    si no. Los datos son los mismos de la vitrina: /showcase en la portada, el snapshot en el catalogo y las categorias,
+    /item en la ficha."""
+    import gzip
+    import json
+
+    from ..services import store_ssr as ssr
+    from ..services.store_snapshot import get_or_rebuild
+
+    cfg = store_cfg(t)
+    tipo = ssr.tipo_de(path)
+    if not tipo or not ssr.flags(cfg)[tipo]:
+        return ""
+    biz = business_of(cfg)
+    parts = [x for x in path.strip("/").split("/") if x]
+    if tipo == "portada":
+        from .store_showcase import showcase_public
+
+        return ssr.portada(cfg, biz, showcase_public(t.slug, Response(), None, db))
+    if tipo == "ficha":
+        from .store_showcase import item
+
+        try:
+            it = item(t.slug, parts[1], Response(), db)
+        except HTTPException:
+            return ""
+        return ssr.ficha(cfg, biz, it)
+    gz, _ = get_or_rebuild(db, t.id)
+    snap = json.loads(gzip.decompress(gz))
+    slug = parts[1] if parts[0] == "c" else None
+    desc, padre = None, None
+    if slug:
+        cats = _categories(db, t.id)
+        slugs = sv.category_slugs(cats)
+        cat = next((c for c in cats if slugs.get(c.id) == slug), None)
+        if cat is None:
+            return ""
+        desc = cat.description
+        up = next((c for c in cats if c.id == cat.parent_id), None)
+        padre = (up.name, f"/c/{slugs[up.id]}") if up and up.id in slugs else None
+    return ssr.categoria(cfg, biz, snap, slug, pagina, desc, padre)
+
+
+@seo.get("/body", response_class=PlainTextResponse)
+@seo.get("/body/{path:path}", response_class=PlainTextResponse)
+def seo_body(
+    path: str = "",
+    host: str | None = Query(None, max_length=200),
+    pagina: str | None = Query(None, max_length=12),
+    x_store_host: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
+    """O2-01b: contenido real de la ruta para el HTML (H1, precios, disponibilidad y enlaces). nginx lo incrusta por SSI
+    dentro del <body> del dominio de la tienda, con tiempo maximo de 3 s; vacio (tipo apagado, otro dominio o error) =
+    la pagina sigue como hoy."""
+    t = _tenant_by_host(db, _host(x_store_host, host))
+    if not t:
+        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
+    try:
+        body = body_html(db, t, "/" + (path or "").strip("/"), pagina_de(pagina))
+    except Exception:  # noqa: BLE001 - el cuerpo del servidor nunca tumba el HTML de la tienda
+        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
+    # vacio (tipo apagado: lo normal hoy) se guarda 5 min en nginx: el HTML de la tienda espera esta subpeticion (include
+    # set=) y asi casi nunca llega al API
+    cc = "public, max-age=60" if body else "public, max-age=300"
+    return PlainTextResponse(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": cc})
+
+
 def store_base(t: Tenant) -> str:
     """https://<dominio de la tienda> (vacio si la tienda no tiene dominio propio)."""
     dom = (store_cfg(t).get("domain") or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")

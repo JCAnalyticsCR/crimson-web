@@ -49,6 +49,9 @@ STORE_DEFAULTS = {
     # O1-17: quien vende. Todo opcional; vacio = no se muestra (nunca una etiqueta vacia). Los datos de cada comercio
     # los llena Mi Tienda -> Datos del comercio (los de Crimson los siembra la migracion tienda_comercio, solo si faltan)
     "business": {},
+    # O2-01b: contenido real en el HTML por tipo de ruta (services/store_ssr.py). Apagado: se enciende uno a la vez,
+    # midiendo CLS y LCP en un celular lento.
+    "ssr_body": {"ficha": False, "categoria": False, "portada": False},
 }
 BUSINESS_FIELDS = ("legal_name", "legal_id", "address", "phone", "email", "hours")
 
@@ -107,6 +110,16 @@ class BusinessIn(BaseModel):
     hours: str = Field("", max_length=120)
 
 
+class SsrBodyIn(BaseModel):
+    """O2-01b: que tipos de ruta llevan su contenido en el HTML (cuerpo por SSI). Apagado por defecto."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ficha: bool = False
+    categoria: bool = False
+    portada: bool = False
+
+
 class StoreIn(BaseModel):
     name: str | None = None
     tagline: str | None = None
@@ -123,6 +136,7 @@ class StoreIn(BaseModel):
     whatsapp: str | None = None
     currency: str | None = None
     business: BusinessIn | None = None
+    ssr_body: SsrBodyIn | None = None
 
     @field_validator("shipping_rates")
     @classmethod

@@ -11,7 +11,8 @@
    Falla si:
    1. ese conjunto trae un modulo del panel (src/app/, otros modulos que no sean la tienda publica, lib/api, la demo);
    2. su peso comprimido (gzip) supera en mas de 5 % la linea base;
-   3. algun archivo del build menciona Google (analitica, Tag Manager o fuentes): la tienda no usa nada de terceros. */
+   3. algun archivo del build menciona Google (analitica, Tag Manager o fuentes): la tienda no usa nada de terceros;
+   4. index.html no enlaza la hoja de la vitrina en el bloque del cuerpo por SSI (O2-01b). */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,6 +83,11 @@ for (const f of [...trozos.map((t) => t.file), "index.html"]) {
   if (existsSync(p) && TERCEROS.test(readFileSync(p, "utf8"))) conTerceros.push(f);
 }
 
+// 4. O2-01b: el bloque del cuerpo por SSI de index.html enlaza la hoja de la vitrina (plugin cssDeLaTienda)
+const indexHtml = existsSync(resolve(DIST, "index.html")) ? readFileSync(resolve(DIST, "index.html"), "utf8") : "";
+const hojaVitrina = vitrina.css.find((c) => indexHtml.includes(`href="/${c}"`));
+const sinHoja = !!indexHtml && (indexHtml.includes("<!--sh-store-css-->") || !hojaVitrina);
+
 if (process.argv.includes("--registrar")) {
   const previo = existsSync(BASE) ? JSON.parse(readFileSync(BASE, "utf8")) : {};
   const base = { ...previo, gzip_bytes: total.gz, bytes: total.crudo, archivos: filas.length, registrado: new Date().toISOString().slice(0, 10) };
@@ -98,6 +104,10 @@ if (intrusos.length) {
 if (conTerceros.length) {
   mal = true;
   console.error(`\nArchivos del build con Google o medicion de terceros (la tienda no usa ninguno): ${conTerceros.join(", ")}`);
+}
+if (sinHoja) {
+  mal = true;
+  console.error("\nindex.html no enlaza la hoja de la vitrina en el bloque del cuerpo por SSI (O2-01b): revisar cssDeLaTienda en vite.tienda.ts.");
 }
 if (existsSync(BASE)) {
   const base = JSON.parse(readFileSync(BASE, "utf8"));

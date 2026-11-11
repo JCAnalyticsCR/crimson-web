@@ -12,6 +12,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { readBoot } from "./boot";
+import { relevoDelServidor } from "./ssrBody";
 
 const PublicStore = lazy(() => import("./PublicStore"));
 
@@ -70,6 +71,8 @@ export default function StoreHost() {
   const [slug, setSlug] = useState<string | null>(() => readBoot()?.slug ?? null);
   const [err, setErr] = useState(false);
   const [intento, setIntento] = useState(0);
+  // O2-01b: si el servidor mando el contenido en el HTML (#sh-ssr), la vitrina lo reemplaza cuando ya pinto lo suyo
+  useEffect(() => relevoDelServidor(), []);
   useEffect(() => {
     if (slug) return;
     // O1-18: un tropiezo de red no deja la tienda en blanco: un reintento automatico a los 2 s y, si vuelve a fallar,

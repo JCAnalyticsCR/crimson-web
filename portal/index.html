@@ -18,6 +18,15 @@
     <!--# endif -->
   </head>
   <body>
+    <!-- Contenido real en el HTML (O2-01b, apagado por defecto: Mi Tienda -> settings.store.ssr_body por tipo de ruta).
+         En el dominio de la tienda nginx pide /public/seo/body (3 s como maximo) y, si trae algo: la hoja de la tienda
+         (el plugin de vite.tienda.ts pone aqui su enlace con hash), el contenido en #sh-ssr y React montando oculto
+         detras, hasta que la vitrina este lista y lo reemplaza (ssrBody.ts). Vacio o con el API caido: como hoy.
+         Sin nginx (vite dev, e2e:compra) este bloque queda como esta: #sh-ssr solo tiene un comentario (:empty) y la
+         regla no oculta nada; el panel y la tienda cargan igual. -->
+    <!--# set var="sh_body" value="" -->
+    <!--# if expr="$is_store" --><!--# include virtual="/__body$seo_path" set="sh_body" wait="yes" --><!--# endif -->
+    <!--# if expr="$sh_body" --><!--sh-store-css--><style>#sh-ssr:not(:empty)~#root{position:absolute;top:0;left:0;right:0;visibility:hidden}</style><div id="sh-ssr"><!--# echo var="sh_body" encoding="none" --></div><!--# endif -->
     <div id="root"></div>
     <!-- Sin JavaScript (O1-06): en el dominio de la tienda, el nombre del comercio y su WhatsApp y telefono reales
          (/public/seo/noscript). En el panel, o sin nginx, no hay nada. -->
