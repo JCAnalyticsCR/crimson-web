@@ -419,7 +419,25 @@ def test_seo_por_dominio_metas_datos_estructurados_sitemap_y_301(client, auth, d
     assert "https://tienda.crimsoncr.com/p/" in sm.text and "https://tienda.crimsoncr.com/c/videovigilancia" in sm.text
     assert "OCULTO".lower() not in sm.text.lower()
     assert client.get("/public/seo/sitemap.xml", headers={"X-Store-Host": "otro.com"}).status_code == 404
-    assert "Sitemap: https://tienda.crimsoncr.com/sitemap.xml" in client.get("/public/seo/robots.txt", headers=H).text
+    robots = client.get("/public/seo/robots.txt", headers=H).text
+    assert "Sitemap: https://tienda.crimsoncr.com/sitemap.xml" in robots
+    # O1-01: el buscador puede cargar los datos y las fotos de la vitrina; el resto del API y los pedidos, no
+    lineas = robots.splitlines()
+    for regla in (
+        "User-agent: *",
+        "Allow: /",
+        "Allow: /api/public/",
+        "Allow: /api/media/f/",
+        "Disallow: /api/",
+        "Disallow: /api/public/store/*/orders/",
+        "Disallow: /buscar",
+        "Disallow: /comparar",
+        "Disallow: /*?pedido=",
+        "Disallow: /*?v=",
+        "Disallow: /*?carrito=",
+    ):
+        assert regla in lineas, regla
+    assert "Disallow: /api/" in lineas and "Allow: /api/public/" in lineas  # gana la mas especifica (Google y Bing)
     assert client.get("/public/seo/robots.txt", headers={"X-Store-Host": "portal.crimsoncr.com"}).text.strip().endswith("Disallow: /")
     assert client.get("/public/store/crimson/sitemap.xml").status_code == 200
 

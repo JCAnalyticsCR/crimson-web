@@ -5,7 +5,7 @@
 #
 # Revisa:
 #   1. portada: 200 y el <title> esperado
-#   2. /robots.txt: 200 y la linea Sitemap
+#   2. /robots.txt: 200, la linea Sitemap y «Allow: /api/public/» (O1-01)
 #   3. /sitemap.xml: 200; cuantas direcciones /p/ trae
 #   4. /api/public/store/<slug>: 200 en JSON y con X-Robots-Tag: noindex (O0-05a)
 #   5. snapshot: su "n" frente a las /p/ del sitemap (mas o menos HUMO_TOLERANCIA); con HUMO_N_ESPERADO, frente a ese
@@ -124,6 +124,9 @@ if [ "$CODE" != 200 ]; then
   falla "robots.txt: estado $CODE"
 elif ! tr -d '\r' <"$tmp/robots.b" | grep -qiE '^Sitemap:[[:space:]]*https?://[^[:space:]]+'; then
   falla "robots.txt: sin la linea Sitemap"
+elif ! tr -d '\r' <"$tmp/robots.b" | grep -qx 'Allow: /api/public/'; then
+  # O1-01: sin esta linea el buscador no puede cargar los datos de la vitrina y ve «Tienda no disponible»
+  falla "robots.txt: sin «Allow: /api/public/» (O1-01)"
 else
   ok "robots.txt 200 · $(tr -d '\r' <"$tmp/robots.b" | grep -iE '^Sitemap:' | head -n 1)"
 fi

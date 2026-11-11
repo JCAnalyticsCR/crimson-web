@@ -283,16 +283,36 @@ def seo_sitemap(host: str | None = Query(None, max_length=200), x_store_host: st
 
 @seo.get("/robots.txt", response_class=PlainTextResponse)
 def seo_robots(host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
-    """Dominio de la tienda: se indexa (menos busqueda y comparador) y anuncia el sitemap. Cualquier otro (el panel):
-    no se indexa nada."""
+    """Dominio de la tienda: se indexa (menos busqueda, comparador y direcciones con parametros de pedido, version o
+    carrito) y anuncia el sitemap. Cualquier otro (el panel): no se indexa nada."""
     h = _host(x_store_host, host)
     t = _tenant_by_host(db, h)
     if not t:
         return PlainTextResponse("User-agent: *\nDisallow: /\n", headers={"Cache-Control": "public, max-age=3600"})
-    return PlainTextResponse(
-        f"User-agent: *\nAllow: /\nDisallow: /buscar\nDisallow: /comparar\nDisallow: /api/\n\nSitemap: {_base(h)}/sitemap.xml\n",
-        headers={"Cache-Control": "public, max-age=3600"},
-    )
+    return PlainTextResponse(robots_txt(_base(h)), headers={"Cache-Control": "public, max-age=3600"})
+
+
+# O1-01: la vitrina pide sus datos a /api/public/ y sus fotos a /api/media/f/. Con «Disallow: /api/» a secas, el
+# buscador que ejecuta JavaScript veia «Tienda no disponible». Gana la regla mas especifica (la mas larga): /api/public/
+# queda abierto, el resto de /api/ cerrado, y los pedidos (datos de una compra) cerrados aunque esten bajo /api/public/.
+# El JSON igual nunca se indexa: nginx le pone X-Robots-Tag noindex (O0-05a).
+ROBOTS_RULES = (
+    "Allow: /",
+    "Allow: /api/public/",
+    "Allow: /api/media/f/",
+    "Disallow: /api/",
+    "Disallow: /api/public/store/*/orders/",
+    "Disallow: /buscar",
+    "Disallow: /comparar",
+    "Disallow: /*?pedido=",
+    "Disallow: /*?v=",
+    "Disallow: /*?carrito=",
+)
+
+
+def robots_txt(base: str) -> str:
+    """robots.txt del dominio de la tienda: una regla por linea y el sitemap al final."""
+    return "User-agent: *\n" + "\n".join(ROBOTS_RULES) + f"\n\nSitemap: {base}/sitemap.xml\n"
 
 
 @seo.get("/legacy")
