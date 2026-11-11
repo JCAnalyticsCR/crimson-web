@@ -23,6 +23,8 @@ export type SnapProduct = {
   availability: SnapAvail; sf: string;
   /** precio anterior tachado (O1-13): solo viaja con historial propio que lo respalde; casi siempre falta */
   compare_display_price?: number | null;
+  /** O2-06 (aditivo): datos clave de la tarjeta; un snapshot viejo no los trae */
+  ks?: string[];
 };
 
 export type SnapCategory = {
@@ -404,6 +406,8 @@ export function snapToVProd(p: SnapProduct, currency: string, cats: SnapCategory
     variants: [],
     price: p.display_price,
     currency,
+    ks: p.ks ?? null,
+    created_ts: p.created_ts || null,
   };
 }
 

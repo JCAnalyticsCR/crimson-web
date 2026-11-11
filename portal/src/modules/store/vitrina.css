@@ -82,55 +82,64 @@
 .vt-avail[data-s="consultar"]::before { background: var(--text-3); box-shadow: none; }
 .vt-avail[data-s="consultar"], .vt-avail[data-s="bajo_pedido"] { color: var(--text-2); }
 
-/* ---------- tarjeta ---------- */
-.vt-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 16px; }
+/* ---------- tarjeta (O2-06): seis elementos y cero adornos ---------- */
+/* rejilla: 2 columnas en celular (tambien a 320 px), 3 en tableta y 4 desde 1180 px */
+.vt-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .vt-grid > li { display: flex; min-width: 0; }
-@media (max-width: 767px) { .vt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
-/* catalogo: columnas fijas (24 por pagina = 6 filas de 4, 8 de 3, 12 de 2: nunca queda una fila coja) */
-@media (min-width: 768px) { .vt-catalog .vt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (min-width: 1180px) { .vt-catalog .vt-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-/* riel: portada y relacionados. Movil y tableta deslizan de lado (scroll nativo con snap, el pulgar manda);
-   escritorio: grilla de 4 (8 productos = 2 filas parejas) */
+@media (min-width: 768px) { .vt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
+@media (min-width: 1180px) { .vt-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; } }
+/* riel: portada y relacionados. Celular y tableta deslizan de lado (scroll nativo con snap); escritorio, 4 */
 @media (max-width: 899px) {
-  .vt-grid--rail { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: min(41vw, 236px); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--pad); margin-inline: calc(var(--pad) * -1); padding: 2px var(--pad) 10px; scrollbar-width: none; }
+  .vt-grid--rail { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: min(44vw, 236px); overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--pad); margin-inline: calc(var(--pad) * -1); padding: 2px var(--pad) 10px; scrollbar-width: none; }
   .vt-grid--rail::-webkit-scrollbar { display: none; }
   .vt-grid--rail > li { scroll-snap-align: start; }
 }
 @media (min-width: 900px) { .vt-grid--rail { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; } }
-.vt-card { position: relative; display: flex; flex-direction: column; width: 100%; min-width: 0; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-2); overflow: hidden; transition: border-color var(--dur-micro), box-shadow var(--dur-micro), transform var(--dur-micro) var(--ease-button); }
-.vt-card__media { display: block; padding: 8px 8px 0; }
-.vt-card__media .vt-vf { aspect-ratio: 1; border-radius: var(--r-1); }
-.vt-card__media .vt-vf > img { padding: 10%; transition: transform var(--dur-drawer) var(--ease-enter); }
-.vt-card__body { padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
-.vt-card__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-0); }
-.vt-card__name { font-weight: 700; font-size: var(--fs-1); line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em; overflow-wrap: anywhere; }
-.vt-card__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--vt-line); }
+.vt-card { position: relative; display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0; padding: 8px 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2); transition: border-color var(--dur-micro), box-shadow var(--dur-micro); }
+/* 1. foto y nombre en un solo enlace */
+.vt-card__link { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: inherit; border-radius: var(--r-1); }
+.vt-card__media { position: relative; display: grid; place-items: center; aspect-ratio: 1; border-radius: var(--r-1); background: var(--tile); overflow: hidden; }
+.vt-card__media img { width: 100%; height: 100%; object-fit: contain; padding: 10%; mix-blend-mode: multiply; }
+.vt-card__badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--surface); color: var(--ink); font-size: var(--fs-0); font-weight: 700; line-height: 1.6; }
+/* 2. marca */
+.vt-card__meta { padding-inline: 4px; font-size: var(--fs-0); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 3. nombre en dos lineas */
+.vt-card__name { padding-inline: 4px; font-weight: 700; font-size: var(--fs-2); line-height: 1.35; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em; overflow-wrap: anywhere; }
+/* 4. datos clave: la linea completa desde 521 px; en celular, solo el primero (el que distingue a la familia) */
+.vt-card__ks { margin: 0; padding-inline: 4px; font-size: var(--fs-0); line-height: 1.4; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .vt-card__ks-more { display: none; } }
+/* 5. precio, «IVA incluido» y disponibilidad (con texto, no solo el punto) · 6. accion */
+.vt-card__foot { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 8px; margin-top: auto; padding: 8px 4px 0; border-top: 1px solid var(--line); }
+/* precio e IVA a la izquierda, la accion a la derecha y la disponibilidad debajo, a todo el ancho */
+.vt-card__buy { display: contents; }
+.vt-card__foot > .vt-card__buy > .vt-price { grid-column: 1; grid-row: 1; }
+.vt-card__foot > .vt-card__buy > .vt-avail { grid-column: 1 / -1; grid-row: 2; }
+.vt-card__foot > .vt-add { grid-column: 2; grid-row: 1; }
+.vt-card .vt-price b { font-size: var(--fs-4); }
+@media (max-width: 520px) { .vt-card .vt-price b { font-size: var(--fs-3); } }
 .vt-add { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--ink); color: #fff; display: grid; place-items: center; cursor: pointer; flex: none; transition: background var(--dur-micro), transform var(--dur-micro) var(--ease-button); }
 .vt-add:active { transform: scale(.92); }
 .vt-add[data-done="true"] { background: var(--ok); }
-.vt-add--ask { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--hair-2); }
-.vt-cmp { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: var(--fs-0); color: var(--text-3); cursor: pointer; align-self: flex-start; }
-.vt-cmp input { width: 16px; height: 16px; accent-color: var(--ink); margin: 0; }
+/* «Consultar»: boton de texto; en celular a todo el ancho de la tarjeta */
+.shop .vt-add.vt-add--pill { width: auto; min-width: 44px; height: 44px; padding: 0 14px; border-radius: var(--r-pill); display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line-2); font-weight: 700; font-size: var(--fs-1); white-space: nowrap; }
+@media (max-width: 767px) { .vt-card__foot > .vt-add--pill { grid-column: 1 / -1; grid-row: 3; justify-content: center; } }
+/* comparar: fuera de la tarjeta en celular y tableta; en escritorio aparece con el puntero o el foco */
+.vt-cmp { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-inline: 4px; font-size: var(--fs-1); color: var(--text-2); cursor: pointer; align-self: flex-start; }
+.vt-cmp input { width: 18px; height: 18px; accent-color: var(--ink); margin: 0; }
 .vt-cmp:has(input:checked) { color: var(--ink); font-weight: 700; }
 .vt-cmp:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+@media (max-width: 1023px) { .vt-card .vt-cmp { display: none; } }
+@media (min-width: 1024px) and (hover: hover) { .vt-card .vt-cmp { opacity: 0; } .vt-card:hover .vt-cmp, .vt-card:focus-within .vt-cmp, .vt-card .vt-cmp:has(input:checked) { opacity: 1; } }
 .vt-card--skel { pointer-events: none; }
-.vt-card--skel .vt-card__body > .sh-skel { display: block; }
-/* hover solo con puntero real y sin "reducir movimiento": la tarjeta sube 2px hacia la persona */
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .vt-card:hover { border-color: var(--hair-2); box-shadow: var(--e-1); transform: translateY(-2px); }
-  .vt-card:hover .vt-card__media img { transform: scale(1.04); }
-  .vt-card:hover .vt-vf__corners { inset: 5px; opacity: .75; }
+/* al pasar el puntero solo cambian el borde y la sombra: nada se mueve */
+@media (hover: hover) {
+  .vt-card:hover { border-color: var(--line-2); box-shadow: var(--e-1); }
   .vt-add:hover { background: #2e2933; }
-  .vt-add--ask:hover { background: var(--ink); color: #fff; box-shadow: none; }
+  .shop .vt-add.vt-add--pill:hover { background: var(--ink); color: #fff; box-shadow: none; }
+  .vt-card__link:hover .vt-card__name { text-decoration: underline; text-underline-offset: 3px; }
 }
-@media (hover: hover) and (prefers-reduced-motion: reduce) { .vt-card:hover { border-color: var(--ink); } }
-@media (max-width: 520px) {
-  .vt-card__media { padding: 6px 6px 0; }
-  .vt-card__body { padding: 10px 10px 6px; }
-  .vt-card__name { font-size: var(--fs-1); }
-  .vt-price b { font-size: var(--fs-3); }
-  .vt-vf__hud { display: none; }
-}
+/* el marco de visor (esquinas y rotulo CAM) ya no se pinta en la tienda; la clase queda por la demo */
+.shop .vt-vf__corners, .shop .vt-vf__hud { display: none; }
 
 /* ---------- migas, vacio ---------- */
 .vt-crumbs ol { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; padding: 8px 0 0; font-size: var(--fs-1); color: var(--text-2); }
@@ -454,13 +463,13 @@
 .vt-acc__head span { font-size: var(--fs-1); color: var(--text-2); }
 .vt-acc__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 10px; }
 .vt-acc__list > li { display: flex; min-width: 0; }
-.vt-acc__list .vt-card { flex-direction: row; align-items: stretch; }
-.vt-acc__list .vt-card__media { flex: none; width: 104px; padding: 8px 0 8px 8px; }
-.vt-acc__list .vt-card__body { padding: 10px 12px; gap: 4px; }
+/* accesorios: la tarjeta en fila (foto chica a la izquierda), se lee como lista de compras */
+.vt-acc__list .vt-card__link { display: grid; grid-template-columns: 72px minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 10px; row-gap: 2px; align-items: start; }
+.vt-acc__list .vt-card__media { grid-row: span 2; }
 .vt-acc__list .vt-card__name { font-size: var(--fs-1); min-height: 0; }
 .vt-acc__list .vt-card__foot { border-top: 0; padding-top: 4px; }
 .vt-acc__list .vt-price b { font-size: var(--fs-2); }
-.vt-acc__list .vt-price small, .vt-acc__list .vt-cmp, .vt-acc__list .vt-avail, .vt-acc__list .vt-vf__hud { display: none; }
+.vt-acc__list .vt-price small, .vt-acc__list .vt-cmp, .vt-acc__list .vt-avail, .vt-acc__list .vt-card__ks { display: none; }
 .vt-acc__list .vt-add { width: 44px; height: 44px; }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) { .vt-acc__list .vt-card:hover { transform: none; } }
 /* barra fija de compra (movil) */

@@ -16,6 +16,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, selectinload
 
@@ -618,6 +619,10 @@ class Ctx:
                 "availability": _avail(own),
             }
         )
+        # O2-06 (aditivo): datos clave de la tarjeta, solo si el producto vino completo (los livianos no los calculan:
+        # leerian la descripcion y las specs una por una)
+        if not ({"specs", "description_invoice"} & sa_inspect(p).unloaded):
+            out["ks"] = sv.key_specs(p)
         if not full:
             out["images"] = out["images"][:2]
         return out

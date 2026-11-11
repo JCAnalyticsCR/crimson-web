@@ -15,7 +15,7 @@
    retrasoItem = ms de espera de /item (O1-03: el desglose no se pinta con datos a medias);
    fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda);
    comercio = datos del comercio, titulares del pago y plazo de la reserva en la portada y el checkout (O1-17). */
-import { Catalog, productPath, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
+import { Catalog, deriveSpecs, productPath, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
 import { installMockApi } from "../../src/demo/mockApi";
 import type { SnapProduct } from "../../src/modules/store/catalogFilter";
 import { CATALOGO, COMERCIO_E2E, DISPONIBILIDAD } from "./datos";
@@ -41,6 +41,17 @@ const ETAG = '"e2e-1"';
 /** nombre + marca + modelo en minusculas y sin tildes (store_snapshot._sf) */
 const sf = (p: RawProduct) => [p.name, p.brand].filter(Boolean).join(" ").normalize("NFD").replace(/[^\x00-\x7f]/g, "").toLowerCase();
 
+/** datos clave de la tarjeta, como api sv.key_specs (O2-06): el primero es el que distingue a la familia */
+function datosClave(p: RawProduct): string[] {
+  const d = deriveSpecs(p);
+  const t = d["Tipo"] || "";
+  const de = (...k: string[]) => k.map((x) => d[x]).filter(Boolean);
+  if (t.startsWith("Cámara")) return de("Resolución", "Formato", "Visión nocturna").slice(0, 4);
+  if (t.startsWith("Grabador")) return d["Canales"] ? [`${d["Canales"]} canales`] : [];
+  if (t.startsWith("Switch")) return d["Puertos"] ? [`${d["Puertos"]} puertos`] : [];
+  return de("Capacidad");
+}
+
 function snapshot() {
   const c = new Catalog(CATALOGO);
   const prods = c.prods;
@@ -49,6 +60,7 @@ function snapshot() {
     display_price: c.gross(p), web_featured: false, image: p.images[0] || null, type: c.displayType(p) || null,
     created_ts: 1_760_000_000 + Number(p.mod) * 86_400 + i, // mas nuevo = `mod` mas alto, como el orden «Novedades» del mock
     availability: dispo(p.id),
+    ks: datosClave(p),
     sf: sf(p),
   }));
   const cuenta = (key: (p: RawProduct) => string | null) => {

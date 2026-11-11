@@ -37,6 +37,10 @@ export type VProd = {
   description: string | null; category: string | null; category_id: number | null; category_path?: string | null; path: string; type?: string;
   tax_rate: number; item_type: string; display_price: string | number; display_currency: string; compare_display_price?: string | number | null;
   price_on_request?: boolean; availability: Avail; variants: Variant[]; price: string | number; currency: string;
+  /** O2-06 (aditivo): datos clave de la tarjeta (api sv.key_specs); el primero distingue a la familia */
+  ks?: string[] | null;
+  /** fecha de alta (unix, segundos): «Nuevo» en la tarjeta hasta 30 dias */
+  created_ts?: number | null;
 };
 /** Datos del comercio (O1-17, Mi Tienda -> Datos del comercio). Todo opcional: vacio = no se muestra. */
 export type Business = { legal_name?: string; legal_id?: string; address?: string; phone?: string; email?: string; hours?: string };
@@ -336,8 +340,15 @@ export function Viewfinder({ children, label, right, live = false, className = "
   );
 }
 
-// ---------- tarjeta de producto ----------
-export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: Avail; n?: number; eager?: boolean }) {
+// ---------- tarjeta de producto (O2-06: seis elementos y cero adornos) ----------
+const NUEVO_DIAS = 30;
+/** una sola insignia y solo con dato real: «Nuevo» (alta de 30 dias o menos); la fila «Listos para entrega» pasa la suya */
+function cardBadge(p: VProd): string | null {
+  if (p.created_ts && Date.now() / 1000 - p.created_ts <= NUEVO_DIAS * 86_400) return "Nuevo";
+  return null;
+}
+/** 1 foto y nombre en un solo enlace · 2 marca · 3 nombre · 4 datos clave · 5 precio, IVA y disponibilidad · 6 accion */
+export function ProductCard({ p, avail, eager = false, badge }: { p: VProd; avail?: Avail; n?: number; eager?: boolean; badge?: string | null }) {
   const ctx = useStore();
   const to = usePath();
   const [done, setDone] = useState(false);
@@ -347,6 +358,8 @@ export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: 
   const ask = p.price_on_request || !Number(p.display_price);
   const noBuy = ctx.isShop && cannotBuy(a); // en la tienda: lo que no se puede comprar en linea se consulta por WhatsApp
   const inCompare = ctx.compare.includes(p.id);
+  const tag = badge === undefined ? cardBadge(p) : badge;
+  const ks = (p.ks || []).filter(Boolean);
   const add = () => {
     if (p.variants?.length) return; // con opciones hay que elegir en la ficha (el enlace lo resuelve)
     ctx.addToCart(p, 1);
@@ -356,36 +369,40 @@ export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: 
   };
   return (
     <article className="vt-card">
-      <Link to={to(p.path)} className="vt-card__media" aria-label={p.name} tabIndex={-1}>
-        <Viewfinder label={n ? `CAM ${String(n).padStart(2, "0")}` : undefined}>
-          {p.image ? <img src={p.image} alt="" loading={eager ? "eager" : "lazy"} decoding="async" width={400} height={400} sizes="(max-width: 520px) 50vw, 260px" /> : <span className="sh-noimg">Sin foto</span>}
-        </Viewfinder>
+      {/* un solo enlace para foto y nombre: la foto va sin texto alternativo y el lector dice el nombre una vez */}
+      <Link to={to(p.path)} className="vt-card__link">
+        <span className="vt-card__media">
+          {p.image ? <img src={p.image} alt="" loading={eager ? "eager" : "lazy"} decoding="async" width={400} height={400} sizes="(max-width: 767px) 50vw, 280px" /> : <span className="sh-noimg">Sin foto</span>}
+          {tag && <span className="vt-card__badge">{tag}</span>}
+        </span>
+        {p.brand && <span className="vt-card__meta">{p.brand}</span>}
+        <span className="vt-card__name">{p.name}</span>
       </Link>
-      <div className="vt-card__body">
-        <span className="sh-meta vt-card__meta">{[p.brand, p.category || p.type].filter(Boolean).join(" · ") || " "}</span>
-        <Link to={to(p.path)} className="vt-card__name">{p.name}</Link>
-        <AvailBadge a={a} compact />
-        <div className="vt-card__foot">
+      {ks.length > 0 && <p className="vt-card__ks">{ks.map((k, i) => <span key={k} className={i ? "vt-card__ks-more" : undefined}>{i ? ` · ${k}` : k}</span>)}</p>}
+      <div className="vt-card__foot">
+        <div className="vt-card__buy">
           <PriceTag p={p} />
-          {ask ? (
-            <Link className="vt-add vt-add--ask" to={to(p.path)} aria-label={`Consultar precio de ${p.name}`}><Ico d={IC.chat} /></Link>
-          ) : noBuy ? (
-            assistAction(a, ctx.store.whatsapp) === "whatsapp"
-              ? <a className="vt-add vt-add--ask vt-add--pill" href={waLink(ctx.store.whatsapp, a?.state === "agotado" ? `Hola, ¿cuándo vuelven a tener ${p.name}${p.code ? ` (código ${p.code})` : ""}?` : mensajePedido({ id: p.id, nombre: p.name, codigo: p.code, cantidad: 1, precio: p.display_price, moneda: p.display_currency, url: absUrl(to(p.path)) }))} target="_blank" rel="noopener noreferrer" aria-label={`Consultar ${p.name} por WhatsApp`}><Ico d={IC.wa} size={16} />Consultar</a>
-              : <Link className="vt-add vt-add--ask vt-add--pill" to={to(p.path)} aria-label={`Ver ${p.name}`}>Ver</Link>
-          ) : p.variants?.length ? (
-            <Link className="vt-add" to={to(p.path)} aria-label={`Ver opciones de ${p.name}`}><Ico d={IC.next} /></Link>
-          ) : (
-            <button className="vt-add" data-done={done} onClick={add} aria-label={`${ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}: ${p.name}`}>
-              <Ico d={done ? IC.check : IC.plus} />
-            </button>
-          )}
+          <AvailBadge a={a} compact />
         </div>
-        <label className="vt-cmp">
-          <input type="checkbox" checked={inCompare} onChange={() => ctx.toggleCompare(p.id)} disabled={!inCompare && ctx.compare.length >= 3} />
-          <span>Comparar</span>
-        </label>
+        {ask ? (
+          <Link className="vt-add vt-add--pill" to={to(p.path)} aria-label={`Consultar precio de ${p.name}`}>Consultar</Link>
+        ) : noBuy ? (
+          assistAction(a, ctx.store.whatsapp) === "whatsapp"
+            ? <a className="vt-add vt-add--pill" href={waLink(ctx.store.whatsapp, a?.state === "agotado" ? `Hola, ¿cuándo vuelven a tener ${p.name}${p.code ? ` (código ${p.code})` : ""}?` : mensajePedido({ id: p.id, nombre: p.name, codigo: p.code, cantidad: 1, precio: p.display_price, moneda: p.display_currency, url: absUrl(to(p.path)) }))} target="_blank" rel="noopener noreferrer" aria-label={`Consultar ${p.name} por WhatsApp`}><Ico d={IC.wa} size={16} />Consultar</a>
+            : <Link className="vt-add vt-add--pill" to={to(p.path)} aria-label={`Ver ${p.name}`}>Ver</Link>
+        ) : p.variants?.length ? (
+          <Link className="vt-add" to={to(p.path)} aria-label={`Ver opciones de ${p.name}`}><Ico d={IC.next} /></Link>
+        ) : (
+          <button type="button" className="vt-add" data-done={done} onClick={add} aria-label={`Agregar ${p.name} ${ctx.isShop ? "al carrito" : "a la cotización"}`}>
+            <Ico d={done ? IC.check : IC.plus} />
+          </button>
+        )}
       </div>
+      {/* comparar: solo en escritorio, al pasar el puntero o con el foco del teclado (en celular queda en la ficha) */}
+      <label className="vt-cmp">
+        <input type="checkbox" checked={inCompare} onChange={() => ctx.toggleCompare(p.id)} disabled={!inCompare && ctx.compare.length >= 3} />
+        <span>Comparar</span>
+      </label>
     </article>
   );
 }
@@ -406,15 +423,9 @@ export function Skeleton({ n = 8, rail = false }: { n?: number; rail?: boolean }
       {Array.from({ length: n }, (_, i) => (
         <li key={i}>
           <div className="vt-card vt-card--skel">
-            <div className="vt-card__media"><div className="vt-vf sh-skel" /></div>
-            <div className="vt-card__body">
-              <span className="sh-skel" style={{ height: 10, width: "45%" }} />
-              <span className="sh-skel" style={{ height: 14, width: "92%" }} />
-              <span className="sh-skel" style={{ height: 14, width: "70%" }} />
-              <span className="sh-skel" style={{ height: 12, width: "38%" }} />
-              <div className="vt-card__foot"><span className="sh-skel" style={{ height: 22, width: "48%" }} /><span className="sh-skel" style={{ height: 44, width: 44, borderRadius: "50%" }} /></div>
-              <span className="sh-skel" style={{ height: 16, width: "34%", margin: "8px 0" }} />
-            </div>
+            <span className="vt-card__link"><span className="vt-card__media sh-skel" /><span className="sh-skel" style={{ height: 12, width: "40%" }} /><span className="sh-skel" style={{ height: 36, width: "92%" }} /></span>
+            <span className="sh-skel" style={{ height: 14, width: "60%" }} />
+            <div className="vt-card__foot"><span className="sh-skel" style={{ height: 40, width: "52%" }} /><span className="sh-skel" style={{ height: 44, width: 44, borderRadius: "50%" }} /></div>
           </div>
         </li>
       ))}

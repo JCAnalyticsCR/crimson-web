@@ -305,12 +305,8 @@
 .shop .vt-textlink { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; color: var(--ink); font-weight: 700; font-size: var(--fs-2); text-decoration: underline; text-underline-offset: 3px; }
 .shop .vt-textlink:hover { text-decoration-thickness: 2px; }
 .shop .vt-stickybuy .vt-textlink { flex: 0 1 auto; text-align: right; }
-/* pastilla «Consultar» de la tarjeta: texto visible en vez del icono solo */
-.shop .vt-add.vt-add--pill { width: auto; min-width: 44px; padding: 0 12px; border-radius: var(--r-pill); gap: 6px; font-weight: 700; font-size: var(--fs-1); text-decoration: none; white-space: nowrap; }
 .shop .vt-acc__list .vt-add.vt-add--pill { width: auto; height: 44px; }
 .shop .vt-qty button[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
-/* con la pastilla de texto el pie de la tarjeta parte renglon en vez de montar «Consultar» sobre el precio */
-.shop .vt-card__foot:has(.vt-add--pill) { flex-wrap: wrap; row-gap: 8px; }
 
 /* ---------- O1-03: precio de la ficha legible en celular ----------
    La regla movil de vitrina.css (.vt-price b a 16,5 px, pensada para la tarjeta) le ganaba al precio grande de la

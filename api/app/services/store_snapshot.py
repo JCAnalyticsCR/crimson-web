@@ -109,6 +109,7 @@ def build(db: Session, t, ctx) -> bytes:
     from ..routers.store_showcase import (
         _avail,
         _cat_tree,
+        _load_full,
         _published_light,
         _stock_map,
     )
@@ -119,6 +120,10 @@ def build(db: Session, t, ctx) -> bytes:
     stock_all = _stock_map(db, t.id, prods)
     # misma regla que catalog(): ocultar agotados
     pool = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
+
+    # O2-06: los datos clave de la tarjeta (sv.key_specs) leen la descripcion y las specs editadas: una sola carga
+    # completa de lo publicado (el snapshot se arma pocas veces; /catalog y /showcase siguen livianos)
+    _load_full(db, [p.id for p in pool])
 
     # campos de tarjeta liviana (sin descripciones ni specs)
     backed = compare_backed(db, t.id, [p for p in pool if p.compare_price])
@@ -147,6 +152,8 @@ def build(db: Session, t, ctx) -> bytes:
                 "type": ctx.dtype(p),  # O1-08: el tipo que se muestra y se filtra (el funcional queda para los kits)
                 "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
                 "availability": _avail(own),
+                # O2-06 (aditivo): 0 a 4 datos clave de la tarjeta; el primero es el que distingue a la familia
+                "ks": sv.key_specs(p),
                 # O1-14: nombre, marca, modelo, codigo, SKU, categoria y tipo, normalizados (services/store_search)
                 "sf": sv.search_text(p, ctx.cat_name.get(p.category_id), ctx.dtype(p)),
             }
