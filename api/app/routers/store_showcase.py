@@ -9,15 +9,12 @@ from __future__ import annotations
 
 import html as htmllib
 import math
-import re
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from urllib.parse import parse_qs, quote, urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, selectinload
@@ -27,7 +24,6 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
-from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.documents import audit
@@ -275,7 +271,10 @@ def _admin_out(t: Tenant, db: Session) -> dict:
             }
             for ln in kit["lines"]
             if ln["key"] in sv.KIT_ROLES
-        ] + [{"key": m["key"], "label": sv.KIT_ROLE_NAMES[m["key"]], "product_id": None, "name": None, "source": "missing", "options": []} for m in kit["missing"]]
+        ] + [
+            {"key": m["key"], "label": sv.KIT_ROLE_NAMES[m["key"]], "product_id": None, "name": None, "source": "missing", "options": []}
+            for m in kit["missing"]
+        ]
         kits_preview.append(
             {
                 "id": k.get("id"),
@@ -494,11 +493,26 @@ def _published(db: Session, tid: int) -> list[Product]:
 # Columnas livianas para filtrar/ordenar/contar facetas: sin texto largo ni specs.
 # description_store se incluye porque build_kit/_pick_camera lo usa para detectar PoE.
 _LIGHT_COLS = (
-    Product.id, Product.name, Product.code, Product.brand, Product.model,
-    Product.supplier_sku, Product.category_id, Product.price, Product.currency,
-    Product.web_price, Product.web_featured, Product.created_at, Product.item_type,
-    Product.active, Product.show_on_web, Product.tenant_id, Product.margin_hold,
-    Product.images, Product.compare_price, Product.description_store,
+    Product.id,
+    Product.name,
+    Product.code,
+    Product.brand,
+    Product.model,
+    Product.supplier_sku,
+    Product.category_id,
+    Product.price,
+    Product.currency,
+    Product.web_price,
+    Product.web_featured,
+    Product.created_at,
+    Product.item_type,
+    Product.active,
+    Product.show_on_web,
+    Product.tenant_id,
+    Product.margin_hold,
+    Product.images,
+    Product.compare_price,
+    Product.description_store,
 )
 
 
@@ -526,9 +540,7 @@ def _load_full(db: Session, ids: list[int]) -> list[Product]:
         return []
     return list(
         db.scalars(
-            select(Product)
-            .where(Product.id.in_(ids))
-            .options(selectinload(Product.taxes).selectinload(ProductTax.tax)),
+            select(Product).where(Product.id.in_(ids)).options(selectinload(Product.taxes).selectinload(ProductTax.tax)),
             execution_options={"populate_existing": True},
         )
     )
@@ -638,11 +650,11 @@ def _created(p: Product) -> float:
 def _rank_default(p: Product) -> tuple:
     """'Relevancia' sin búsqueda: destacados primero, luego Hikvision, luego lo que se puede comprar ya."""
     return (
-        not bool(p.web_featured),                      # 1. destacados (Hikvision y los que Andrés marcó)
-        (p.brand or "").lower() != "hikvision",        # 2. Hikvision no marcado explícitamente
-        not p.images,                                  # 3. con foto
-        not (p.price and Decimal(str(p.price)) > 0),   # 4. con precio
-        p.name.lower(),                                # 5. alfabético
+        not bool(p.web_featured),  # 1. destacados (Hikvision y los que Andrés marcó)
+        (p.brand or "").lower() != "hikvision",  # 2. Hikvision no marcado explícitamente
+        not p.images,  # 3. con foto
+        not (p.price and Decimal(str(p.price)) > 0),  # 4. con precio
+        p.name.lower(),  # 5. alfabético
     )
 
 
@@ -660,9 +672,7 @@ def store_snapshot_endpoint(slug: str, response: Response, if_none_match: str | 
 
     from ..models import StoreSnapshot as _SS
 
-    row = db.scalar(
-        select(_SS).where(_SS.tenant_id == t.id).options(_lo(_SS.version, _SS.built_at, _SS.n_products))
-    )
+    row = db.scalar(select(_SS).where(_SS.tenant_id == t.id).options(_lo(_SS.version, _SS.built_at, _SS.n_products)))
     if row is not None and if_none_match and if_none_match == f'"{row.version}"':
         return Response(status_code=304)
     gz, version = snap.get_or_rebuild(db, t.id)
@@ -1330,36 +1340,52 @@ def _crear_oportunidad(db: Session, slug: str, data: AdvisoryIn, ip: str) -> Non
         correo_v = member_inbox(m_v) if m_v else None
         if correo_v:
             queue_email(
-                db, t, correo_v,
+                db,
+                t,
+                correo_v,
                 f"Nueva consulta asignada: {e(number)} · {etiqueta}",
                 # El vendedor recibe el detalle completo si fue asignado automáticamente
                 cuerpo,
-                "opportunity", o.id,
+                "opportunity",
+                o.id,
                 dedupe_key=f"opp-asig-vendedor:{o.id}",
                 company_bcc=False,
             )
         # Admin recibe el detalle completo siempre
         responsable = db.get(User, assigned_uid)
         notify_roles(
-            db, t, ("admin",),
+            db,
+            t,
+            ("admin",),
             f"Asesoría web {number} · {etiqueta} · {quien[:40]} (asignada a {(responsable.full_name or responsable.email) if responsable else 'un vendedor'})",
-            cuerpo, "opportunity", o.id, internal_copy=True,
+            cuerpo,
+            "opportunity",
+            o.id,
+            internal_copy=True,
         )
     else:
         # Modo manual: el admin recibe con detalle; los vendedores solo "hay una consulta nueva por asignar"
-        _cuerpo_vendedor = (
-            f"<p>Hay una nueva solicitud de asesoría desde la tienda (<b>{e(number)}</b>) que todavía no tiene responsable.</p>"
-            + cta("/ventas/por-asignar", "Ir a Ventas por asignar")
+        _cuerpo_vendedor = f"<p>Hay una nueva solicitud de asesoría desde la tienda (<b>{e(number)}</b>) que todavía no tiene responsable.</p>" + cta(
+            "/ventas/por-asignar", "Ir a Ventas por asignar"
         )
         notify_roles(
-            db, t, ("admin",),
+            db,
+            t,
+            ("admin",),
             f"Asesoría web {number} · {etiqueta} · {quien[:40]}",
-            cuerpo, "opportunity", o.id, internal_copy=True,
+            cuerpo,
+            "opportunity",
+            o.id,
+            internal_copy=True,
         )
         notify_roles(
-            db, t, ("supervisor", "ventas"),
+            db,
+            t,
+            ("supervisor", "ventas"),
             f"Nueva consulta web por asignar · {etiqueta}",
-            _cuerpo_vendedor, "opportunity", o.id,
+            _cuerpo_vendedor,
+            "opportunity",
+            o.id,
         )
     db.commit()
 
@@ -1391,318 +1417,27 @@ async def advisory(slug: str, request: Request, db: Session = Depends(get_db)):
     return ADVISORY_OK
 
 
-# ================================================================ SEO por dominio (nginx: SSI, robots, sitemap, 301)
-seo = APIRouter(prefix="/public/seo", tags=["publico"])
-
-
-def _tenant_by_host(db: Session, host: str | None) -> Tenant | None:
-    h = (host or "").strip().lower().split(":")[0]
-    if not h:
-        return None
-    for t in db.scalars(select(Tenant).where(Tenant.active)):
-        cfg = store_cfg(t)
-        dom = (cfg.get("domain") or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
-        if cfg["published"] and dom and dom == h:
-            return t
-    return None
-
-
-def _host(x_store_host: str | None, host: str | None) -> str:
-    return (x_store_host or host or "").strip().lower().split(":")[0][:200]
-
-
-def _base(host: str) -> str:
-    return f"https://{host}"
-
-
-def _abs(base: str, url: str) -> str:
-    """WhatsApp y Google necesitan la foto con direccion completa (las del media del API vienen como /api/...)."""
-    return f"{base}{url}" if url and url.startswith("/") and not url.startswith("//") else url
-
-
-def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
-    """Titulo, descripcion, canonica, Open Graph y JSON-LD de una ruta de la vitrina."""
-    cfg = store_cfg(t)
-    sc = sv.showcase_cfg(cfg)
-    name = cfg["name"]
-    path = "/" + (path or "").strip("/")
-    parts = [x for x in path.split("/") if x]
-    site_desc = (
-        sc["seo_description"]
-        or f"{name}: cámaras de seguridad, grabadores, redes, control de acceso y respaldo eléctrico en Costa Rica. Precios con IVA, factura electrónica, soporte técnico local e instalación."
-    )
-    org = {
-        "@type": "Organization",
-        "@id": base + "/#org",
-        "name": name,
-        "url": base + "/",
-        **({"logo": cfg["logo_url"]} if cfg.get("logo_url") and str(cfg["logo_url"]).startswith("http") else {}),
-        **({"telephone": "+" + re.sub(r"\D", "", cfg["whatsapp"])} if cfg.get("whatsapp") else {}),
-        "address": {"@type": "PostalAddress", "addressCountry": "CR"},
-    }
-    meta = {"site_name": name, "robots": "index,follow", "description": site_desc}
-    if not parts:
-        meta |= {
-            "title": f"{name} · Tienda de seguridad electrónica y redes en Costa Rica",
-            "canonical": base + "/",
-            "ld": {
-                "@context": "https://schema.org",
-                "@graph": [
-                    org,
-                    {
-                        "@type": "WebSite",
-                        "url": base + "/",
-                        "name": f"Tienda {name}",
-                        "inLanguage": "es-CR",
-                        "publisher": {"@id": base + "/#org"},
-                        "potentialAction": {
-                            "@type": "SearchAction",
-                            "target": base + "/buscar?q={search_term_string}",
-                            "query-input": "required name=search_term_string",
-                        },
-                    },
-                ],
-            },
-        }
-        return meta
-    head = parts[0]
-    if head == "p" and len(parts) > 1:
-        pid = sv.product_id_from_ref(parts[1])
-        p = db.get(Product, pid) if pid else None
-        if not p or p.tenant_id != t.id or not p.show_on_web or not p.active:
-            return meta | {"title": f"Producto no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
-        ctx = Ctx(db, t)
-        own = _stock_of(db, t.id, [p.id]).get(p.id)
-        c = ctx.card(p, own, full=True)
-        url = base + c["path"]
-        desc = re.sub(r"\s+", " ", (p.description_store or p.description_invoice or p.name)).strip()
-        price = Decimal(str(c["display_price"]))
-        crumbs = [("Tienda", "/")]
-        if c.get("category_path"):
-            crumbs.append((c["category"], c["category_path"]))
-        crumbs.append((p.name, c["path"]))
-        offer = {
-            "@type": "Offer",
-            "url": url,
-            "priceCurrency": c["display_currency"],
-            "availability": sv.availability_schema(c["availability"]["state"], c["availability"].get("ultimas")),
-            "itemCondition": "https://schema.org/NewCondition",
-            "seller": {"@id": base + "/#org"},
-        }
-        if price > 0:
-            offer["price"] = str(price)
-            offer["priceValidUntil"] = (date.today() + timedelta(days=30)).isoformat()
-        product_ld = {
-            "@type": "Product",
-            "name": p.name,
-            "sku": p.code,
-            "description": desc[:500],
-            "image": [_abs(base, u) for u in (c["images"][:5] or ([c["image"]] if c["image"] else []))],
-            "category": c.get("category") or c.get("type") or None,
-            "offers": offer,
-        }
-        if p.brand:
-            product_ld["brand"] = {"@type": "Brand", "name": p.brand}
-        if p.model:
-            product_ld["mpn"] = p.model
-        return meta | {
-            "title": f"{p.name} · {name}"[:160],
-            "description": (f"{desc[:200]} · " if desc else "")
-            + ("Precio con IVA incluido. " if price > 0 else "")
-            + "Envío a todo Costa Rica, factura electrónica y soporte local.",
-            "canonical": url,
-            "og_type": "product",
-            "image": _abs(base, c["image"]) if c["image"] else None,
-            "price": str(price) if price > 0 else None,
-            "currency": c["display_currency"],
-            "ld": {"@context": "https://schema.org", "@graph": [product_ld, sv.breadcrumb_ld(base, crumbs), org]},
-        }
-    if head == "c" and len(parts) > 1:
-        cats = _categories(db, t.id)
-        slugs = sv.category_slugs(cats)
-        cid = next((i for i, s in slugs.items() if s == parts[1]), None)
-        cat = next((c for c in cats if c.id == cid), None)
-        if not cat:
-            return meta | {"title": f"Categoría no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
-        url = f"{base}/c/{slugs[cat.id]}"
-        return meta | {
-            "title": f"{cat.name} · {name}",
-            "description": cat.description or f"{cat.name} en {name}: precios con IVA, disponibilidad, envío a todo Costa Rica y asesoría técnica.",
-            "canonical": url,
-            "ld": {
-                "@context": "https://schema.org",
-                "@graph": [
-                    {"@type": "CollectionPage", "name": cat.name, "url": url, "isPartOf": {"@type": "WebSite", "url": base + "/"}},
-                    sv.breadcrumb_ld(base, [("Tienda", "/"), (cat.name, f"/c/{slugs[cat.id]}")]),
-                    org,
-                ],
-            },
-        }
-    simple = {
-        "catalogo": ("Catálogo completo", "Todos los productos: cámaras, grabadores, redes, control de acceso, UPS y herramientas, con precio e IVA incluido."),
-        "arma-tu-sistema": (
-            "Arma tu sistema de cámaras",
-            "Respondé 4 preguntas y te armamos un kit de videovigilancia con productos reales, validado por un técnico de Crimson.",
-        ),
-        "asesoria": (
-            "Solicitud de asesoría personalizada",
-            "Contanos qué necesitás proteger o conectar y un asesor de Crimson te contacta con una propuesta a la medida.",
-        ),
-    }
-    if head in simple and len(parts) == 1:
-        title, desc = simple[head]
-        url = f"{base}/{head}"
-        return meta | {
-            "title": f"{title} · {name}",
-            "description": desc,
-            "canonical": url,
-            "ld": {"@context": "https://schema.org", "@graph": [sv.breadcrumb_ld(base, [("Tienda", "/"), (title, f"/{head}")]), org]},
-        }
-    if head == "info" and len(parts) == 2 and parts[1] in sv.INFO_KINDS:
-        title = sv.INFO_KINDS[parts[1]]
-        url = f"{base}/info/{parts[1]}"
-        ld: dict = {"@context": "https://schema.org", "@graph": [sv.breadcrumb_ld(base, [("Tienda", "/"), (title, f"/info/{parts[1]}")]), org]}
-        if parts[1] == "preguntas-frecuentes":
-            ld["@graph"].insert(
-                0,
-                {
-                    "@type": "FAQPage",
-                    "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in sc["faq"]],
-                },
-            )
-        return meta | {"title": f"{title} · {name}", "description": f"{title} de la tienda {name}.", "canonical": url, "ld": ld}
-    # busqueda, comparador y cualquier otra: no se indexan (contenido duplicado o vacio)
-    return meta | {"title": f"Tienda · {name}", "robots": "noindex,follow", "canonical": base + "/"}
-
-
-@seo.get("/head", response_class=PlainTextResponse)
-@seo.get("/head/{path:path}", response_class=PlainTextResponse)
-def seo_head(path: str = "", host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
-    """Fragmento <head> por ruta. nginx lo incrusta con SSI en index.html para el dominio de la tienda: asi
-    WhatsApp, Facebook y Google ven titulo, foto y precio sin ejecutar JavaScript. Cuerpo vacio = nginx usa el
-    titulo por defecto (dominio que no es tienda, tienda despublicada)."""
-    h = _host(x_store_host, host)
-    t = _tenant_by_host(db, h)
-    if not t:
-        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
-    try:
-        meta = seo_meta(db, t, _base(h), path)
-    except HTTPException:
-        return PlainTextResponse("")
-    return PlainTextResponse(sv.head_html(meta), media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})
-
-
-def _sitemap(db: Session, t: Tenant, base: str) -> str:
-    cats = _categories(db, t.id)
-    slugs = sv.category_slugs(cats)
-    prods = _published(db, t.id)
-    used = {p.category_id for p in prods}
-    today = date.today().isoformat()
-    urls = [(base + "/", today, "1.0"), (base + "/catalogo", today, "0.8"), (base + "/arma-tu-sistema", None, "0.7"), (base + "/asesoria", None, "0.6")]
-    urls += [(f"{base}/c/{slugs[c.id]}", today, "0.7") for c in cats if c.id in used]
-    cfg = store_cfg(t)
-    legal = cfg.get("legal") or {}
-    for k in sv.INFO_KINDS:
-        if (k == "terminos" and not legal.get("terms")) or (k == "privacidad" and not legal.get("privacy")):
-            continue
-        urls.append((f"{base}/info/{k}", None, "0.3"))
-    for p in prods:
-        urls.append((base + sv.product_path(p), (p.updated_at or p.created_at).date().isoformat() if (p.updated_at or p.created_at) else None, "0.6"))
-    body = "".join(f"<url><loc>{htmllib.escape(u)}</loc>{f'<lastmod>{lm}</lastmod>' if lm else ''}<priority>{pr}</priority></url>" for u, lm, pr in urls)
-    return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>\n'
-
-
-@seo.get("/exists")
-@seo.get("/exists/{path:path}")
-def seo_exists(
-    path: str = "",
-    host: str | None = Query(None, max_length=200),
-    x_store_host: str | None = Header(None),
-    x_original_uri: str | None = Header(None),
-    db: Session = Depends(get_db),
-):
-    """Para nginx (auth_request): 204 si la ficha o la categoria existe, 403 si no (nginx lo sirve como 404 real
-    con la vitrina). En un dominio que no es tienda no bloquea nada."""
-    t = _tenant_by_host(db, _host(x_store_host, host))
-    if not t:
-        return Response(status_code=204)
-    path = path or urlsplit(x_original_uri or "/").path
-    parts = [x for x in (path or "").strip("/").split("/") if x]
-    ok = True
-    if len(parts) >= 2 and parts[0] == "p":
-        pid = sv.product_id_from_ref(parts[1])
-        p = db.get(Product, pid) if pid else None
-        ok = bool(p and p.tenant_id == t.id and p.show_on_web and p.active)
-    elif len(parts) >= 2 and parts[0] == "c":
-        cats = _categories(db, t.id)
-        ok = parts[1] in set(sv.category_slugs(cats).values()) or (parts[1].isdigit() and any(c.id == int(parts[1]) for c in cats))
-    return Response(status_code=204 if ok else 403, headers={"Cache-Control": "no-store"})
-
-
-@seo.get("/sitemap.xml")
-def seo_sitemap(host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
-    h = _host(x_store_host, host)
-    t = _tenant_by_host(db, h)
-    if not t:
-        raise HTTPException(404, "Sin sitemap para este dominio")
-    return Response(_sitemap(db, t, _base(h)), media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
-
-
-@seo.get("/robots.txt", response_class=PlainTextResponse)
-def seo_robots(host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
-    """Dominio de la tienda: se indexa (menos busqueda y comparador) y anuncia el sitemap. Cualquier otro (el panel):
-    no se indexa nada."""
-    h = _host(x_store_host, host)
-    t = _tenant_by_host(db, h)
-    if not t:
-        return PlainTextResponse("User-agent: *\nDisallow: /\n", headers={"Cache-Control": "public, max-age=3600"})
-    return PlainTextResponse(
-        f"User-agent: *\nAllow: /\nDisallow: /buscar\nDisallow: /comparar\nDisallow: /api/\n\nSitemap: {_base(h)}/sitemap.xml\n",
-        headers={"Cache-Control": "public, max-age=3600"},
-    )
-
-
-@seo.get("/legacy")
-def seo_legacy(
-    uri: str | None = Query(None, max_length=1000),
-    host: str | None = Query(None, max_length=200),
-    x_store_host: str | None = Header(None),
-    x_original_uri: str | None = Header(None),
-    db: Session = Depends(get_db),
-):
-    """301 de las direcciones de Fygaro (/products/<uuid>/, /products/category/<id>/, /products/search/?keywords=,
-    /terms, /policies, /page/...) a las nuevas. Los enlaces ya compartidos y lo que Google tiene indexado no mueren."""
-    h = _host(x_store_host, host)
-    t = _tenant_by_host(db, h)
-    raw = x_original_uri or uri or "/"
-    parts = urlsplit(raw if raw.startswith("/") else "/" + raw)
-    if not t:
-        return RedirectResponse("/", status_code=302)
-    fy = (t.settings or {}).get("fygaro") or {}
-    cats = _categories(db, t.id)
-    slugs = sv.category_slugs(cats)
-
-    def to_product(pid: int) -> str | None:
-        p = db.get(Product, pid)
-        return sv.product_path(p) if p and p.tenant_id == t.id and p.show_on_web and p.active else None
-
-    def to_category(cid: int) -> str:
-        return f"/c/{slugs[cid]}" if cid in slugs else "/catalogo"
-
-    def unmapped(ref: str, entry: dict | None) -> str | None:
-        hit = fygaro_legacy.resolve(db, t.id, ref, entry)
-        if not hit:
-            return None
-        return to_product(int(hit[1])) if hit[0] == "product" else f"/buscar?q={quote(str(hit[1]), safe='')}"
-
-    q = {k: v[0] for k, v in parse_qs(parts.query).items() if v}
-    target = sv.legacy_target(parts.path, q, fy.get("products") or {}, fy.get("categories") or {}, to_product, to_category, unmapped)
-    return RedirectResponse(_base(h) + target, status_code=301, headers={"Cache-Control": "public, max-age=86400"})
-
-
 @pub.get("/sitemap.xml")
 def store_sitemap(slug: str, db: Session = Depends(get_db)):
     """Sitemap de la tienda por slug (util antes del corte de dominio o para revisarlo desde el panel)."""
+    from .store_seo import _base, _sitemap
+
     t = _tenant(db, slug)
     dom = (store_cfg(t).get("domain") or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
     return Response(_sitemap(db, t, _base(dom) if dom else ""), media_type="application/xml")
+
+
+# ================================================================ SEO por dominio: vive en routers/store_seo.py (O1-01)
+_SEO_NAMES = frozenset(
+    {"seo", "seo_meta", "seo_head", "_sitemap", "seo_exists", "seo_sitemap", "seo_robots", "seo_legacy", "_tenant_by_host", "_host", "_base", "_abs"}
+)
+
+
+def __getattr__(name: str):
+    """Compatibilidad: los nombres del SEO se movieron a routers/store_seo.py; se importan aqui solo al pedirlos (una
+    importacion arriba seria circular: store_seo usa Ctx y _published de este modulo)."""
+    if name in _SEO_NAMES:
+        from . import store_seo
+
+        return getattr(store_seo, name)
+    raise AttributeError(name)

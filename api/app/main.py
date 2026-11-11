@@ -48,6 +48,7 @@ from .routers import (
     stock,
     store,
     store_checkout,
+    store_seo,
     store_showcase,
     store_test,
     supplier_catalog,
@@ -162,7 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(invoice_proofs_router.router)  # comprobantes de la pagina de pago de facturas (/pagar)
     app.include_router(store_showcase.router)
     app.include_router(store_showcase.pub)
-    app.include_router(store_showcase.seo)
+    app.include_router(store_seo.seo)
     app.include_router(reception.router)
     app.include_router(accounting.router)
     app.include_router(quickbooks.router)  # asientos QBO (conta-asientos)
