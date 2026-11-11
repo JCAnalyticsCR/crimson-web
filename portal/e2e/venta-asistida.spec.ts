@@ -3,7 +3,7 @@
    botón. Corre en los cinco anchos (el criterio pide 320, 360, 375 y 768). */
 import { REF } from "./app/datos";
 import type { AjustesE2e } from "./app/api";
-import { PANTALLAS, prod } from "./soporte/pantallas";
+import { PANTALLAS, prod, rutaFicha } from "./soporte/pantallas";
 import { expect, medirAncho, test, tiendaLista } from "./soporte/tienda";
 
 const abrir = (id: string) => PANTALLAS.find((p) => p.id === id)!.abrir;
@@ -64,4 +64,26 @@ test("[O1-02] la tarjeta por confirmar dice «Consultar» y su nombre accesible 
   await expect(tarjeta.locator(".vt-avail")).toHaveText("Por confirmar");
   const pill = tarjeta.getByRole("link", { name: `Consultar ${p.name} por WhatsApp` });
   await expect(pill).toHaveText("Consultar");
+});
+
+test("[O1-03] con /item retrasado 3 s el desglose de IVA nunca muestra «₡0»", async ({ page }) => {
+  test.skip(page.viewportSize()!.width > 375, "criterio de celular: 320, 360 y 375 px");
+  await page.addInitScript((a: AjustesE2e) => { (window as Window & { __e2eAjustes?: AjustesE2e }).__e2eAjustes = a; }, { retrasoItem: 3000 });
+  // se entra por la portada (el snapshot queda cargado) y se navega a la ficha: primer pintado desde el snapshot
+  await page.goto("/");
+  await tiendaLista(page);
+  const p = prod(REF.comprable);
+  const vistos: string[] = [];
+  await page.exposeFunction("__desglose", (t: string) => { vistos.push(t); });
+  await page.evaluate(() => {
+    new MutationObserver(() => { const el = document.querySelector(".vt-breakdown"); if (el) (window as unknown as { __desglose: (t: string) => void }).__desglose(el.textContent || ""); })
+      .observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  await page.evaluate((path) => { history.pushState({}, "", path); dispatchEvent(new PopStateEvent("popstate")); }, rutaFicha(REF.comprable));
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(p.name);
+  await expect(page.locator(".vt-info__price .vt-price b")).toBeVisible();
+  await expect(page.locator(".vt-breakdown")).toHaveCount(0); // a la espera de /item: solo el precio final
+  await expect(page.locator(".vt-breakdown")).toContainText("IVA 13 %", { timeout: 8000 });
+  expect(vistos.some((t) => /₡\s*0(?!\d)/.test(t.replace(/[\u00a0\u202f]/g, " ")))).toBe(false);
+  await expect(page.locator(".vt-breakdown")).not.toContainText(/₡\s?0(?![\d\s.,])/);
 });

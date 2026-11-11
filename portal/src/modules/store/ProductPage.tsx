@@ -29,6 +29,9 @@ export default function ProductPage() {
   // ya lo agrego: "Ir al carrito" queda a mano hasta salir de la ficha (pedido 21/10; antes el enlace se iba a los 2 s)
   const [inCart, setInCart] = useState(false);
   const [shared, setShared] = useState(false);
+  // O1-03: la ficha completa (/item) ya llego. Antes de eso solo hay la tarjeta del snapshot, sin el desglose de IVA:
+  // no se pinta «Precio sin IVA ₡X + IVA 13 % ₡0» con datos a medias, solo el precio final y «IVA incluido».
+  const [full, setFull] = useState(false);
   const [zoom, setZoom] = useState(false);
   const addT = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(addT.current), []);
@@ -45,7 +48,7 @@ export default function ProductPage() {
 
   useEffect(() => {
     let alive = true;
-    setMissing(false); setPhoto(0); setQty(1);
+    setMissing(false); setPhoto(0); setQty(1); setFull(false);
     // Mostrar datos del snapshot inmediatamente si están en caché (cero latencia)
     if (snapCard) {
       setD({
@@ -65,7 +68,7 @@ export default function ProductPage() {
     }
     // Cargar la ficha completa (description, specs, relacionados, accesorios)
     ctx.api<Detail>(`/item/${encodeURIComponent(ref)}`)
-      .then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); })
+      .then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); setFull(true); })
       .catch(() => { if (alive) { setD(null); setMissing(true); } });
     return () => { alive = false; };
   // snapCard se lee sincrónicamente en el efecto; no se incluye en deps para no re-ejecutar cuando el snap llega tarde
@@ -144,7 +147,7 @@ ${url}`) : "";
             <PriceTag p={shown} big />
             <AvailBadge a={a} />
           </div>
-          {!ask && (
+          {!ask && full && (
             <p className="vt-breakdown">
               Precio sin IVA {money(net, d.display_currency)} + IVA {d.tax_rate} % {money(iva, d.display_currency)}
               {save > 0 && <b> · Ahorrás {money(save, d.display_currency)}</b>}

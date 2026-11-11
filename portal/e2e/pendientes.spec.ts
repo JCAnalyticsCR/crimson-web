@@ -18,8 +18,8 @@ test("[O1-02] ficha por confirmar: ningún botón apagado y la barra fija nunca 
   await expect(page.locator(".vt-stickybuy button:disabled")).toHaveCount(0);
 });
 
-test.fixme("[O1-03] ficha en celular: precio de 30 px o más e «IVA incluido» de 14 px o más", async ({ page }, info) => {
-  // hoy a 375 px: precio 16,5 px e «IVA incluido» 11 px (una regla movil de vitrina.css le gana al precio grande)
+test("[O1-03] ficha en celular: precio de 30 px o más e «IVA incluido» de 14 px o más", async ({ page }, info) => {
+  // antes, a 375 px: precio 16,5 px e «IVA incluido» 11 px (una regla movil de vitrina.css le gana al precio grande)
   test.skip(info.project.use.viewport!.width > 375, "criterio de celular: 320, 360 y 375 px");
   await abrir("ficha-comprable")(page);
   const precio = page.locator(".vt-info__price .vt-price");
