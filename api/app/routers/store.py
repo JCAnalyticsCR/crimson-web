@@ -611,10 +611,19 @@ def store_home(slug: str, db: Session = Depends(get_db)):
     pricer = Pricer(db, t)
     pages = db.scalars(select(StorePage).where(StorePage.tenant_id == t.id, StorePage.published).order_by(StorePage.position)).all()
     cats = db.scalars(select(Category).where(Category.tenant_id == t.id, Category.show_on_web).order_by(Category.name)).all()
-    counts = dict(
-        db.execute(
-            select(Product.category_id, func.count()).where(Product.tenant_id == t.id, Product.active, Product.show_on_web).group_by(Product.category_id)
-        ).all()
+    # O1-05: los conteos son los del snapshot ya armado (lo que la tienda lista, sin los ocultos); esta llamada bloquea
+    # toda la tienda y nunca recalcula disponibilidad. Sin snapshot guardado, el conteo de publicados de antes.
+    from ..services.store_snapshot import counts as snapshot_counts
+
+    snap = snapshot_counts(db, t.id)
+    counts = (
+        snap["direct"]
+        if snap is not None
+        else dict(
+            db.execute(
+                select(Product.category_id, func.count()).where(Product.tenant_id == t.id, Product.active, Product.show_on_web).group_by(Product.category_id)
+            ).all()
+        )
     )
     # subcategorias (Fygaro: categoria > subcategoria): el conteo de la madre suma el de sus hijas
     kids: dict[int | None, list] = {}
@@ -645,7 +654,7 @@ def store_home(slug: str, db: Session = Depends(get_db)):
             for c in cats
             if (c.parent_id is None or c.parent_id not in shown) and total(c)
         ],
-        "product_count": sum(counts.values()),
+        "product_count": snap["n"] if snap is not None else sum(counts.values()),
         # las tarifas se configuran en colones (Mi Tienda -> "Base ₡"); display_amount = en la moneda de la tienda, con IVA
         # sin tipo de cambio (tienda en otra moneda) la tarifa queda null: "a consultar", nunca un 500 ni un 422
         "shipping_rates": [{**r, "display_amount": ship_display(pricer, r)} for r in cfg["shipping_rates"] if r.get("active")],

@@ -743,6 +743,13 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
                 images[p.category_id] = (p.images[0] or {}).get("url")
         if p.brand:
             brands[p.brand] = brands.get(p.brand, 0) + 1
+    # O1-05: conteos por categoria, por marca y total del snapshot (lo que la tienda lista), los mismos de /store
+    from ..services.store_snapshot import counts as snapshot_counts
+
+    snap_n = snapshot_counts(db, t.id)
+    if snap_n is not None:
+        counts = dict(snap_n["direct"])
+        brands = {b["name"]: int(b["count"]) for b in snap_n["brands"] if b.get("name")}
     by_id = {p.id: p for p in prods}
     stock = _stock_map(db, t.id, prods)  # una sola consulta: destacados, novedades y kits con la misma disponibilidad
     # Ajustes "ocultar agotados": tampoco salen en destacados, novedades ni kits
@@ -793,7 +800,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
         "featured": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in featured[:8]],
         "fresh": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in fresh],
         "kits": kits,
-        "product_count": len(prods),
+        "product_count": snap_n["n"] if snap_n is not None else len(prods),
         "currency": ctx.pricer.currency,
         "seo": _seo(db, t, "/"),
         "info": [

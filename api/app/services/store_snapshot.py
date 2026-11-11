@@ -464,6 +464,47 @@ def _after_rollback(session: Session) -> None:
     session.info.pop("snapshot_dirty", None)
 
 
+# ---------------------------------------------------------------- O1-05: conteos reales, los del snapshot
+_COUNTS: dict[tuple[int, str], dict] = {}
+
+
+def counts(db: Session, tid: int) -> dict | None:
+    """Total, conteo por categoria (con sus hijas) y por marca tomados del snapshot YA armado: lo que la tienda lista
+    (sin los ocultos). Nunca rearma ni recalcula disponibilidad (GET /public/store/{slug} bloquea toda la tienda):
+    sin snapshot guardado devuelve None y quien llama usa su respaldo. Se recuerda por version (una descompresion por
+    snapshot nuevo, no por visita)."""
+    from ..models import StoreSnapshot
+
+    ver = db.scalar(select(StoreSnapshot.version).where(StoreSnapshot.tenant_id == tid))
+    if not ver:
+        return None
+    key = (tid, ver)
+    if key not in _COUNTS:
+        gz = db.scalar(select(StoreSnapshot.gz).where(StoreSnapshot.tenant_id == tid))
+        if not gz:
+            return None
+        try:
+            data = json.loads(gzip.decompress(gz))
+        except Exception:  # noqa: BLE001
+            return None
+        tree: dict[int, int] = {}
+
+        def walk(nodes) -> None:
+            for c in nodes or []:
+                tree[int(c["id"])] = int(c.get("count") or 0)
+                walk(c.get("children"))
+
+        walk(data.get("categories"))
+        direct: dict[int, int] = {}
+        for p in data.get("products") or []:
+            if p.get("category_id"):
+                direct[int(p["category_id"])] = direct.get(int(p["category_id"]), 0) + 1
+        for k in [k for k in _COUNTS if k[0] == tid]:
+            _COUNTS.pop(k, None)
+        _COUNTS[key] = {"n": int(data.get("n") or 0), "categories": tree, "direct": direct, "brands": data.get("brands") or []}
+    return _COUNTS[key]
+
+
 def enqueue_rebuild(tid: int, countdown: int = 30) -> None:
     """Encola store.rebuild_snapshot con debounce (countdown segundos) para no apilar llamadas.
 
