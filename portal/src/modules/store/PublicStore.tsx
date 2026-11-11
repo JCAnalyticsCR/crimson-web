@@ -216,7 +216,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
   return (
     <StoreProvider value={ctx}>
-    <div className="shop" style={{ fontFamily: undefined /* toda la tienda en Arial (var(--sans)) */ }}>
+    <div className="shop">{/* la familia de toda la tienda vive en un solo token: --font (shop.css, O2-04) */}
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
       {/* O1-10c: en el checkout la cabecera se reduce a logo, «Pago seguro» y «Volver a la tienda» (sin buscador ni
           menu: nada que saque a la persona a mitad de la compra) */}

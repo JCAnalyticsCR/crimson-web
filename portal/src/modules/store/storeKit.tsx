@@ -122,6 +122,11 @@ export function useStore(): StoreCtx {
 
 export const money = (v: string | number, cur = "CRC") =>
   new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).format(Number(v) || 0);
+/** O2-04: el monto con el simbolo de la moneda en su propio span (.vt-cur). El texto es identico al de money(). */
+export function Money({ v, cur = "CRC" }: { v: string | number; cur?: string }) {
+  const parts = new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).formatToParts(Number(v) || 0);
+  return <>{parts.map((x, i) => (x.type === "currency" ? <span key={i} className="vt-cur">{x.value}</span> : x.value))}</>;
+}
 /** direccion completa de una ruta de la tienda (para mensajes que se mandan fuera de la pagina) */
 export const absUrl = (path: string) => (typeof location !== "undefined" ? `${location.origin}${path}` : path);
 export const waLink = (phone: string, text: string) => `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
@@ -238,7 +243,7 @@ export function PriceTag({ p, big = false }: { p: Pick<VProd, "display_price" | 
   return (
     <span className={`vt-price${big ? " vt-price--big" : ""}`}>
       {cmp && <s aria-label={`Antes ${money(cmp, p.display_currency)}`}>{money(cmp, p.display_currency)}</s>}
-      <b>{money(p.display_price, p.display_currency)}</b>
+      <b><Money v={p.display_price} cur={p.display_currency} /></b>
       <small>IVA incluido</small>
     </span>
   );
