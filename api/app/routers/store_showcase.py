@@ -769,6 +769,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
         "kits": kits,
         "product_count": len(prods),
         "currency": ctx.pricer.currency,
+        "seo": _seo(db, t, "/"),
         "info": [
             {"kind": k, "title": v, "path": f"/info/{k}"}
             for k, v in sv.INFO_KINDS.items()
@@ -933,7 +934,15 @@ def catalog(
         },
         "currency": ctx.pricer.currency,
         "nav": nav,
+        "seo": _seo(db, t, f"/c/{ctx.cat_slug[cat_obj.id]}" if cat_obj else ("/buscar" if terms else "/catalogo")),
     }
+
+
+def _seo(db: Session, t: Tenant, path: str, **kw) -> dict | None:
+    """Bloque seo de la ruta (O1-06): el mismo de /public/seo/head, armado por seo_meta (routers/store_seo.py)."""
+    from .store_seo import seo_block
+
+    return seo_block(db, t, path, **kw)
 
 
 ACCESSORY_RULES = {
@@ -1019,6 +1028,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         "related": [ctx.card(r, stock.get(r.id)) for r in related],
         "accessories": [{"title": g["title"], "reason": g["reason"], "items": [ctx.card(r, stock.get(r.id)) for r in g["items"]]} for g in groups],
         "whatsapp": ctx.cfg.get("whatsapp") or "",
+        "seo": _seo(db, t, out["path"], ctx=ctx, card=out),
     }
 
 
@@ -1033,10 +1043,10 @@ def info(slug: str, kind: str, db: Session = Depends(get_db)):
     legal = cfg.get("legal") or {}
     body = {"terminos": legal.get("terms"), "privacidad": legal.get("privacy")}.get(kind) or sc["pages"].get(kind) or ""
     if kind == "preguntas-frecuentes":
-        return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": "", "faq": sc["faq"]}
+        return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": "", "faq": sc["faq"], "seo": _seo(db, t, f"/info/{kind}")}
     if not str(body).strip():
         raise HTTPException(404, "Página no disponible")
-    return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": body, "faq": []}
+    return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": body, "faq": [], "seo": _seo(db, t, f"/info/{kind}")}
 
 
 class KitAnswers(BaseModel):

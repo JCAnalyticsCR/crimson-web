@@ -5,14 +5,14 @@
    Si no hay snapshot (primera visita o falla), cae al endpoint /catalog como antes. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useHead, usePath, useStore, type VProd } from "./storeKit";
+import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useHead, usePath, useStore, type SeoBlock, type VProd } from "./storeKit";
 import { filterCatalog, snapToVProd, type CatalogResult } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
 type Facets = { brands: { name: string; count: number }[]; types: { name: string; count: number }[]; availability: { disponible: number; bajo_pedido: number }; price: { min: number; max: number } };
 type CatInfo = { id: number; name: string; slug: string; description: string | null; parent: { name: string; path: string } | null; children: { name: string; path: string }[] };
 type NavCat = { name: string; path: string; count: number };
-type Res = { items: VProd[]; total: number; category: CatInfo | null; facets: Facets; currency: string; nav: NavCat[] };
+type Res = { items: VProd[]; total: number; category: CatInfo | null; facets: Facets; currency: string; nav: NavCat[]; seo?: SeoBlock | null };
 
 const PAGE = 24;
 const SORTS: [string, string][] = [["relevance", "Relevancia"], ["price_asc", "Precio: menor a mayor"], ["price_desc", "Precio: mayor a menor"], ["name", "Nombre"], ["recent", "Novedades"]];
@@ -145,6 +145,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     description: mode === "category" && res?.category ? res.category.description || `${res.category.name} en ${ctx.store.name}: precios con IVA, envío a todo Costa Rica y asesoría técnica.` : "Catálogo completo con precios e IVA incluido.",
     path: mode === "category" && res?.category ? `/c/${res.category.slug}` : mode === "all" ? "/catalogo" : "/buscar",
     noindex: mode === "search" || activeCount > 0,
+    seo: res?.seo, // solo sin snapshot (respaldo por /catalog); con snapshot, la canonica y el titulo de aqui
   });
 
   // hoja de filtros (movil)

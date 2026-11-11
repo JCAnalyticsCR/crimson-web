@@ -4,7 +4,7 @@
    al instante (sin esperar /showcase). Los kits y la info de páginas legales siguen viniendo de /showcase. */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type KitPhoto, type VProd } from "./storeKit";
+import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type KitPhoto, type SeoBlock, type VProd } from "./storeKit";
 import { snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
@@ -16,6 +16,7 @@ type Showcase = {
   headline: string; subline: string; banners: Banner[]; trust: { icon: string; title: string; text: string }[];
   categories: Cat[]; brands: { name: string; count: number }[]; featured: VProd[]; fresh: VProd[]; kits: Kit[];
   product_count: number; currency: string; info: { kind: string; title: string; path: string }[];
+  seo?: SeoBlock | null;
 };
 
 const TRUST_IC: Record<string, string> = { shield: IC.shield, tool: IC.tool, truck: IC.truck, doc: IC.doc, chat: IC.chat, clock: IC.clock };
@@ -140,6 +141,7 @@ export default function StoreHome() {
     description: `Cámaras, grabadores, redes, control de acceso y UPS con precio e IVA incluido. Soporte técnico local, factura electrónica e instalación por ${S.name}.`,
     path: "/",
     image: d?.featured[0]?.image,
+    seo: d?.seo,
   });
   const time = useMemo(stamp, []);
   const wall = (d?.featured || []).filter((p) => p.image).slice(0, 4);

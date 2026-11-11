@@ -355,34 +355,55 @@ export function Crumbs({ items }: { items: { name: string; path?: string }[] }) 
 }
 
 // ---------- SEO del lado del navegador: actualiza las mismas etiquetas que nginx incrusta (data-sh) ----------
-export type HeadMeta = { title: string; description?: string; path?: string; image?: string | null; type?: string; noindex?: boolean; ld?: object | null };
+/** Bloque seo que devuelven /item, /catalog, /showcase e /info (O1-06): lo mismo que nginx incrusta por SSI para esa
+    ruta, armado por el API (seo_meta). Aditivo: un API viejo no lo manda y la vitrina usa lo suyo. */
+export type SeoBlock = { title: string; description?: string; canonical?: string | null; robots?: string; og_type?: string; og_image?: string | null; ld?: object | null };
+export type HeadMeta = { title: string; description?: string; path?: string; image?: string | null; type?: string; noindex?: boolean; seo?: SeoBlock | null };
+/* O1-06: la ruta con la que se abrio la pagina, si el servidor ya puso sus metas (nginx SSI: etiquetas data-sh).
+   En esa ruta el navegador no toca nada: el titulo, la descripcion, la canonica, robots, Open Graph y el JSON-LD que
+   ve Google son los del servidor, sin un segundo JSON-LD ni un «index,follow» encima de un noindex. Al navegar a otra
+   ruta, se olvida y el navegador pone el bloque seo del API (o lo suyo si no viene). */
+let ssrPath: string | null = typeof document !== "undefined" && document.head.querySelector("[data-sh]") ? location.pathname : null;
+/** solo para las pruebas: simula una carga con (o sin) metas del servidor */
+export const _setSsrPath = (p: string | null) => { ssrPath = p; };
+export function serverOwnsHead(pathname: string): boolean {
+  if (ssrPath === null) return false;
+  if (pathname === ssrPath) return true;
+  ssrPath = null; // primera navegacion interna: desde aqui manda el navegador
+  return false;
+}
 export function useHead(m: HeadMeta | null) {
   const { hostMode, store } = useStore();
   const json = JSON.stringify(m);
   useEffect(() => {
     if (!m) return;
-    document.title = m.title;
     document.documentElement.lang = "es-CR";
-    const canonical = hostMode && m.path !== undefined ? `${location.origin}${m.path}` : null;
+    if (serverOwnsHead(location.pathname)) return;
+    const seo = hostMode ? m.seo || null : null;
+    document.title = seo?.title || m.title;
+    const canonical = seo ? seo.canonical || null : hostMode && m.path !== undefined ? `${location.origin}${m.path}` : null;
     const set = (attr: "name" | "property", key: string, val: string | null | undefined) => {
       let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
       if (!val) { el?.remove(); return; }
       if (!el) { el = document.createElement("meta"); el.setAttribute(attr, key); el.setAttribute("data-sh", ""); document.head.appendChild(el); }
       el.content = val;
     };
-    set("name", "description", m.description || store.tagline || `Tienda en línea de ${store.name}`);
-    set("name", "robots", hostMode && !m.noindex ? "index,follow" : "noindex");
-    set("property", "og:title", m.title);
-    set("property", "og:description", m.description || "");
-    set("property", "og:type", m.type || "website");
-    set("property", "og:image", m.image || null);
+    const desc = seo ? seo.description || "" : m.description || store.tagline || `Tienda en línea de ${store.name}`;
+    set("name", "description", desc);
+    // robots: el del API; sin bloque, nada (lo normal es indexar) salvo noindex. Fuera del dominio propio, nunca se indexa.
+    set("name", "robots", !hostMode ? "noindex" : m.noindex ? "noindex,follow" : seo?.robots || null);
+    set("property", "og:title", seo?.title || m.title);
+    set("property", "og:description", desc);
+    set("property", "og:type", seo?.og_type || m.type || "website");
+    set("property", "og:image", seo ? seo.og_image || null : m.image || null);
     set("property", "og:url", canonical);
     let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (canonical) { if (!link) { link = document.createElement("link"); link.rel = "canonical"; link.setAttribute("data-sh", ""); document.head.appendChild(link); } link.href = canonical; } else link?.remove();
+    // un solo JSON-LD, el del servidor: sin bloque seo no se arma uno propio
     let s = document.getElementById("sh-ld");
-    if (m.ld && hostMode) {
+    if (seo?.ld) {
       if (!s) { s = document.createElement("script"); s.id = "sh-ld"; s.setAttribute("type", "application/ld+json"); s.setAttribute("data-sh", ""); document.head.appendChild(s); }
-      s.textContent = JSON.stringify(m.ld).replace(/</g, "\\u003c");
+      s.textContent = JSON.stringify(seo.ld).replace(/</g, "\\u003c");
     } else s?.remove();
   }, [json, hostMode, store.name, store.tagline]); // eslint-disable-line react-hooks/exhaustive-deps
 }

@@ -19,6 +19,9 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Sin JavaScript (O1-06): en el dominio de la tienda, el nombre del comercio y su WhatsApp y telefono reales
+         (/public/seo/noscript). En el panel, o sin nginx, no hay nada. -->
+    <!--# if expr="$is_store" --><noscript><!--# include virtual="/__noscript" --></noscript><!--# endif -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

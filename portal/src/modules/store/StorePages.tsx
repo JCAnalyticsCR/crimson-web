@@ -5,7 +5,7 @@ import { cloneElement, isValidElement, useEffect, useId, useMemo, useState, type
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Blocks, type Block, type PubProduct } from "./Blocks";
 import { KIT_STORAGE } from "./KitBuilder";
-import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, type SeoBlock, type VProd } from "./storeKit";
 
 const SOLUTIONS: [string, string][] = [
   ["cctv", "Videovigilancia"], ["acceso", "Control de acceso"], ["redes", "Redes y WiFi"], ["ups", "Respaldo eléctrico (UPS)"],
@@ -166,7 +166,7 @@ export function AdvisoryPage() {
   );
 }
 
-type Info = { kind: string; title: string; body: string; faq: { q: string; a: string }[] };
+type Info = { kind: string; title: string; body: string; faq: { q: string; a: string }[]; seo?: SeoBlock | null };
 
 export function InfoPage() {
   const ctx = useStore();
@@ -176,7 +176,7 @@ export function InfoPage() {
   const [missing, setMissing] = useState(false);
   useEffect(() => { setD(null); setMissing(false); ctx.api<Info>(`/info/${kind}`).then(setD).catch(() => setMissing(true)); }, [kind, ctx]);
   const title = INFO.find(([k]) => k === kind)?.[1] || "Información";
-  useHead({ title: `${title} · ${ctx.store.name}`, description: `${title} de la tienda ${ctx.store.name}.`, path: `/info/${kind}`, noindex: missing });
+  useHead({ title: `${title} · ${ctx.store.name}`, description: `${title} de la tienda ${ctx.store.name}.`, path: `/info/${kind}`, noindex: missing, seo: d?.seo });
   return (
     <div className="sh-wrap vt-infopage">
       <Crumbs items={[{ name: "Tienda", path: "/" }, { name: title }]} />

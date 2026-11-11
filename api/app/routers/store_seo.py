@@ -22,7 +22,9 @@ from ..core.db import get_db
 from ..models import Product, Tenant
 from ..services import fygaro_legacy
 from ..services import store_showcase as sv
-from .store import _stock_of, store_cfg
+from ..services.availability import settings_of
+from ..services.store_seo import BUYABLE_STATES, organization_ld, schema_availability
+from .store import _stock_of, business_of, store_cfg
 from .store_showcase import Ctx, _categories, _published
 
 seo = APIRouter(prefix="/public/seo", tags=["publico"])
@@ -53,8 +55,9 @@ def _abs(base: str, url: str) -> str:
     return f"{base}{url}" if url and url.startswith("/") and not url.startswith("//") else url
 
 
-def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
-    """Titulo, descripcion, canonica, Open Graph y JSON-LD de una ruta de la vitrina."""
+def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = None, card: dict | None = None) -> dict:
+    """Titulo, descripcion, canonica, Open Graph y JSON-LD de una ruta de la vitrina. La ficha (/item) pasa su ctx y su
+    tarjeta ya armadas para no repetir las consultas (mismo resultado que sin ellas)."""
     cfg = store_cfg(t)
     sc = sv.showcase_cfg(cfg)
     name = cfg["name"]
@@ -64,15 +67,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
         sc["seo_description"]
         or f"{name}: cámaras de seguridad, grabadores, redes, control de acceso y respaldo eléctrico en Costa Rica. Precios con IVA, factura electrónica, soporte técnico local e instalación."
     )
-    org = {
-        "@type": "Organization",
-        "@id": base + "/#org",
-        "name": name,
-        "url": base + "/",
-        **({"logo": cfg["logo_url"]} if cfg.get("logo_url") and str(cfg["logo_url"]).startswith("http") else {}),
-        **({"telephone": "+" + re.sub(r"\D", "", cfg["whatsapp"])} if cfg.get("whatsapp") else {}),
-        "address": {"@type": "PostalAddress", "addressCountry": "CR"},
-    }
+    org = organization_ld(base, name, logo=cfg.get("logo_url"), whatsapp=cfg.get("whatsapp"), business=business_of(cfg))
     meta = {"site_name": name, "robots": "index,follow", "description": site_desc}
     if not parts:
         meta |= {
@@ -104,9 +99,11 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
         p = db.get(Product, pid) if pid else None
         if not p or p.tenant_id != t.id or not p.show_on_web or not p.active:
             return meta | {"title": f"Producto no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
-        ctx = Ctx(db, t)
-        own = _stock_of(db, t.id, [p.id]).get(p.id)
-        c = ctx.card(p, own, full=True)
+        if card is None:
+            ctx = ctx or Ctx(db, t)
+            card = ctx.card(p, _stock_of(db, t.id, [p.id]).get(p.id), full=True)
+        c = card
+        state = c["availability"]["state"]
         url = base + c["path"]
         desc = re.sub(r"\s+", " ", (p.description_store or p.description_invoice or p.name)).strip()
         price = Decimal(str(c["display_price"]))
@@ -118,13 +115,14 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str) -> dict:
             "@type": "Offer",
             "url": url,
             "priceCurrency": c["display_currency"],
-            "availability": sv.availability_schema(c["availability"]["state"], c["availability"].get("ultimas")),
+            "availability": schema_availability(state, (ctx.cfg_inv if ctx else None) or settings_of(t)),
             "itemCondition": "https://schema.org/NewCondition",
             "seller": {"@id": base + "/#org"},
         }
         if price > 0:
             offer["price"] = str(price)
-            offer["priceValidUntil"] = (date.today() + timedelta(days=30)).isoformat()
+            if state in BUYABLE_STATES:  # O1-06: solo se promete el precio por 30 dias en lo que se puede pagar
+                offer["priceValidUntil"] = (date.today() + timedelta(days=30)).isoformat()
         product_ld = {
             "@type": "Product",
             "name": p.name,
@@ -223,6 +221,54 @@ def seo_head(path: str = "", host: str | None = Query(None, max_length=200), x_s
     except HTTPException:
         return PlainTextResponse("")
     return PlainTextResponse(sv.head_html(meta), media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})
+
+
+def store_base(t: Tenant) -> str:
+    """https://<dominio de la tienda> (vacio si la tienda no tiene dominio propio)."""
+    dom = (store_cfg(t).get("domain") or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
+    return _base(dom) if dom else ""
+
+
+def seo_block(db: Session, t: Tenant, path: str, *, ctx: Ctx | None = None, card: dict | None = None) -> dict | None:
+    """O1-06: lo mismo que /public/seo/head para esa ruta, como datos, para que la vitrina lo aplique al navegar sin
+    armar su propio JSON-LD (un solo JSON-LD: el del servidor). Aditivo: si falla, None y el navegador deja lo suyo."""
+    try:
+        m = seo_meta(db, t, store_base(t), path, ctx=ctx, card=card)
+    except Exception:  # noqa: BLE001 - el SEO nunca tumba la ficha ni el catalogo
+        return None
+    return {
+        "title": m["title"],
+        "description": str(m.get("description") or "")[:400],
+        "canonical": m.get("canonical"),
+        "robots": m.get("robots", "index,follow"),
+        "og_type": m.get("og_type", "website"),
+        "og_image": m.get("image"),
+        "ld": m.get("ld"),
+    }
+
+
+@seo.get("/noscript", response_class=PlainTextResponse)
+def seo_noscript(host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
+    """O1-06: lo que ve quien abre la tienda sin JavaScript (nginx lo incrusta por SSI dentro de <noscript>, solo en el
+    dominio de la tienda): el nombre del comercio y como contactarlo de verdad (WhatsApp y telefono). Vacio en otro
+    dominio."""
+    t = _tenant_by_host(db, _host(x_store_host, host))
+    if not t:
+        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
+    cfg = store_cfg(t)
+    b = business_of(cfg)
+    wa = re.sub(r"\D", "", cfg.get("whatsapp") or "")
+    tel = re.sub(r"\D", "", b.get("phone") or "") or wa
+    links = []
+    if wa:
+        links.append(f'<a href="https://wa.me/{wa}">WhatsApp</a>')
+    if tel:
+        tel = tel if len(tel) > 8 else "506" + tel
+        links.append(f'<a href="tel:+{tel}">Llamar al {sv.esc(b.get("phone") or "+" + tel)}</a>')
+    contacto = f"<p>Para ver los productos y comprar, activá JavaScript en tu navegador{(', o escribinos: ' + ' · '.join(links)) if links else ''}.</p>"
+    extra = "".join(f"<p>{sv.esc(x)}</p>" for x in (b.get("legal_name"), b.get("address"), b.get("hours")) if x)
+    body = f'<div class="sh-noscript"><h1>{sv.esc(cfg["name"])}</h1>{contacto}{extra}</div>'
+    return PlainTextResponse(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=300"})
 
 
 def _sitemap(db: Session, t: Tenant, base: str) -> str:

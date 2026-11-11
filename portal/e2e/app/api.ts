@@ -127,6 +127,14 @@ export function instalarApiE2e() {
       if (sub === "" && b.store && typeof b.store === "object") (b.store as Record<string, unknown>).business = COMERCIO_E2E;
       if (sub === "/checkout-config") Object.assign(b, { business: COMERCIO_E2E, holders: { sinpe: "Comercio de Prueba SRL", transferencia: "Comercio de Prueba SRL" }, hold: { enabled: true, manual_hours: 48, card_minutes: 30 } });
     }
+    // O1-06: la ficha trae su bloque seo (el mismo del SSI en el API real); el resto no, para probar los dos caminos
+    if (method === "GET" && sub.startsWith("/item/") && body && typeof body === "object" && !("seo" in body)) {
+      const b = body as { name: string; path: string; image?: string | null };
+      (b as Record<string, unknown>).seo = {
+        title: `${b.name} · Crimson`, description: `Ficha de prueba de ${b.name}.`, canonical: `${location.origin}${b.path}`, robots: "index,follow",
+        og_type: "product", og_image: null, ld: { "@context": "https://schema.org", "@graph": [{ "@type": "Product", name: b.name }] },
+      };
+    }
     // /availability?ids= devuelve la disponibilidad plana por id: { items: [{ id, state, label, ... }] }
     const fixed = method === "GET" && sub === "/availability" && body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)
       ? { items: (body as { items: { id: number }[] }).items.map((it) => (DISPONIBILIDAD[it.id] ? { id: it.id, ...dispo(it.id) } : it)) }

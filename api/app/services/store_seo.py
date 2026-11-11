@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 
 
 def esc(s: object) -> str:
@@ -48,15 +49,61 @@ def head_html(meta: dict) -> str:
     return "\n".join(parts)
 
 
+SCHEMA = "https://schema.org/"
+# estados que se pagan en linea (los mismos de services/availability.SELLABLE_STATES)
+BUYABLE_STATES = ("en_bodega", "bajo_pedido", "servicio")
+
+
+def schema_availability(state: str | None, cfg: dict | None = None) -> str:
+    """O1-06: la UNICA traduccion de la disponibilidad de la tienda a schema.org (lo que Google muestra).
+
+    en bodega = InStock · bajo pedido = BackOrder · agotado = OutOfStock · servicio = InStock.
+    «Por confirmar» (consultar: dato del proveedor viejo o comprometido) = OutOfStock mientras lo unico que se ofrece
+    es escribir por WhatsApp; pasa a BackOrder solo si la tienda deja «Solicitar sin pagar» (P-03,
+    out_of_stock_action = "solicitar"). Antes era BackOrder siempre: Google prometia un pedido que no se podia hacer.
+    cfg: los ajustes de inventario de la tienda (services/availability.settings_of)."""
+    if state in ("en_bodega", "disponible", "ultimas", "servicio"):
+        return SCHEMA + "InStock"
+    if state == "bajo_pedido":
+        return SCHEMA + "BackOrder"
+    if state == "consultar" and (cfg or {}).get("out_of_stock_action") == "solicitar":
+        return SCHEMA + "BackOrder"
+    return SCHEMA + "OutOfStock"
+
+
 def availability_schema(state: str, ultimas: bool | None = False) -> str:
-    """Estado de services/availability -> schema.org (en_bodega con pocas unidades = LimitedAvailability)."""
-    if state in ("en_bodega", "disponible", "ultimas"):
-        return "https://schema.org/LimitedAvailability" if (ultimas or state == "ultimas") else "https://schema.org/InStock"
-    return {
-        "bajo_pedido": "https://schema.org/BackOrder",
-        "agotado": "https://schema.org/OutOfStock",
-        "servicio": "https://schema.org/InStock",
-    }.get(state, "https://schema.org/BackOrder")  # "consultar": se trae del distribuidor
+    """Compatibilidad (nombre viejo): la regla vive en schema_availability."""
+    return schema_availability(state)
+
+
+_DAYS = r"(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?"
+_HOURS_ONE = rf"{_DAYS}(?:,{_DAYS})* \d{{2}}:\d{{2}}-\d{{2}}:\d{{2}}"
+_HOURS_SCHEMA = re.compile(rf"^{_HOURS_ONE}(?:\s*;\s*{_HOURS_ONE})*$")
+
+
+def organization_ld(base: str, name: str, *, logo: str | None = None, whatsapp: str | None = None, business: dict | None = None) -> dict:
+    """Organization del JSON-LD con los datos del comercio (O1-17, Mi Tienda -> Datos del comercio) cuando existen:
+    razon social, cedula juridica, direccion, telefono, correo y horario. Nada vacio ni inventado.
+    openingHours solo si el horario ya viene en el formato de schema.org («Mo-Fr 08:00-17:00»): un texto libre
+    («Lunes a viernes de 8 a 5») no se publica ahi (seria un dato invalido para Google)."""
+    b = business or {}
+    phone = re.sub(r"\D", "", b.get("phone") or "") or re.sub(r"\D", "", whatsapp or "")
+    org: dict = {"@type": "Organization", "@id": base + "/#org", "name": name, "url": base + "/"}
+    if logo and str(logo).startswith("http"):
+        org["logo"] = logo
+    if b.get("legal_name"):
+        org["legalName"] = b["legal_name"]
+    if b.get("legal_id"):
+        org["taxID"] = b["legal_id"]
+    if phone:
+        org["telephone"] = "+" + (phone if len(phone) > 8 else "506" + phone)
+    if b.get("email"):
+        org["email"] = b["email"]
+    org["address"] = {"@type": "PostalAddress", **({"streetAddress": b["address"]} if b.get("address") else {}), "addressCountry": "CR"}
+    hours = (b.get("hours") or "").strip()
+    if hours and _HOURS_SCHEMA.match(hours):
+        org["openingHours"] = [h.strip() for h in hours.split(";") if h.strip()]
+    return org
 
 
 def breadcrumb_ld(base: str, items: list[tuple[str, str]]) -> dict:

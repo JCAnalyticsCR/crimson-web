@@ -504,3 +504,79 @@ def test_memoria_microsd_es_la_tarjeta_no_el_aparato_que_la_usa():
     assert tipo("Cámara IP Hikvision DS-2CV1023G2-LIDW(B) bullet audio 2 vias WiFi micro SD para exteriores 2MP") == "Cámara WiFi"
     assert tipo("Memoria micro SDXC 64GB Kingston clase 10 para cámaras de vigilancia") == "Memoria microSD"
     assert tipo("Memoria micro SD 128GB Hiksemi HS-TF-E1 especializada para videovigilancia") == "Memoria microSD"
+
+
+def _ld(html):
+    return json.loads(re.search(r'<script data-sh type="application/ld\+json" id="sh-ld">(.*?)</script>', html, re.S).group(1))
+
+
+def _meta(html, attr, key):
+    m = re.search(rf'<meta data-sh {attr}="{re.escape(key)}" content="([^"]*)">', html)
+    return m and m.group(1)
+
+
+def test_un_solo_json_ld_el_bloque_seo_es_el_del_servidor(client, auth, db_session):
+    """O1-06: /item, /catalog, /showcase e /info traen el mismo SEO que nginx incrusta por SSI (seo_meta), para que la
+    vitrina no arme su propio JSON-LD al navegar; disponibilidad veraz y datos del comercio en Organization."""
+    import html as htmllib
+
+    _publicar(client, business={"legal_name": "Comercio de Prueba S.A.", "legal_id": "3-101-000000", "address": "San José, Costa Rica", "phone": "2222-3333", "hours": "Mo-Fr 08:00-17:00"})
+    prods = _catalogo(db_session)
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    cam = prods["DS-2CD1043G2-LIU"]
+    assert client.post("/stock/movements", json={"product_id": cam.id, "warehouse_id": main["id"], "kind": "entrada", "quantity": 5}).status_code == 201
+    H = {"X-Store-Host": "tienda.crimsoncr.com"}
+    S = "/public/store/crimson"
+
+    def igual(bloque, ruta):
+        head = client.get(f"/public/seo/head{ruta}", headers=H).text
+        assert bloque["title"] == htmllib.unescape(re.search(r"<title>(.*?)</title>", head).group(1))
+        assert bloque["description"] == htmllib.unescape(_meta(head, "name", "description"))
+        assert bloque["robots"] == _meta(head, "name", "robots")
+        assert bloque["canonical"] == htmllib.unescape(re.search(r'rel="canonical" href="([^"]*)"', head).group(1))
+        assert bloque["ld"] == _ld(head)
+
+    ficha = client.get(f"{S}/item/x-{cam.id}").json()
+    igual(ficha["seo"], ficha["path"])
+    igual(client.get(f"{S}/catalog", params={"category": "videovigilancia"}).json()["seo"], "/c/videovigilancia")
+    igual(client.get(f"{S}/catalog").json()["seo"], "/catalogo")
+    igual(client.get(f"{S}/showcase").json()["seo"], "")
+    igual(client.get(f"{S}/info/preguntas-frecuentes").json()["seo"], "/info/preguntas-frecuentes")
+    assert client.get(f"{S}/catalog", params={"q": "camara"}).json()["seo"]["robots"] == "noindex,follow"
+
+    # en bodega: InStock con precio valido 30 dias; sin existencias: OutOfStock y sin promesa de precio
+    oferta = next(n for n in ficha["seo"]["ld"]["@graph"] if n["@type"] == "Product")["offers"]
+    assert oferta["availability"] == "https://schema.org/InStock" and "priceValidUntil" in oferta
+    sin = client.get(f"{S}/item/x-{prods['DS-2CD1143G2-LIU'].id}").json()
+    assert sin["availability"]["state"] not in ("en_bodega", "bajo_pedido")
+    oferta = next(n for n in sin["seo"]["ld"]["@graph"] if n["@type"] == "Product")["offers"]
+    assert oferta["availability"] == "https://schema.org/OutOfStock" and "priceValidUntil" not in oferta and "price" in oferta
+    # la ficha trae un solo JSON-LD con Product, BreadcrumbList y Organization (con los datos del comercio)
+    org = next(n for n in ficha["seo"]["ld"]["@graph"] if n["@type"] == "Organization")
+    assert org["legalName"] == "Comercio de Prueba S.A." and org["taxID"] == "3-101-000000"
+    assert org["telephone"] == "+50622223333" and org["address"]["streetAddress"] == "San José, Costa Rica"
+    assert org["openingHours"] == ["Mo-Fr 08:00-17:00"]
+
+
+def test_disponibilidad_para_google_y_horario_libre():
+    from app.services.store_seo import organization_ld, schema_availability
+
+    S = "https://schema.org/"
+    assert schema_availability("en_bodega") == S + "InStock"
+    assert schema_availability("servicio") == S + "InStock"
+    assert schema_availability("bajo_pedido") == S + "BackOrder"
+    assert schema_availability("agotado") == S + "OutOfStock"
+    # por confirmar: solo WhatsApp -> OutOfStock; con «Solicitar sin pagar» (P-03) -> BackOrder
+    assert schema_availability("consultar", {"out_of_stock_action": "whatsapp"}) == S + "OutOfStock"
+    assert schema_availability("consultar", {"out_of_stock_action": "solicitar"}) == S + "BackOrder"
+    # un horario en texto libre no se publica como openingHours (seria invalido); sin datos, nada vacio
+    org = organization_ld("https://t.cr", "Tienda", business={"hours": "Lunes a viernes de 8 a 5"})
+    assert "openingHours" not in org and "legalName" not in org and "telephone" not in org
+    assert organization_ld("https://t.cr", "Tienda", whatsapp="+506 8888-9892")["telephone"] == "+50688889892"
+
+
+def test_sin_javascript_el_dominio_de_la_tienda_muestra_contacto_real(client, auth, db_session):
+    _publicar(client, business={"phone": "2222-3333"})
+    html = client.get("/public/seo/noscript", headers={"X-Store-Host": "tienda.crimsoncr.com"}).text
+    assert 'href="https://wa.me/50688889892"' in html and 'href="tel:+50622223333"' in html
+    assert client.get("/public/seo/noscript", headers={"X-Store-Host": "portal.crimsoncr.com"}).text == ""

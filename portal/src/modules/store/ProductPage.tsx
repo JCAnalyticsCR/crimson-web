@@ -5,7 +5,7 @@
    Si el snapshot está cargado, muestra nombre/foto/precio/disponibilidad al instante sin esperar /item. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type SeoBlock, type Variant, type VProd } from "./storeKit";
 import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
@@ -13,6 +13,7 @@ import { useSnapshot } from "./useSnapshot";
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
   breadcrumbs: { name: string; path: string }[]; related: VProd[]; accessories: { title: string; reason: string; items: VProd[] }[]; whatsapp: string;
+  seo?: SeoBlock | null;
 };
 
 export default function ProductPage() {
@@ -87,12 +88,10 @@ export default function ProductPage() {
 
   const S = ctx.store;
   const url = typeof location !== "undefined" ? location.href.split("?")[0] : "";
-  useHead(d ? {
-    title: `${d.name} · ${S.name}`,
-    description: `${(d.description || d.name).replace(/\s+/g, " ").slice(0, 150)} · Precio con IVA, envío a todo Costa Rica.`,
-    path: d.path, image: d.image, type: "product",
-    ld: { "@context": "https://schema.org", "@type": "Product", name: d.name, sku: d.code, image: d.images, brand: d.brand ? { "@type": "Brand", name: d.brand } : undefined, offers: Number(d.display_price) ? { "@type": "Offer", price: String(d.display_price), priceCurrency: d.display_currency, url } : undefined },
-  } : missing ? { title: `Producto no disponible · ${S.name}`, noindex: true } : null);
+  // O1-06: la descripcion, Open Graph y el JSON-LD de la ficha son los del API (bloque seo, el mismo del SSI); la ficha
+  // ya no arma los suyos
+  useHead(d ? { title: `${d.name} · ${S.name}`, path: d.path, image: d.image, type: "product", seo: d.seo }
+    : missing ? { title: `Producto no disponible · ${S.name}`, noindex: true } : null);
 
   if (missing) return <div className="sh-wrap"><EmptyHelp title="Este producto ya no está disponible." text="Puede que lo hayamos reemplazado por un modelo nuevo. Te ayudamos a encontrar el equivalente."><Link className="sh-btn" to={to("/catalogo")}>Ver catálogo</Link></EmptyHelp></div>;
   if (!d) return <div className="sh-wrap"><div className="vt-pdp" style={{ paddingTop: 24 }}><div className="sh-skel" style={{ aspectRatio: "1" }} /><div style={{ display: "grid", gap: 12, alignContent: "start" }}><div className="sh-skel" style={{ height: 22, width: "40%" }} /><div className="sh-skel" style={{ height: 70 }} /><div className="sh-skel" style={{ height: 160 }} /></div></div></div>;
