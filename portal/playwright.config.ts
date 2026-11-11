@@ -16,6 +16,11 @@ const SOLO_CAPTURAS = [375, 768, 1280]; // capturas base (toHaveScreenshot)
 const SOLO_AXE = [375, 1280]; // informe de accesibilidad y recorrido de compra
 /* la compra real contra el API local (O0-03) tiene su propia configuracion y sus servidores: `npm run e2e:compra` */
 const COMPRA_REAL = "**/compra.spec.ts";
+/* Prueba de humo en WebKit (O1-18: Safari de iPhone, el navegador que mas se rompe con sintaxis nueva). En CI corre
+   siempre (la imagen de Playwright trae WebKit); en una maquina local solo con E2E_WEBKIT=1, despues de
+   `npx playwright install webkit`. */
+const WEBKIT = CI || process.env.E2E_WEBKIT === "1";
+const HUMO = "**/humo.spec.ts";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -43,7 +48,7 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: ANCHOS.map(([w, h]) => ({
+  projects: [...ANCHOS.map(([w, h]) => ({
     name: `w${w}`,
     use: { viewport: { width: w, height: h }, isMobile: w < 1024, hasTouch: w < 1024 },
     testIgnore: [
@@ -52,6 +57,8 @@ export default defineConfig({
       ...(SOLO_AXE.includes(w) ? [] : ["**/axe.spec.ts", "**/compra-mock.spec.ts"]),
     ],
   })),
+  ...(WEBKIT ? [{ name: "webkit-375", testMatch: HUMO, use: { browserName: "webkit" as const, viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true } }] : []),
+  ],
   webServer: {
     command: "npm run e2e:servir",
     url: `http://127.0.0.1:${PUERTO}/`,

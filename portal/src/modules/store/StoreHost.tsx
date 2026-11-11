@@ -9,7 +9,7 @@
      /page/solicitud-de-asesoria… -> /asesoria
    En produccion nginx ya responde estas con un 301 del API (/public/seo/legacy) antes de llegar aqui; esto
    cubre el servidor de desarrollo y cualquier enlace que se escape. */
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 const PublicStore = lazy(() => import("./PublicStore"));
@@ -48,16 +48,39 @@ function Page() {
   return <Navigate to={ref.includes("asesoria") ? "/asesoria" : "/"} replace />;
 }
 
+/** espera antes del reintento automatico cuando falla la primera llamada (O1-18) */
+export const REINTENTO_MS = 2000;
+
+/** «No pudimos cargar la tienda.» con salida: el foco va directo a «Reintentar» (role alert lo anuncia). */
+function NoCargo({ onRetry }: { onRetry: () => void }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => btn.current?.focus(), []);
+  return (
+    <div role="alert" style={{ minHeight: "100dvh", display: "grid", placeItems: "center", alignContent: "center", gap: 16, padding: 16, background: "#f6f2ee", color: "#3d3842", fontFamily: "Arial, Helvetica, sans-serif", textAlign: "center" }}>
+      <p style={{ margin: 0, fontSize: 18 }}>No pudimos cargar la tienda.</p>
+      <button ref={btn} type="button" onClick={onRetry} style={{ minHeight: 44, padding: "0 24px", borderRadius: 999, border: 0, background: "#15131a", color: "#fff", font: "700 16px Arial, Helvetica, sans-serif", cursor: "pointer" }}>Reintentar</button>
+    </div>
+  );
+}
+
 export default function StoreHost() {
   const [slug, setSlug] = useState<string | null>(null);
   const [err, setErr] = useState(false);
+  const [intento, setIntento] = useState(0);
   useEffect(() => {
-    fetch(`/api/public/store-domain?host=${encodeURIComponent(location.hostname)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((j) => setSlug(j.slug))
-      .catch(() => setErr(true));
-  }, []);
-  if (err) return <div style={{ minHeight: "100dvh", display: "grid", placeItems: "center", background: "#f6f2ee", color: "#5a5560", fontFamily: "Arial, Helvetica, sans-serif" }}>Tienda no disponible en este momento.</div>;
+    // O1-18: un tropiezo de red no deja la tienda en blanco: un reintento automatico a los 2 s y, si vuelve a fallar,
+    // un aviso con «Reintentar» (que repite la misma secuencia)
+    let alive = true;
+    let t: number | undefined;
+    const pedir = () => fetch(`/api/public/store-domain?host=${encodeURIComponent(location.hostname)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))));
+    pedir()
+      .catch(() => new Promise((res) => { t = window.setTimeout(res, REINTENTO_MS); }).then(pedir))
+      .then((j) => { if (alive) setSlug(j.slug); })
+      .catch(() => { if (alive) setErr(true); });
+    return () => { alive = false; window.clearTimeout(t); };
+  }, [intento]);
+  if (err) return <NoCargo onRetry={() => { setErr(false); setIntento((n) => n + 1); }} />;
   if (!slug) return <Spin />;
   return (
     <Suspense fallback={<Spin />}>

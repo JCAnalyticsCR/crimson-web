@@ -4,6 +4,7 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { OBJETIVO_NAVEGADORES } from "./vite.config";
 
 const PUERTO = Number(process.env.E2E_PUERTO) || 5301;
 
@@ -18,6 +19,6 @@ export default defineConfig({
     outDir: resolve(__dirname, "e2e/.dist"),
     emptyOutDir: true,
     sourcemap: false,
-    target: "es2022",
+    target: OBJETIVO_NAVEGADORES, // el mismo del build real (vite.config.ts): la prueba de humo en WebKit lo cubre
   },
 });

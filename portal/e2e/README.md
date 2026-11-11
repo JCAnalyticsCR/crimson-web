@@ -42,6 +42,9 @@ No es la compra real: aquí no hay inventario, pago ni correo. La compra de punt
 | `compra-mock.spec.ts` | Recorrido ficha → carrito → 4 pasos del checkout → «Mi pedido», sobre el mock | 375, 1280 |
 | `compra.spec.ts` | La compra real contra el API local: **no** corre con `npm run e2e`, sino con `npm run e2e:compra` | 375, 768 |
 | `pendientes.spec.ts` | Fallos conocidos, como `test.fixme` con su tarea | todos |
+| `venta-asistida.spec.ts` | Ficha «por confirmar» (O1-02) y desglose de IVA con `/item` lento (O1-03) | todos |
+| `tienda-carga.spec.ts` | La tienda reintenta si falla `/store-domain` y ofrece «Reintentar» (O1-18) | todos |
+| `humo.spec.ts` | La portada pinta sin errores; también en **WebKit** (proyecto `webkit-375`: siempre en CI, local con `E2E_WEBKIT=1` tras `npx playwright install webkit`) | todos + WebKit |
 
 Agregar una pantalla: una entrada en `soporte/pantallas.ts` (con `base: true` entra también a capturas y axe).
 

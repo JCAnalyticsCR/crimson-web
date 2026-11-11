@@ -9,6 +9,7 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { OBJETIVO_NAVEGADORES } from "./vite.config";
 
 const PUERTO = Number(process.env.E2E_PUERTO) || 5301;
 const API = process.env.E2E_API_URL || `http://127.0.0.1:${Number(process.env.E2E_API_PUERTO) || 8101}`;
@@ -24,5 +25,5 @@ export default defineConfig({
   // solo esta maquina: ni el servidor de desarrollo ni el de vista previa escuchan en la red
   server: { host: "127.0.0.1", port: PUERTO, strictPort: true, proxy },
   preview: { host: "127.0.0.1", port: PUERTO, strictPort: true, proxy },
-  build: { outDir: resolve(__dirname, "e2e/.dist-compra"), emptyOutDir: true, sourcemap: false, target: "es2022" },
+  build: { outDir: resolve(__dirname, "e2e/.dist-compra"), emptyOutDir: true, sourcemap: false, target: OBJETIVO_NAVEGADORES },
 });
