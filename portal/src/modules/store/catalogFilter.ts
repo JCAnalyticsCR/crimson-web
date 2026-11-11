@@ -45,6 +45,8 @@ export type Snapshot = {
   brands: Array<{ name: string; count: number }>;
   types: Array<{ name: string; count: number }>;
   showcase: SnapShowcase;
+  /** O1-14: tabla de sinonimos del buscador (raiz -> raices del grupo). Falta en un snapshot viejo: sin sinonimos. */
+  syn?: Record<string, string[]>;
 };
 
 // ── Tipos de resultados ───────────────────────────────────────────────────────
@@ -103,26 +105,54 @@ export function descendants(cats: SnapCategory[], cid: number): Set<number> {
   return out;
 }
 
-/** Normaliza igual que el backend: NFD → quita diacríticos → minúsculas. */
-function norm(s: string): string {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+// ── Buscador (O1-14): la MISMA regla que api/app/services/store_search.py ─────
+// Si cambias algo aqui, cambia lo mismo alla: la prueba de paridad (busqueda_casos.json) lo exige.
+
+/** minusculas y sin tildes (NFKD y fuera todo lo que no es ASCII, como el `encode("ascii", "ignore")` del API) */
+export function fold(s: string): string {
+  return (s || "").normalize("NFKD").replace(/[^\x00-\x7f]/g, "").toLowerCase();
+}
+export const words = (s: string | null | undefined): string[] => fold(s || "").match(/[a-z0-9]+/g) || [];
+export const compact = (s: string | null | undefined): string => words(s).join("");
+/** raiz: sin plural (es / s) y sin la vocal final; los numeros y las palabras cortas quedan igual */
+export function stem(w: string): string {
+  if (w.length <= 3 || /^\d+$/.test(w)) return w;
+  if (w.endsWith("es") && w.length > 4 && !"aeiou".includes(w[w.length - 3])) w = w.slice(0, -2);
+  else if (w.endsWith("s")) w = w.slice(0, -1);
+  if (w.length > 3 && "aeo".includes(w[w.length - 1])) w = w.slice(0, -1);
+  return w;
+}
+/** campo de busqueda (el sf del snapshot): las palabras normalizadas separadas por un espacio */
+export const searchField = (...parts: (string | null | undefined)[]) => parts.flatMap((p) => words(p)).join(" ");
+const splitQuery = (q: string) => words(q).slice(0, 8);
+
+function termMatches(term: string, stems: string[], comp: string, syn: Record<string, string[]>): boolean {
+  const t = stem(term);
+  const alts = syn[t] || syn[term] || [t];
+  if (stems.some((s) => alts.some((a) => s.startsWith(a)))) return true;
+  const c = compact(term);
+  return c.length >= 3 && [c, ...(syn[c] || [])].some((a) => a.length >= 3 && comp.includes(a));
 }
 
-/** Divide la consulta en términos normalizados (igual que sv.split_terms). */
-function splitTerms(q: string): string[] {
-  return norm(q).split(/\s+/).filter(Boolean);
-}
-
-/** Score de búsqueda: 0 = no coincide, >0 = número de términos en sf.
- *  AND estricto: todos los términos deben aparecer en sf. */
-function scoreSearch(sf: string, terms: string[]): number {
+/** 0 = no coincide. Si coincide: 100 por modelo o codigo, 20 si todas las palabras estan en el nombre, 5 por marca o
+    categoria que coincida, y 1 de base (services/store_search.score). */
+export function searchScore(q: string, p: { name: string; brand?: string | null; model?: string | null; code?: string | null; sf: string }, category: string | null, syn: Record<string, string[]>): number {
+  const terms = splitQuery(q);
   if (!terms.length) return 0;
-  let n = 0;
-  for (const t of terms) {
-    if (!sf.includes(t)) return 0;
-    n++;
-  }
-  return n;
+  const field = words(p.sf); // un sf viejo (con guiones y puntos) se normaliza igual
+  const stems = field.map(stem);
+  const comp = field.join("");
+  const whole = compact(q);
+  const every = terms.every((t) => termMatches(t, stems, comp, syn));
+  if (!every && !(whole.length >= 4 && comp.includes(whole))) return 0;
+  let pts = 1;
+  const codes = [p.model, p.code].filter(Boolean).map((x) => compact(x));
+  if (whole.length >= 3 && codes.some((c) => c.startsWith(whole) || c.includes(whole))) pts += 100;
+  const nameStems = words(p.name).map(stem);
+  if (terms.every((t) => termMatches(t, nameStems, compact(p.name), syn))) pts += 20;
+  const side = words([p.brand, category].filter(Boolean).join(" ")).map(stem);
+  pts += 5 * terms.filter((t) => termMatches(t, side, "", syn)).length;
+  return pts;
 }
 
 /** Prioridad de disponibilidad (aproximación de sort_key del backend). */
@@ -205,12 +235,13 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
     }
   }
 
-  // Búsqueda por términos en el campo sf (normalizado por el backend)
-  const terms = splitTerms(q);
+  // Búsqueda (O1-14): la misma regla del API sobre el campo sf y la tabla de sinonimos del snapshot
+  const terms = splitQuery(q);
   const scores = new Map<number, number>();
+  const syn = snap.syn || {};
   if (terms.length) {
     pool = pool.filter((p) => {
-      const s = scoreSearch(p.sf, terms);
+      const s = searchScore(q, p, p.category_id != null ? catById.get(p.category_id)?.name ?? null : null, syn);
       if (s > 0) { scores.set(p.id, s); return true; }
       return false;
     });

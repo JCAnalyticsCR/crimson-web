@@ -7,7 +7,7 @@
    (decision del dueno del 21/10: Hikvision destacado y primero). */
 import { describe, expect, it } from "vitest";
 import {
-  descendants, filterCatalog, pidFromRef, snapToVProd,
+  descendants, filterCatalog, pidFromRef, searchField, snapToVProd,
   type SnapCategory, type SnapProduct, type Snapshot,
 } from "../catalogFilter";
 
@@ -100,14 +100,16 @@ describe("filterCatalog · búsqueda", () => {
     expect(ids(todos({ q: "nodo" })).sort()).toEqual([4, 6]);
   });
 
-  it("hoy el plural no encuentra el singular (lo cambia O1-14)", () => {
-    expect(todos({ q: "camaras" }).total).toBe(0);
-    expect(todos({ q: "grabadores" }).total).toBe(0);
+  it("[O1-14] el plural encuentra el singular", () => {
+    expect(ids(todos({ q: "camaras" }))).toEqual([1, 2]);
+    expect(ids(todos({ q: "grabadores" }))).toEqual([3]);
   });
 
-  it("hoy no encuentra por código (SKU) ni por modelo escrito sin guion (lo cambia O1-14)", () => {
-    expect(todos({ q: "SKU-3" }).total).toBe(0);
-    expect(todos({ q: "hk200" }).total).toBe(0);
+  it("[O1-14] encuentra el modelo escrito sin guion y, con el sf nuevo (codigo y SKU incluidos), por codigo", () => {
+    expect(ids(todos({ q: "hk200" }))).toEqual([2]);
+    expect(todos({ q: "SKU-3" }).total).toBe(0); // el sf viejo (nombre, marca, modelo) no trae el codigo
+    const nuevo: Snapshot = { ...SNAP, products: SNAP.products.map((p) => ({ ...p, sf: searchField(p.name, p.brand, p.model, p.code) })) };
+    expect(ids(filterCatalog(nuevo, { q: "SKU-3" }))).toEqual([3]);
   });
 
   it("entre coincidencias manda la disponibilidad: en bodega antes que bajo pedido", () => {

@@ -37,8 +37,8 @@ Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
         "max_qty": 5 | null,        -- null = sin tope
         "plazo": null | "3-5 dias"
       },
-      "sf": "hikvision ds-2cd2143g2-i cam ip poe"  -- search field: name+brand+model normalizado para
-                                                    -- busqueda tolerante en el cliente (minusculas, sin acento)
+      "sf": "hikvision ds 2cd2143g2 i camara ip"  -- O1-14: nombre, marca, modelo, codigo, SKU, categoria y tipo
+                                                    -- normalizados (services/store_search; el navegador usa la misma regla)
     },
     ...
   ],
@@ -75,7 +75,7 @@ Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
 
 Notas para el frontend:
 - "display_price" es el precio CON IVA en la moneda del tenant (CRC o USD): lo que se muestra.
-- La busqueda usa el campo "sf": split por espacio, cada termino debe aparecer en "sf" del producto.
+- La busqueda usa "sf" y la tabla "syn" con la regla de services/store_search (O1-14), la misma en el navegador.
 - Los agotados ocultos NO estan en el snapshot (misma regla que catalog() hoy).
 - La ficha completa (descripcion larga, specs, accesorios sugeridos) sigue en /catalog?ids=<id>.
 """
@@ -86,7 +86,6 @@ import gzip
 import hashlib
 import json
 import logging
-import unicodedata
 import weakref
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -98,21 +97,6 @@ log = logging.getLogger("crimson.snapshot")
 
 FORMAT_V = 2  # O1-13: precio de la ficha, comparacion con respaldo; el navegador descarta un snapshot guardado con v menor
 COMPARE_MIN_DAYS = 30  # un tachado necesita 30 dias de historial propio a ese precio (plan: nada de tachados sin respaldo)
-
-
-def _nfc(s: str) -> str:
-    """Normaliza a NFC y quita acentos: para el campo de busqueda 'sf'."""
-    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode()
-
-
-def _sf(name: str, brand: str | None, model: str | None) -> str:
-    """Campo de busqueda: nombre + marca + modelo en minusculas sin acento."""
-    parts = [name]
-    if brand:
-        parts.append(brand)
-    if model:
-        parts.append(model)
-    return _nfc(" ".join(parts)).lower()
 
 
 def build(db: Session, t, ctx) -> bytes:
@@ -128,6 +112,7 @@ def build(db: Session, t, ctx) -> bytes:
         _published_light,
         _stock_map,
     )
+    from ..services import store_search
     from ..services import store_showcase as sv
 
     prods = _published_light(db, t.id)
@@ -162,7 +147,8 @@ def build(db: Session, t, ctx) -> bytes:
                 "type": sv.product_type(p),
                 "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
                 "availability": _avail(own),
-                "sf": _sf(p.name, p.brand, p.model),
+                # O1-14: nombre, marca, modelo, codigo, SKU, categoria y tipo, normalizados (services/store_search)
+                "sf": sv.search_text(p, ctx.cat_name.get(p.category_id)),
             }
         )
         if p.id in backed and price_with_tax > 0:
@@ -209,6 +195,7 @@ def build(db: Session, t, ctx) -> bytes:
     payload = {
         "v": FORMAT_V,
         "version": version,
+        "syn": store_search.SYNONYMS,  # O1-14: la tabla de sinonimos una vez (el navegador usa la misma regla)
         "built_at": datetime.now(UTC).isoformat(),
         "currency": ctx.pricer.currency,
         "n": len(items),

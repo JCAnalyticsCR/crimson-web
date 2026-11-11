@@ -68,9 +68,10 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort, live]);
 
-  /** Cuántos productos mostrar en el modo snapshot (crece con "Cargar más"). */
-  const [displayLimit, setDisplayLimit] = useState(PAGE);
-  useEffect(() => { setDisplayLimit(PAGE); }, [qs]);
+  /** Cuántos productos mostrar en el modo snapshot: «Ver 24 más» lo guarda en ?pagina=N (O1-14; el mismo parámetro de
+      O2-01c), así volver de una ficha no pierde el lugar. */
+  const pagina = Math.max(1, Math.min(200, Number(sp.get("pagina")) || 1));
+  const displayLimit = PAGE * pagina;
 
   // ── Estado de la respuesta (API o snapshot) ────────────────────────────────
   const [res, setRes] = useState<Res | null>(null);
@@ -122,8 +123,10 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
 
   const loadMore = () => {
     if (snapResult) {
-      // snapshot: mostrar más sin llamada al API
-      setDisplayLimit((n) => n + PAGE);
+      // snapshot: mostrar más sin llamada al API; el avance queda en la direccion (atras desde una ficha vuelve aqui)
+      const n = new URLSearchParams(sp);
+      n.set("pagina", String(pagina + 1));
+      setSp(n, { replace: true });
       return;
     }
     setMore(true);
@@ -139,6 +142,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
 
   const set = useCallback((patch: Record<string, string | string[] | null>) => {
     const n = new URLSearchParams(sp);
+    n.delete("pagina"); // otro filtro u otro orden: se vuelve a la primera pagina
     for (const [k, v] of Object.entries(patch)) {
       n.delete(k);
       if (Array.isArray(v)) v.forEach((x) => n.append(k, x));
@@ -149,12 +153,13 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   const clearAll = () => setSp(q ? new URLSearchParams({ q }) : new URLSearchParams(), { replace: true });
   const activeCount = brands.length + (tipo ? 1 : 0) + (min || max ? 1 : 0) + (disp ? 1 : 0);
 
+  const catMissing = mode === "category" && !!snapResult && !snapResult.category;
   const title = mode === "search" ? (q ? `Resultados para “${q}”` : "Buscar") : res?.category?.name || (mode === "category" ? "Categoría" : "Catálogo completo");
   useHead({
     title: `${mode === "search" ? `Buscar “${q}”` : title} · ${ctx.store.name}`,
     description: mode === "category" && res?.category ? res.category.description || `${res.category.name} en ${ctx.store.name}: precios con IVA, envío a todo Costa Rica y asesoría técnica.` : "Catálogo completo con precios e IVA incluido.",
     path: mode === "category" && res?.category ? `/c/${res.category.slug}` : mode === "all" ? "/catalogo" : "/buscar",
-    noindex: mode === "search" || activeCount > 0,
+    noindex: mode === "search" || activeCount > 0 || catMissing,
     seo: res?.seo, // solo sin snapshot (respaldo por /catalog); con snapshot, la canonica y el titulo de aqui
   });
 
@@ -170,7 +175,8 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     return () => { document.removeEventListener("keydown", onKey); prev?.focus?.(); };
   }, [sheet]);
 
-  if (missing) return <div className="sh-wrap"><EmptyHelp title="Esta categoría ya no está disponible." text="Puede que la hayamos reorganizado."><Link className="sh-btn" to={to("/catalogo")}>Ver catálogo completo</Link></EmptyHelp></div>;
+  // O1-14: una categoria que no existe lo dice (antes, segun quien llegaba primero, listaba todo el catalogo)
+  if (missing || catMissing) return <div className="sh-wrap"><EmptyHelp title="Esta categoría ya no está disponible" text="Puede que la hayamos reorganizado."><Link className="sh-btn" to={to("/catalogo")}>Ver todo el catálogo</Link></EmptyHelp></div>;
 
   const crumbs: { name: string; path?: string }[] = [{ name: "Tienda", path: "/" }];
   if (res?.category?.parent) crumbs.push({ name: res.category.parent.name, path: res.category.parent.path });

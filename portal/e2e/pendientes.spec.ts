@@ -36,19 +36,36 @@ test.fixme("[O1-08] la tarjeta de una barra de sonido no dice «Cámara»", asyn
   await expect(tarjeta.locator(".vt-card__meta")).not.toContainText(/c[aá]mara/i);
 });
 
-test.fixme("[O1-14] buscar «camaras» encuentra las cámaras", async ({ page }) => {
+test("[O1-14] buscar «camaras» encuentra las cámaras", async ({ page }) => {
   // hoy el plural no encuentra el singular: solo sale el producto que dice «cámaras» en el nombre
   await page.goto("/buscar?q=camaras");
   await tiendaLista(page);
   await expect(page.locator(".vt-grid .vt-card", { hasText: /C[aá]mara (bullet|domo)/i }).first()).toBeVisible();
 });
 
-test.fixme("[O1-14] una categoría que no existe lo dice, en vez de listar todo el catálogo", async ({ page }) => {
+test("[O1-14] una categoría que no existe lo dice, en vez de listar todo el catálogo", async ({ page }) => {
   // hoy depende de una carrera: si el snapshot llega antes que /catalog lista todo; si llega despues, sale el aviso
   await page.goto("/c/no-existe");
   await tiendaLista(page);
   await expect(page.locator("main")).toContainText("Esta categoría ya no está disponible");
   await expect(page.locator(".vt-grid .vt-card")).toHaveCount(0);
+});
+
+test("[O1-14] «Ver más» queda en la dirección y volver de una ficha conserva el lugar", async ({ page }) => {
+  await page.goto("/catalogo");
+  await tiendaLista(page);
+  const tarjetas = page.locator(".vt-grid .vt-card:not(.vt-card--skel)");
+  await expect(tarjetas).toHaveCount(24);
+  await page.locator(".vt-pager button").click();
+  await expect(page).toHaveURL(/[?&]pagina=2/);
+  const n = await tarjetas.count();
+  expect(n).toBeGreaterThan(24);
+  await tarjetas.nth(n - 1).locator(".vt-card__name").click();
+  await expect(page.locator(".vt-buybox")).toBeVisible();
+  await page.goBack();
+  await tiendaLista(page);
+  await expect(page).toHaveURL(/[?&]pagina=2/);
+  await expect(tarjetas).toHaveCount(n);
 });
 
 // una prueba viva en el archivo: la ficha «por confirmar» del catalogo de pruebas esta en el estado que las de arriba suponen

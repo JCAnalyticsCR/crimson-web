@@ -369,54 +369,25 @@ def ports(p: Product) -> int | None:
     return int(m.group(1)) if m else None
 
 
-# ---------------------------------------------------------------- busqueda tolerante
-SYNONYMS = {
-    "grabador": ("nvr", "dvr", "grabador", "grabadora"),
-    "grabadora": ("nvr", "dvr", "grabador", "grabadora"),
-    "camara": ("camara", "camera", "cam"),
-    "camaras": ("camara", "camera", "cam"),
-    "disco": ("disco", "hdd"),
-    "ups": ("ups", "back-ups"),
-    "wifi": ("wifi", "wi-fi", "inalambric"),
-    "acceso": ("acceso", "lector", "facial"),
-}
+# ---------------------------------------------------------------- busqueda tolerante (regla unica: store_search, O1-14)
+def search_text(p: Product, cat_name: str | None) -> str:
+    """campo de busqueda del producto (el mismo sf del snapshot): nombre, marca, modelo, codigo, SKU, categoria y tipo"""
+    from . import store_search as ss
+
+    return ss.search_field(p.name, p.brand, p.model, p.code, p.supplier_sku, cat_name, product_type(p))
 
 
-def haystack(p: Product, cat_name: str | None) -> tuple[str, str]:
-    raw = " ".join(x or "" for x in (p.name, p.code, p.brand, p.model, p.supplier_sku, cat_name, product_type(p)))
-    return " " + fold(raw) + " ", compact(raw)
+def search_score(p: Product, cat_name: str | None, terms: list[str], hay: str | None = None) -> int:
+    """0 = no coincide. La regla vive en services/store_search (la misma del navegador)."""
+    from . import store_search as ss
 
-
-def search_score(p: Product, cat_name: str | None, terms: list[str], hay: tuple[str, str] | None = None) -> int:
-    """0 = no coincide. Todas las palabras deben aparecer (sin tildes, con o sin guiones). Mas puntos si el
-    codigo o el modelo empiezan igual que lo buscado, o si la palabra esta en el nombre."""
-    text, comp = hay or haystack(p, cat_name)
-    name = fold(p.name)
-    codes = [compact(p.code), compact(p.model or ""), compact(p.supplier_sku or "")]
-    score = 1
-    for t in terms:
-        c = compact(t)
-        if not c:
-            continue
-        alts = SYNONYMS.get(c, (c,))
-        variants = (
-            {compact(a) for a in alts} | ({c[:-1]} if len(c) > 4 and c.endswith("s") else set()) | ({c[:-2]} if len(c) > 5 and c.endswith("es") else set())
-        )
-        if not any(v and v in comp for v in variants):
-            return 0
-        if any(cd and cd.startswith(c) for cd in codes):
-            score += 40
-        elif any(cd and c in cd for cd in codes):
-            score += 20
-        if any(v in compact(name) for v in variants):
-            score += 6
-        if re.search(rf"\b{re.escape(fold(t))}\b", name):
-            score += 4
-    return score
+    return ss.score(" ".join(terms), name=p.name, brand=p.brand, model=p.model, code=p.code, category=cat_name, sf=hay or search_text(p, cat_name))
 
 
 def split_terms(q: str) -> list[str]:
-    return [w for w in re.split(r"[\s,;/]+", (q or "").strip()) if w][:8]
+    from . import store_search as ss
+
+    return ss.split_query(q)
 
 
 # ---------------------------------------------------------------- configurador "Arma tu sistema"

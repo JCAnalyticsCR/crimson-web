@@ -1,0 +1,748 @@
+{
+ "_": "Casos del buscador (O1-14). Los arma api/app/services/store_search.py; los comprueban tests/test_tienda_busqueda.py y __tests__/busqueda.test.ts. Datos ficticios.",
+ "syn": {
+  "altavoz": [
+   "altavoz",
+   "bocin",
+   "bocina",
+   "parlant",
+   "parlante"
+  ],
+  "bocin": [
+   "altavoz",
+   "bocin",
+   "bocina",
+   "parlant",
+   "parlante"
+  ],
+  "bocina": [
+   "altavoz",
+   "bocin",
+   "bocina",
+   "parlant",
+   "parlante"
+  ],
+  "parlant": [
+   "altavoz",
+   "bocin",
+   "bocina",
+   "parlant",
+   "parlante"
+  ],
+  "parlante": [
+   "altavoz",
+   "bocin",
+   "bocina",
+   "parlant",
+   "parlante"
+  ],
+  "extensor": [
+   "extensor",
+   "repetidor"
+  ],
+  "repetidor": [
+   "extensor",
+   "repetidor"
+  ],
+  "timbr": [
+   "timbr",
+   "timbre",
+   "videoporter",
+   "videoportero"
+  ],
+  "timbre": [
+   "timbr",
+   "timbre",
+   "videoporter",
+   "videoportero"
+  ],
+  "videoporter": [
+   "timbr",
+   "timbre",
+   "videoporter",
+   "videoportero"
+  ],
+  "videoportero": [
+   "timbr",
+   "timbre",
+   "videoporter",
+   "videoportero"
+  ],
+  "tplink": [
+   "tplink"
+  ],
+  "inalambric": [
+   "inalambric",
+   "inalambrico",
+   "wifi"
+  ],
+  "inalambrico": [
+   "inalambric",
+   "inalambrico",
+   "wifi"
+  ],
+  "wifi": [
+   "inalambric",
+   "inalambrico",
+   "wifi"
+  ],
+  "wifi6": [
+   "wifi6"
+  ],
+  "dvr": [
+   "dvr",
+   "grabador",
+   "grabadora",
+   "nvr"
+  ],
+  "grabador": [
+   "dvr",
+   "grabador",
+   "grabadora",
+   "nvr"
+  ],
+  "grabadora": [
+   "dvr",
+   "grabador",
+   "grabadora",
+   "nvr"
+  ],
+  "nvr": [
+   "dvr",
+   "grabador",
+   "grabadora",
+   "nvr"
+  ],
+  "cam": [
+   "cam",
+   "camar",
+   "camara",
+   "camer",
+   "camera"
+  ],
+  "camar": [
+   "cam",
+   "camar",
+   "camara",
+   "camer",
+   "camera"
+  ],
+  "camara": [
+   "cam",
+   "camar",
+   "camara",
+   "camer",
+   "camera"
+  ],
+  "camer": [
+   "cam",
+   "camar",
+   "camara",
+   "camer",
+   "camera"
+  ],
+  "camera": [
+   "cam",
+   "camar",
+   "camara",
+   "camer",
+   "camera"
+  ],
+  "disc": [
+   "disc",
+   "disco",
+   "hdd"
+  ],
+  "disco": [
+   "disc",
+   "disco",
+   "hdd"
+  ],
+  "hdd": [
+   "disc",
+   "disco",
+   "hdd"
+  ],
+  "backup": [
+   "backup",
+   "backups",
+   "ups"
+  ],
+  "backups": [
+   "backup",
+   "backups",
+   "ups"
+  ],
+  "ups": [
+   "backup",
+   "backups",
+   "ups"
+  ],
+  "acces": [
+   "acces",
+   "acceso",
+   "facial",
+   "lector"
+  ],
+  "acceso": [
+   "acces",
+   "acceso",
+   "facial",
+   "lector"
+  ],
+  "facial": [
+   "acces",
+   "acceso",
+   "facial",
+   "lector"
+  ],
+  "lector": [
+   "acces",
+   "acceso",
+   "facial",
+   "lector"
+  ]
+ },
+ "products": [
+  {
+   "id": 1,
+   "name": "Cámara IP bullet 4 MP de prueba",
+   "brand": "Hikvision",
+   "model": "DS-2CD1047G3-L",
+   "code": "PR-001",
+   "sku": "EC-9001",
+   "category": "Cámaras IP",
+   "type": "Cámara IP",
+   "sf": "camara ip bullet 4 mp de prueba hikvision ds 2cd1047g3 l pr 001 ec 9001 camaras ip camara ip"
+  },
+  {
+   "id": 2,
+   "name": "Cámara domo 2 MP de prueba",
+   "brand": "Vigia",
+   "model": "VG-200",
+   "code": "PR-002",
+   "sku": "EC-9002",
+   "category": "Cámaras IP",
+   "type": "Cámara IP",
+   "sf": "camara domo 2 mp de prueba vigia vg 200 pr 002 ec 9002 camaras ip camara ip"
+  },
+  {
+   "id": 3,
+   "name": "Cámaras de exhibición (pack de 2) de prueba",
+   "brand": "Vigia",
+   "model": "VG-PACK2",
+   "code": "PR-003",
+   "sku": null,
+   "category": "Cámaras IP",
+   "type": "Cámara IP",
+   "sf": "camaras de exhibicion pack de 2 de prueba vigia vg pack2 pr 003 camaras ip camara ip"
+  },
+  {
+   "id": 4,
+   "name": "Grabador NVR 8 canales de prueba",
+   "brand": "Vigia",
+   "model": "VG-NVR8",
+   "code": "PR-004",
+   "sku": null,
+   "category": "Grabadores",
+   "type": "Grabador NVR",
+   "sf": "grabador nvr 8 canales de prueba vigia vg nvr8 pr 004 grabadores grabador nvr"
+  },
+  {
+   "id": 5,
+   "name": "Grabadores DVR 4 canales de prueba",
+   "brand": "Nodo",
+   "model": "ND-DVR4",
+   "code": "PR-005",
+   "sku": null,
+   "category": "Grabadores",
+   "type": "Grabador DVR",
+   "sf": "grabadores dvr 4 canales de prueba nodo nd dvr4 pr 005 grabadores grabador dvr"
+  },
+  {
+   "id": 6,
+   "name": "Router WiFi 6 AX1500 de prueba",
+   "brand": "TP-Link",
+   "model": "Archer AX10",
+   "code": "PR-006",
+   "sku": "EC-9006",
+   "category": "Redes",
+   "type": "Router",
+   "sf": "router wifi 6 ax1500 de prueba tp link archer ax10 pr 006 ec 9006 redes router"
+  },
+  {
+   "id": 7,
+   "name": "Repetidor WiFi de prueba",
+   "brand": "TP-Link",
+   "model": "RE200",
+   "code": "PR-007",
+   "sku": null,
+   "category": "Redes",
+   "type": "Repetidor WiFi",
+   "sf": "repetidor wifi de prueba tp link re200 pr 007 redes repetidor wifi"
+  },
+  {
+   "id": 8,
+   "name": "Extensor de señal inalámbrico de prueba",
+   "brand": "Nodo",
+   "model": "ND-EXT",
+   "code": "PR-008",
+   "sku": null,
+   "category": "Redes",
+   "type": "Repetidor WiFi",
+   "sf": "extensor de senal inalambrico de prueba nodo nd ext pr 008 redes repetidor wifi"
+  },
+  {
+   "id": 9,
+   "name": "Parlante Bluetooth 10 W de prueba",
+   "brand": "Sonar",
+   "model": "SG5071",
+   "code": "PR-009",
+   "sku": null,
+   "category": "Audio",
+   "type": "Parlante",
+   "sf": "parlante bluetooth 10 w de prueba sonar sg5071 pr 009 audio parlante"
+  },
+  {
+   "id": 10,
+   "name": "Altavoz de techo 6 W de prueba",
+   "brand": "Sonar",
+   "model": "ST-6",
+   "code": "PR-010",
+   "sku": null,
+   "category": "Audio",
+   "type": "Parlante",
+   "sf": "altavoz de techo 6 w de prueba sonar st 6 pr 010 audio parlante"
+  },
+  {
+   "id": 11,
+   "name": "Timbre con cámara WiFi de prueba",
+   "brand": "Vigia",
+   "model": "VG-DB1",
+   "code": "PR-011",
+   "sku": null,
+   "category": "Seguridad electrónica",
+   "type": "Videoportero",
+   "sf": "timbre con camara wifi de prueba vigia vg db1 pr 011 seguridad electronica videoportero"
+  },
+  {
+   "id": 12,
+   "name": "Videoportero 7 pulgadas de prueba",
+   "brand": "Nodo",
+   "model": "ND-VP7",
+   "code": "PR-012",
+   "sku": null,
+   "category": "Seguridad electrónica",
+   "type": "Videoportero",
+   "sf": "videoportero 7 pulgadas de prueba nodo nd vp7 pr 012 seguridad electronica videoportero"
+  },
+  {
+   "id": 13,
+   "name": "Disco duro 2 TB para vigilancia de prueba",
+   "brand": "Purpura",
+   "model": "PU-2TB",
+   "code": "PR-013",
+   "sku": null,
+   "category": "Almacenamiento",
+   "type": "Disco duro",
+   "sf": "disco duro 2 tb para vigilancia de prueba purpura pu 2tb pr 013 almacenamiento disco duro"
+  },
+  {
+   "id": 14,
+   "name": "Switch PoE 8 puertos de prueba",
+   "brand": "TP-Link",
+   "model": "TL-SG1008P",
+   "code": "PR-014",
+   "sku": null,
+   "category": "Redes",
+   "type": "Switch PoE",
+   "sf": "switch poe 8 puertos de prueba tp link tl sg1008p pr 014 redes switch poe"
+  },
+  {
+   "id": 15,
+   "name": "UPS 1000 VA de prueba",
+   "brand": "Respaldo",
+   "model": "RS-1000",
+   "code": "PR-015",
+   "sku": null,
+   "category": "Respaldo eléctrico",
+   "type": "UPS",
+   "sf": "ups 1000 va de prueba respaldo rs 1000 pr 015 respaldo electrico ups"
+  },
+  {
+   "id": 16,
+   "name": "Lector facial de acceso de prueba",
+   "brand": "Vigia",
+   "model": "VG-FACE",
+   "code": "PR-016",
+   "sku": null,
+   "category": "Seguridad electrónica",
+   "type": "Control de acceso",
+   "sf": "lector facial de acceso de prueba vigia vg face pr 016 seguridad electronica control de acceso"
+  },
+  {
+   "id": 17,
+   "name": "Cable UTP Cat6 305 m de prueba",
+   "brand": "Nodo",
+   "model": "ND-UTP6",
+   "code": "PR-017",
+   "sku": null,
+   "category": "Cables",
+   "type": "Cable",
+   "sf": "cable utp cat6 305 m de prueba nodo nd utp6 pr 017 cables cable"
+  },
+  {
+   "id": 18,
+   "name": "Bocina portátil de prueba",
+   "brand": "Sonar",
+   "model": "SB-2",
+   "code": "PR-018",
+   "sku": null,
+   "category": "Audio",
+   "type": "Parlante",
+   "sf": "bocina portatil de prueba sonar sb 2 pr 018 audio parlante"
+  }
+ ],
+ "cases": [
+  {
+   "q": "camara",
+   "ids": [
+    1,
+    2,
+    3,
+    11
+   ],
+   "scores": {
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "11": 21
+   }
+  },
+  {
+   "q": "camaras",
+   "ids": [
+    1,
+    2,
+    3,
+    11
+   ],
+   "scores": {
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "11": 21
+   }
+  },
+  {
+   "q": "cámaras",
+   "ids": [
+    1,
+    2,
+    3,
+    11
+   ],
+   "scores": {
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "11": 21
+   }
+  },
+  {
+   "q": "CAMARA",
+   "ids": [
+    1,
+    2,
+    3,
+    11
+   ],
+   "scores": {
+    "1": 26,
+    "2": 26,
+    "3": 26,
+    "11": 21
+   }
+  },
+  {
+   "q": "grabador",
+   "ids": [
+    4,
+    5
+   ],
+   "scores": {
+    "4": 26,
+    "5": 26
+   }
+  },
+  {
+   "q": "grabadores",
+   "ids": [
+    4,
+    5
+   ],
+   "scores": {
+    "4": 26,
+    "5": 26
+   }
+  },
+  {
+   "q": "nvr",
+   "ids": [
+    4,
+    5
+   ],
+   "scores": {
+    "4": 126,
+    "5": 26
+   }
+  },
+  {
+   "q": "tp-link",
+   "ids": [
+    6,
+    7,
+    14
+   ],
+   "scores": {
+    "6": 11,
+    "7": 11,
+    "14": 11
+   }
+  },
+  {
+   "q": "tp link",
+   "ids": [
+    6,
+    7,
+    14
+   ],
+   "scores": {
+    "6": 11,
+    "7": 11,
+    "14": 11
+   }
+  },
+  {
+   "q": "tplink",
+   "ids": [
+    6,
+    7,
+    14
+   ],
+   "scores": {
+    "6": 1,
+    "7": 1,
+    "14": 1
+   }
+  },
+  {
+   "q": "TP-LINK switch",
+   "ids": [
+    14
+   ],
+   "scores": {
+    "14": 11
+   }
+  },
+  {
+   "q": "SG5071",
+   "ids": [
+    9
+   ],
+   "scores": {
+    "9": 101
+   }
+  },
+  {
+   "q": "sg-5071",
+   "ids": [
+    9
+   ],
+   "scores": {
+    "9": 101
+   }
+  },
+  {
+   "q": "ds2cd1047g3",
+   "ids": [
+    1
+   ],
+   "scores": {
+    "1": 101
+   }
+  },
+  {
+   "q": "DS-2CD1047G3",
+   "ids": [
+    1
+   ],
+   "scores": {
+    "1": 101
+   }
+  },
+  {
+   "q": "bocina",
+   "ids": [
+    9,
+    10,
+    18
+   ],
+   "scores": {
+    "9": 21,
+    "10": 21,
+    "18": 21
+   }
+  },
+  {
+   "q": "parlante",
+   "ids": [
+    9,
+    10,
+    18
+   ],
+   "scores": {
+    "9": 21,
+    "10": 21,
+    "18": 21
+   }
+  },
+  {
+   "q": "altavoz",
+   "ids": [
+    9,
+    10,
+    18
+   ],
+   "scores": {
+    "9": 21,
+    "10": 21,
+    "18": 21
+   }
+  },
+  {
+   "q": "parlantes",
+   "ids": [
+    9,
+    10,
+    18
+   ],
+   "scores": {
+    "9": 21,
+    "10": 21,
+    "18": 21
+   }
+  },
+  {
+   "q": "repetidor",
+   "ids": [
+    7,
+    8
+   ],
+   "scores": {
+    "7": 21,
+    "8": 21
+   }
+  },
+  {
+   "q": "extensor",
+   "ids": [
+    7,
+    8
+   ],
+   "scores": {
+    "7": 21,
+    "8": 21
+   }
+  },
+  {
+   "q": "timbre",
+   "ids": [
+    11,
+    12
+   ],
+   "scores": {
+    "11": 21,
+    "12": 21
+   }
+  },
+  {
+   "q": "videoportero",
+   "ids": [
+    11,
+    12
+   ],
+   "scores": {
+    "11": 21,
+    "12": 21
+   }
+  },
+  {
+   "q": "wifi 6",
+   "ids": [
+    6
+   ],
+   "scores": {
+    "6": 21
+   }
+  },
+  {
+   "q": "wifi6",
+   "ids": [
+    6
+   ],
+   "scores": {
+    "6": 21
+   }
+  },
+  {
+   "q": "disco 2tb",
+   "ids": [
+    13
+   ],
+   "scores": {
+    "13": 21
+   }
+  },
+  {
+   "q": "ups",
+   "ids": [
+    15
+   ],
+   "scores": {
+    "15": 21
+   }
+  },
+  {
+   "q": "lector facial",
+   "ids": [
+    16
+   ],
+   "scores": {
+    "16": 21
+   }
+  },
+  {
+   "q": "utp cat6",
+   "ids": [
+    17
+   ],
+   "scores": {
+    "17": 21
+   }
+  },
+  {
+   "q": "camara vigia",
+   "ids": [
+    2,
+    3,
+    11
+   ],
+   "scores": {
+    "2": 11,
+    "3": 11,
+    "11": 6
+   }
+  }
+ ]
+}

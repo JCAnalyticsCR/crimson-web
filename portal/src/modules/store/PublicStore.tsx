@@ -374,7 +374,7 @@ function SearchBox({ value, onChange, onSubmit }: { value: string; onChange: (v:
   return (
     <form className="sh-search" role="search" onSubmit={onSubmit}>
       <Ico d={IC.search} />
-      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscar producto, marca o modelo" aria-label="Buscar productos" enterKeyHint="search" />
+      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscá por producto, marca o modelo" aria-label="Buscar productos" enterKeyHint="search" />
       {value && <button type="button" className="sh-search__clear" onClick={() => onChange("")} aria-label="Borrar búsqueda"><Ico d={IC.x} size={16} /></button>}
     </form>
   );
