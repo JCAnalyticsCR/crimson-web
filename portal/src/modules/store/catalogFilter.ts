@@ -10,6 +10,8 @@ import type { Avail, VProd } from "./storeKit";
 export type SnapAvail = {
   state: string; label: string; label_short?: string | null;
   accion: string | null; max_qty: number | null; plazo: string | null;
+  /** se puede comprar en linea (services/availability); viaja en el snapshot v2 */
+  disponible?: boolean;
 };
 
 export type SnapProduct = {

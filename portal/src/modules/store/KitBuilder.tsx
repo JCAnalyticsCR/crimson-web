@@ -1,4 +1,4 @@
-/* "Arma tu sistema": 6 pasos -> kit con productos reales de la tienda. Las cantidades salen de las mismas
+/* "Armá tu sistema": 6 pasos -> kit con productos reales de la tienda. Las cantidades salen de las mismas
    reglas del levantamiento tecnico (API /kit). Honesto: "kit sugerido, un tecnico lo valida". El resultado se
    recalcula al cambiar una respuesta (sin boton extra) y se puede llevar al carrito o mandar como asesoria.
    Cada pieza muestra sus datos clave y se puede "Cambiar" por una alternativa que tambien calza: la eleccion viaja al
@@ -120,7 +120,7 @@ export default function KitBuilder() {
   const [alarm, setAlarm] = useState(false); // tambien le interesa una alarma: va en la asesoria y en el WhatsApp (se cotiza aparte)
   const total = ans.indoor + ans.outdoor;
 
-  useHead({ title: `Arma tu sistema de cámaras · ${ctx.store.name}`, description: "En 6 pasos te cotizamos al instante un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
+  useHead({ title: `Armá tu sistema de cámaras · ${ctx.store.name}`, description: "En 6 pasos te cotizamos al instante un kit de videovigilancia con productos reales, validado por un técnico.", path: "/arma-tu-sistema" });
 
   useEffect(() => {
     if (total === 0) { setKit(null); setBusy(false); setErr("Elegí al menos una cámara."); return; }
@@ -141,7 +141,7 @@ export default function KitBuilder() {
 
   // La direccion del navegador sigue al kit EN PANTALLA: respuestas, el kit de la tienda (si aplica) y solo las
   // elecciones que valieron. Corre con el configurador montado (una respuesta tardia ya no navega) y tambien repone la
-  // direccion si un enlace del menu ("Arma tu sistema") la dejo sin parametros con el kit a la vista.
+  // direccion si un enlace del menu ("Armá tu sistema") la dejo sin parametros con el kit a la vista.
   const spKey = sp.toString();
   useEffect(() => {
     if (!kit) return;
@@ -222,7 +222,7 @@ export default function KitBuilder() {
     try {
       sessionStorage.setItem(KIT_STORAGE, JSON.stringify({
         items: kit.lines.map((l) => ({ product_id: l.product.id, quantity: l.quantity, name: l.product.name })),
-        text: `Kit sugerido desde "Arma tu sistema"${kit.kit ? ` (kit «${kit.kit.title}»)` : ""}: ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}${detail(kit) ? `, ${detail(kit)}` : ""}${alarm ? ". También le interesa una alarma (sensores, sirena y panel)" : ""}.${kit.lines.some(isMine) ? ` Productos que el cliente cambió: ${kit.lines.filter(isMine).map((l) => l.product.name).join(", ")}.` : ""} Enlace del kit: ${shareUrl}`,
+        text: `Kit sugerido desde "Armá tu sistema"${kit.kit ? ` (kit «${kit.kit.title}»)` : ""}: ${kit.place_label}, ${kit.answers.indoor} cámara(s) adentro y ${kit.answers.outdoor} afuera, ${kit.answers.days} días de grabación${kit.answers.remote ? ", ver desde el celular" : ""}${detail(kit) ? `, ${detail(kit)}` : ""}${alarm ? ". También le interesa una alarma (sensores, sirena y panel)" : ""}.${kit.lines.some(isMine) ? ` Productos que el cliente cambió: ${kit.lines.filter(isMine).map((l) => l.product.name).join(", ")}.` : ""} Enlace del kit: ${shareUrl}`,
       }));
     } catch { /* sin almacenamiento: la asesoria igual se abre */ }
     nav(to("/asesoria?origen=arma-tu-sistema&solucion=cctv&instalar=1"));
@@ -230,10 +230,10 @@ export default function KitBuilder() {
 
   return (
     <div className="sh-wrap vt-kitb">
-      <Crumbs items={[{ name: "Tienda", path: "/" }, { name: "Arma tu sistema" }]} />
+      <Crumbs items={[{ name: "Tienda", path: "/" }, { name: "Armá tu sistema" }]} />
       <header className="vt-cathead">
         <span className="sh-eyebrow">Configurador · 6 pasos · 2 minutos</span>
-        <h1>Arma tu sistema de cámaras en 6 pasos</h1>
+        <h1>Armá tu sistema de cámaras en 6 pasos</h1>
         <p>Respondé 6 pasos rápidos y te cotizamos al instante un kit con equipo real de la tienda. Es una sugerencia: antes de instalar, un técnico de Crimson visita tu sitio y confirma que todo calce.</p>
       </header>
       <div className="vt-kitb__grid">

@@ -377,13 +377,15 @@ export class Catalog {
       const lines = kit.lines.filter((l) => l.product.usd > 0);
       const total = lines.reduce((a, l) => a + this.gross(l.product) * l.quantity, 0);
       const cam = lines.find((l) => l.role.startsWith("Cámaras"))?.product;
-      return { id: k.id, title: k.title, text: k.text, answers: kit.answers, items: lines.reduce((a, l) => a + l.quantity, 0), total: Math.round(total), image: cam?.images[0] || null, cameras: kit.cameras };
+      const payable = lines.length === kit.lines.length && lines.every((l) => l.product.avail !== "a"); // O1-04 h
+      return { id: k.id, title: k.title, text: k.text, answers: kit.answers, items: lines.reduce((a, l) => a + l.quantity, 0), total: Math.round(total), image: cam?.images[0] || null, cameras: kit.cameras, payable };
     });
     return {
       headline: "", subline: "", banners: [], trust: DEFAULT_TRUST,
       categories: this.tree(counts, images),
       brands: [...brands.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([name, count]) => ({ name, count })),
       featured: featured.slice(0, 8).map((p) => this.card(p)),
+      featured_source: "auto", // O1-04 a: la demo no tiene destacados elegidos a mano
       fresh: fresh.map((p) => this.card(p)),
       kits, product_count: this.prods.length, currency: "CRC",
       info: Object.entries(INFO_KINDS).map(([kind, title]) => ({ kind, title, path: `/info/${kind}` })),

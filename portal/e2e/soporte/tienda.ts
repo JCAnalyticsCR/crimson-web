@@ -86,7 +86,7 @@ export async function cargarTodo(page: Page) {
   });
   await enCalma(page);
   await expect(page.locator(CARGANDO)).toHaveCount(0);
-  /* Los carruseles vuelven al inicio. En la portada, «Lo más pedido» puede quedar corrido de lado: la fila se pinta
+  /* Los carruseles vuelven al inicio. En la portada, la fila de destacados puede quedar corrida de lado: la fila se pinta
      primero con el snapshot y luego con /showcase, y el navegador sigue a la tarjeta que tenia ajustada. Depende de
      cual de las dos respuestas llega antes, asi que sin esto la captura cambiaria de una corrida a otra. */
   await page.evaluate(async () => {

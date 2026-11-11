@@ -235,11 +235,14 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         url = f"{base}/info/{parts[1]}"
         ld: dict = {"@context": "https://schema.org", "@graph": [sv.breadcrumb_ld(base, [("Tienda", "/"), (title, f"/info/{parts[1]}")]), org]}
         if parts[1] == "preguntas-frecuentes":
+            from ..services import store_orders as so
+
+            faq = sv.public_faq(sc["faq"], so.methods_available(db, t))  # la misma de /info (O1-04 l)
             ld["@graph"].insert(
                 0,
                 {
                     "@type": "FAQPage",
-                    "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in sc["faq"]],
+                    "mainEntity": [{"@type": "Question", "name": f["q"], "acceptedAnswer": {"@type": "Answer", "text": f["a"]}} for f in faq],
                 },
             )
         return meta | {"title": f"{title} · {name}", "description": f"{title} de la tienda {name}.", "canonical": url, "ld": ld}

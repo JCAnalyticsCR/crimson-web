@@ -295,6 +295,14 @@
 .vt-kit__price strong { font-family: var(--serif); font-size: 28px; line-height: 1; letter-spacing: -.02em; color: #fff; font-variant-numeric: tabular-nums; }
 .vt-kit__cta { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--crimson); color: #fff; font-weight: 700; font-size: 14px; box-shadow: 0 14px 30px -16px rgba(226, 35, 58, .8); transition: background var(--dur-micro); }
 .vt-kits__note { margin: 16px 0 0; font-size: 12.5px; color: var(--muted-dark); }
+/* O1-04 h: que incluye el precio (y si es de referencia) */
+.vt-kit__terms { font-size: 12.5px; line-height: 1.45; color: var(--muted-dark); }
+/* O1-04 h: un solo kit ocupa el ancho completo; en escritorio, foto a la izquierda y datos a la derecha */
+.vt-kits__list[data-n="1"] { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 768px) {
+  .vt-kits__list[data-n="1"] .vt-kit { flex-direction: row; }
+  .vt-kits__list[data-n="1"] .vt-kit__img { flex: 0 0 52%; margin: 8px 0 8px 8px; aspect-ratio: 16 / 10; }
+}
 @media (hover: hover) {
   .vt-kit:hover { border-color: rgba(226, 35, 58, .6); box-shadow: 0 30px 60px -36px rgba(226, 35, 58, .55); }
   .vt-kit:hover .vt-kit__cta { background: var(--crimson-dark); }

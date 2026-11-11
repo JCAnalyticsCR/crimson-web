@@ -22,7 +22,9 @@ import { CATALOGO, COMERCIO_E2E, DISPONIBILIDAD } from "./datos";
 
 const SLUG = "crimson";
 
-export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e };
+/* portadaTras (O1-04 j): ms entre el snapshot y /showcase; -1 = al azar entre 0 y 60 ms (alrededor de la ventana de la
+   carrera de StoreHome). Sin la perilla: 200 ms, el orden fijo de las capturas. */
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e; portadaTras?: number };
 /** O1-09: lo que manda el API real en shipping_public (perilla `envio`; sin ella la tienda no muestra la franja) */
 export type ShipE2e = { free_from: number | null; rates: { name: string; zone: string | null; area: string; amount: number; lead?: string | null }[]; pickup: { address: string; hours?: string } | null; invoice?: boolean };
 
@@ -110,13 +112,13 @@ export function instalarApiE2e() {
       return new Response(snap, { status: 200, headers: { "Content-Type": "application/json", ETag: ETAG, "Cache-Control": "public, max-age=0, must-revalidate" } });
     }
     /* ORDEN FIJO EN LA PORTADA: /showcase siempre responde despues del snapshot, que es lo normal en produccion (el
-       snapshot suele estar en cache). Sin esto la portada cambia segun cual llega antes: si /showcase gana por poco,
-       StoreHome (efecto «if (snapD && !d) setD(snapD)») lo pisa con los datos del snapshot y la portada se queda sin
-       kits y con otra fila de «Lo más pedido». Es una carrera real de la tienda, anotada para quien toque
-       StoreHome.tsx; aqui solo se evita que haga cambiar las capturas de una corrida a otra. */
+       snapshot suele estar en cache), para que las capturas no cambien de una corrida a otra (los destacados del
+       snapshot y los de /showcase pueden diferir mientras carga). La carrera que dejaba la portada sin kits (efecto
+       «if (snapD && !d) setD(snapD)») se corrigio en StoreHome (O1-04 j); portada.spec.ts la vigila con portadaTras. */
     if (method === "GET" && sub === "/showcase") {
       await Promise.race([trasSnapshot, pausa(3000)]);
-      await pausa(200);
+      const tras = ajustes().portadaTras;
+      await pausa(tras == null ? 200 : tras < 0 ? Math.floor(Math.random() * 61) : tras);
     }
 
     if (method === "GET" && sub.startsWith("/item/") && ajustes().retrasoItem) await pausa(ajustes().retrasoItem!);

@@ -53,7 +53,8 @@ export default function StoreShowcaseAdmin() {
     // los avisos son oraciones largas (una por producto que no se fijo): quedan escritos junto a «Guardar kits»; el
     // aviso flotante solo dice que los hay
     if ("kits" in patch) setAvisos(r.warnings || []);
-    if (r.warnings?.length) toast(`Vitrina actualizada con ${r.warnings.length === 1 ? "1 aviso" : `${r.warnings.length} avisos`}: véalos sobre la lista de kits`, "bad");
+    if (r.warnings?.length && "kits" in patch) toast(`Vitrina actualizada con ${r.warnings.length === 1 ? "1 aviso" : `${r.warnings.length} avisos`}: véalos sobre la lista de kits`, "bad");
+    else if (r.warnings?.length) toast(`Vitrina actualizada. ${r.warnings.join(" ")}`, "bad"); // O1-04 d: banner de relleno desactivado
     else toast("Vitrina actualizada");
   }).catch((e) => toast(e.message, "bad"));
   const saveLegal = (legal: { terms?: string; privacy?: string }) => api("/store", { method: "PUT", json: { legal: { ...d?.legal, ...legal } } }).then(() => { setD((x) => (x ? { ...x, legal: { ...x.legal, ...legal } } : x)); toast("Texto legal guardado"); }).catch((e) => toast(e.message, "bad"));
@@ -108,6 +109,9 @@ export default function StoreShowcaseAdmin() {
 
 const row: React.CSSProperties = { border: "1px solid var(--hair)", borderRadius: 10, padding: 10, display: "grid", gap: 8 };
 
+/** O1-04 d: sin imagen, o con el titulo vacio o «Nuevo banner»: la tienda no lo pinta (y el API lo guarda inactivo) */
+const incompleto = (b: Banner) => !b.image.trim() || ["", "nuevo banner"].includes(b.title.trim().toLowerCase());
+
 function BannersEditor({ value, onSave }: { value: Banner[]; onSave: (v: Banner[]) => void }) {
   const [list, setList] = useState<Banner[]>(value);
   useEffect(() => setList(value), [value]);
@@ -117,7 +121,8 @@ function BannersEditor({ value, onSave }: { value: Banner[]; onSave: (v: Banner[
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <b style={{ fontSize: 13 }}>Banners (hasta 3 visibles; el primero es el grande)</b>
         <div style={{ display: "flex", gap: 6 }}>
-          <button className="btn btn--ghost btn--sm" onClick={() => setList([...list, { image: "", title: "Nuevo banner", text: "", link: "/catalogo", cta: "Ver más", position: list.length + 1, active: true }])} disabled={list.length >= 12}><Icon d={I.plus} />Banner</button>
+          {/* O1-04 d: nace inactivo y sin titulo (antes «Nuevo banner» activo salia publicado tal cual) */}
+          <button className="btn btn--ghost btn--sm" onClick={() => setList([...list, { image: "", title: "", text: "", link: "/catalogo", cta: "Ver más", position: list.length + 1, active: false }])} disabled={list.length >= 12}><Icon d={I.plus} />Banner</button>
           <button className="btn btn--crimson btn--sm" onClick={() => onSave(list)}><Icon d={I.check} />Guardar banners</button>
         </div>
       </div>
@@ -136,6 +141,7 @@ function BannersEditor({ value, onSave }: { value: Banner[]; onSave: (v: Banner[
             <label style={{ fontSize: 13, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={b.active} onChange={(e) => upd(i, { active: e.target.checked })} />Activo</label>
             <button className="btn btn--danger btn--sm" onClick={() => setList(list.filter((_, k) => k !== i))}>Quitar</button>
           </div>
+          {incompleto(b) && <p className="meta" role="note" style={{ margin: 0, color: "var(--warn)" }}>Este banner no se muestra hasta que tenga título e imagen.</p>}
         </div>
       ))}
     </div>
@@ -197,10 +203,10 @@ function FeaturedEditor({ ids, items, onSave }: { ids: number[]; items: Showcase
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <b style={{ fontSize: 13 }}>Productos destacados (“Lo más pedido”)</b>
+        <b style={{ fontSize: 13 }}>Productos destacados de la portada</b>
         <button className="btn btn--crimson btn--sm" onClick={() => onSave(list.map((x) => x.id))} disabled={JSON.stringify(list.map((x) => x.id)) === JSON.stringify(ids)}><Icon d={I.check} />Guardar destacados</button>
       </div>
-      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Vacío = la tienda elige sola uno o dos por categoría, con foto y precio. Se muestran hasta 8.</p>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Con productos elegidos aquí, la portada los titula «Selección» y «Elegidos por nuestro equipo». Vacío = la tienda elige sola uno por tipo de equipo, solo entre lo que se puede comprar en línea y con precio, y los titula «Del catálogo». Se muestran hasta 8.</p>
       <ProductPicker onPick={(p) => !list.some((x) => x.id === p.id) && list.length < 24 && setList([...list, { id: p.id, name: p.name, code: p.code, show_on_web: p.show_on_web, state: p.availability?.state, label: p.availability?.label_publico || p.availability?.label }])} />
       {list.map((p, i) => (
         <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
@@ -247,7 +253,7 @@ function KitsEditor({ value, preview, avisos, onSave }: { value: Kit[]; preview:
           </ul>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Arma tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados. Primero propone lo que se puede comprar (en bodega o bajo pedido). En cada pieza puede dejar “Automático” (entre equivalentes, el artículo varía de un día a otro) o fijar un producto, y sumar adicionales como una UPS. El cliente igual puede cambiar cada pieza al abrir el kit.</p>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Cada kit se arma con el configurador “Armá tu sistema”: los productos y el precio salen del catálogo vigente, nunca quedan desactualizados. Primero propone lo que se puede comprar (en bodega o bajo pedido). En cada pieza puede dejar “Automático” (entre equivalentes, el artículo varía de un día a otro) o fijar un producto, y sumar adicionales como una UPS. El cliente igual puede cambiar cada pieza al abrir el kit.</p>
       {list.map((k, i) => (
         <div key={i} style={row}>
           <div className="grid-2">

@@ -143,6 +143,81 @@ def showcase_cfg(store: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------- portada honesta (O1-04)
+BANNER_PLACEHOLDERS = ("", "nuevo banner")  # titulos de relleno: el que traia el boton «+ Banner» y el vacio
+BANNER_OFF_WARNING = "Se desactivó un banner sin imagen o sin título."
+
+
+def banner_incomplete(b: dict) -> bool:
+    """sin imagen, o con el titulo vacio o de relleno: no se publica"""
+    return not str(b.get("image") or "").strip() or fold(str(b.get("title") or "").strip()) in BANNER_PLACEHOLDERS
+
+
+def internal_link(link: str, domain: str | None) -> str:
+    """un enlace al propio dominio de la tienda (https://tienda.ejemplo.com/c/x) se trata como ruta interna (/c/x)"""
+    dom = (domain or "").strip().lower().removeprefix("https://").removeprefix("http://").rstrip("/")
+    if not dom or not link:
+        return link
+    m = re.match(r"^https?://(?:www\.)?([^/?#]+)(.*)$", link.strip(), re.I)
+    if not m or m.group(1).lower() not in (dom, dom.removeprefix("www.")):
+        return link
+    rest = m.group(2) or "/"
+    return rest if rest.startswith("/") else f"/{rest}"
+
+
+def public_banners(banners: list[dict], domain: str | None) -> list[dict]:
+    """los banners que la portada y el snapshot pintan: activos, con imagen y con titulo de verdad, en su orden"""
+    out = [{**b, "link": internal_link(str(b.get("link") or ""), domain)} for b in banners or [] if b.get("active", True) and not banner_incomplete(b)]
+    return sorted(out, key=lambda b: b.get("position", 0))
+
+
+# un horario escrito: dias o una hora («lunes a viernes», «8 a. m.», «8:00», «17 h»)
+_HOURS_RX = re.compile(r"\b(lunes|martes|miercoles|jueves|viernes|sabado|domingo|l-v|24/7)\b|\b\d{1,2}(:\d{2})?\s?(a\.?\s?m|p\.?\s?m|h\b)")
+
+
+def public_trust(trust: list[dict], hours: str | None) -> list[dict]:
+    """Sellos con dato verificable (O1-04 k): «Soporte técnico» solo con horario; si el sello no lo dice y el comercio
+    tiene horario (Mi Tienda -> Datos del comercio), se le agrega; sin horario, no se publica."""
+    hours = (hours or "").strip()
+    out = []
+    for s in trust or []:
+        if fold(s.get("title")).startswith("soporte") and not _HOURS_RX.search(fold(s.get("text"))):
+            if not hours:
+                continue
+            s = {**s, "text": f"{str(s.get('text') or '').rstrip('. ')}. Horario: {hours.rstrip('.')}."}
+        out.append(s)
+    return out
+
+
+METHOD_FAQ = {"tarjeta": "tarjeta de crédito o débito", "sinpe": "SINPE Móvil", "transferencia": "transferencia", "efectivo": "efectivo"}
+
+
+def pay_answer(methods: list[dict]) -> str | None:
+    """«Con tarjeta de crédito o débito, SINPE Móvil o transferencia.» desde los metodos activos del checkout"""
+    order = ("tarjeta", "sinpe", "transferencia", "efectivo")
+    names = []
+    for code in order:
+        m = next((x for x in methods if x.get("code") == code), None)
+        if m:
+            names.append(METHOD_FAQ[code] + (" al retirar" if code == "efectivo" and m.get("pickup_only") else ""))
+    if not names:
+        return None
+    return "Con " + (names[0] if len(names) == 1 else f"{', '.join(names[:-1])} o {names[-1]}") + "."
+
+
+def public_faq(faq: list[dict], methods: list[dict]) -> list[dict]:
+    """«¿Cómo pago?» sale de los metodos activos (O1-04 l): nunca promete uno apagado. Sin metodos, no se publica."""
+    ans = pay_answer(methods)
+    out = []
+    for f in faq or []:
+        if re.sub(r"[^a-z ]", "", fold(f.get("q"))).strip() == "como pago":
+            if not ans:
+                continue
+            f = {**f, "a": ans}
+        out.append(f)
+    return out
+
+
 # ---------------------------------------------------------------- texto
 _FOLD_MEMO_MAX = 200  # nombres, codigos y modelos; un texto largo (una descripcion) no se guarda
 

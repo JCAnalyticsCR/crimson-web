@@ -33,7 +33,7 @@ from ..services.fx import FxMissing
 from ..services.mail import notify_roles
 from .auth import client_ip
 from .public_incidents import _CONTROL, _buscar_cliente
-from .store import STORE_DEFAULTS, Pricer, _gross, _prod_pub, _stock_of, _tenant, _variants, store_cfg
+from .store import STORE_DEFAULTS, Pricer, _gross, _prod_pub, _stock_of, _tenant, _variants, business_of, store_cfg
 
 router = APIRouter(tags=["tienda-vitrina"])
 
@@ -362,9 +362,20 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     if "featured" in patch:
         own = set(db.scalars(select(Product.id).where(Product.tenant_id == t.id, Product.id.in_(patch["featured"] or [])))) if patch["featured"] else set()
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
-    if "banners" in patch:
-        patch["banners"] = [{**b, "id": b.get("id") or f"b{i + 1}"} for i, b in enumerate(patch["banners"] or [])]
     warnings: list[str] = []
+    if "banners" in patch:
+        # O1-04 d: se sanea en vez de rechazar (el editor manda la lista completa; un 422 bloquearia todo cambio): el
+        # banner sin imagen o sin titulo (o con «Nuevo banner») queda guardado pero inactivo, con aviso. Un enlace al
+        # propio dominio se guarda como ruta interna.
+        out = []
+        for i, b in enumerate(patch["banners"] or []):
+            b = {**b, "id": b.get("id") or f"b{i + 1}", "link": sv.internal_link(b.get("link") or "", store.get("domain")), "active": b.get("active", True)}
+            if b.get("active", True) and sv.banner_incomplete(b):
+                b["active"] = False
+                if sv.BANNER_OFF_WARNING not in warnings:
+                    warnings.append(sv.BANNER_OFF_WARNING)
+            out.append(b)
+        patch["banners"] = out
     if "kits" in patch and patch["kits"] is not None:
         _unique_kit_ids(patch["kits"])
         # productos fijos y adicionales: solo de esta empresa; uno que nunca sirve para la pieza (un disco como camara)
@@ -765,13 +776,19 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     # Ajustes "ocultar agotados": tampoco salen en destacados, novedades ni kits
     pool = [p for p in prods if not (stock.get(p.id) or {}).get("ocultar")]
     sellable = {p.id for p in pool if _sellable(stock.get(p.id))}
+    kit_price = _kit_price(ctx.pricer)
     featured = [by_id[i] for i in sc["featured"] if i in by_id and by_id[i] in pool]
-    if not featured:  # sin eleccion de Andres: uno por tipo de equipo, con foto y precio, primero lo que se puede comprar
-        featured = sv.default_featured(pool, prefer=sellable, type_of=ctx.dtype)
+    # O1-04 a/e: el origen viaja («manual» = los eligio Andres; «auto» = la tienda) para no presentar como curada una
+    # lista automatica. La automatica: uno por tipo de equipo, solo lo que se puede comprar ya y con precio mayor que 0.
+    featured_source = "manual" if featured else "auto"
+    if not featured:
+        featured = sv.default_featured([p for p in pool if p.id in sellable and kit_price(p) > 0], prefer=sellable, type_of=ctx.dtype)
     fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
+    # O1-04 c: «Marcas» solo con las de seguridad, redes y respaldo (con al menos un producto en esas familias)
+    fam_brands = {p.brand for p in prods if p.brand and p.category_id in ctx.cat_chain and pt.functional_family(ctx.cat_chain[p.category_id][1])}
+    brands = {b: n for b, n in brands.items() if b in fam_brands}
     kits = []
     photo_prods = _kit_products(db, t.id, sc["kits"])
-    kit_price = _kit_price(ctx.pricer)
     for k in sc["kits"]:
         if not k.get("active", True):
             continue
@@ -781,6 +798,8 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
         if not lines:
             continue
         photos = sv.kit_photos(lines, k.get("photos"), photo_prods)
+        # O1-04 h: todas las piezas tienen precio y se pagan en linea; si no, la tienda dice «Precio de referencia»
+        payable = len(lines) == len(kit["lines"]) and all(ln["product"].id in sellable for ln in lines)
         kits.append(
             {
                 "id": k.get("id"),
@@ -793,6 +812,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
                 # fotos fijas de los equipos reales del kit (o las que eligio Andres): {image, label, name}
                 "photos": [{k_: ph[k_] for k_ in ("image", "label", "name")} for ph in photos],
                 "cameras": kit["cameras"],
+                "payable": payable,
             }
         )
     # Carga completa para los productos que se renderizan como tarjeta (featured + fresh).
@@ -803,11 +823,13 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     return {
         "headline": sc["headline"],
         "subline": sc["subline"],
-        "banners": sorted([b for b in sc["banners"] if b.get("active", True) and (b.get("image") or b.get("title"))], key=lambda b: b.get("position", 0)),
-        "trust": sc["trust"],
+        # O1-04 d/k: sin banners de relleno (sin imagen o «Nuevo banner») y sellos con dato verificable
+        "banners": sv.public_banners(sc["banners"], ctx.cfg.get("domain")),
+        "trust": sv.public_trust(sc["trust"], business_of(ctx.cfg).get("hours")),
         "categories": _cat_tree(ctx, counts, images),
         "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1]))[:14]],
         "featured": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in featured[:8]],
+        "featured_source": featured_source,
         "fresh": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in fresh],
         "kits": kits,
         "product_count": snap_n["n"] if snap_n is not None else len(prods),
@@ -1108,7 +1130,10 @@ def info(slug: str, kind: str, db: Session = Depends(get_db)):
     legal = cfg.get("legal") or {}
     body = {"terminos": legal.get("terms"), "privacidad": legal.get("privacy")}.get(kind) or sc["pages"].get(kind) or ""
     if kind == "preguntas-frecuentes":
-        return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": "", "faq": sc["faq"], "seo": _seo(db, t, f"/info/{kind}")}
+        from ..services import store_orders as so
+
+        faq = sv.public_faq(sc["faq"], so.methods_available(db, t))  # O1-04 l: «¿Cómo pago?» desde los metodos activos
+        return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": "", "faq": faq, "seo": _seo(db, t, f"/info/{kind}")}
     if not str(body).strip():
         raise HTTPException(404, "Página no disponible")
     return {"kind": kind, "title": sv.INFO_KINDS[kind], "body": body, "faq": [], "seo": _seo(db, t, f"/info/{kind}")}

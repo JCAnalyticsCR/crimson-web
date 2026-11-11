@@ -248,7 +248,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
             </Link>
             <nav className="vt-mainnav" aria-label="Principal">
               <Link to={L("/catalogo")} aria-current={rel === "/catalogo" ? "page" : undefined}>Catálogo</Link>
-              <Link to={L("/arma-tu-sistema")} aria-current={rel === "/arma-tu-sistema" ? "page" : undefined}>Arma tu sistema</Link>
+              <Link to={L("/arma-tu-sistema")} aria-current={rel === "/arma-tu-sistema" ? "page" : undefined}>Armá tu sistema</Link>
               <Link to={L("/asesoria")} aria-current={rel === "/asesoria" ? "page" : undefined}>Asesoría</Link>
             </nav>
             <SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} />
@@ -263,7 +263,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
           </div>
           <div className="sh-head__search-m"><SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} /></div>
           <nav className="vt-quick" aria-label="Accesos rápidos">
-            <Link to={L("/arma-tu-sistema")} className="vt-quick__hot"><Ico d={IC.cam} size={16} />Arma tu sistema</Link>
+            <Link to={L("/arma-tu-sistema")} className="vt-quick__hot"><Ico d={IC.cam} size={16} />Armá tu sistema</Link>
             <Link to={L("/catalogo")}>Catálogo</Link>
             {home.categories.map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
             <Link to={L("/asesoria")}>Asesoría</Link>
@@ -315,7 +315,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
               <div className="vt-foot__col">
                 <Link to={L("/catalogo")}>Catálogo completo</Link>
                 {home.categories.slice(0, 5).map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
-                <Link to={L("/arma-tu-sistema")}>Arma tu sistema</Link>
+                <Link to={L("/arma-tu-sistema")}>Armá tu sistema</Link>
               </div>
             </div>
             <div><span className="sh-meta">Ayuda</span>

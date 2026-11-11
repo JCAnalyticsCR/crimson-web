@@ -105,7 +105,7 @@ def build(db: Session, t, ctx) -> bytes:
     Se llama desde rebuild() con sus propios objetos.
     """
     # importaciones locales para no crear dependencias circulares en tiempo de importacion
-    from ..routers.store import _gross, store_cfg
+    from ..routers.store import _gross, business_of, store_cfg
     from ..routers.store_showcase import (
         _avail,
         _cat_tree,
@@ -187,8 +187,9 @@ def build(db: Session, t, ctx) -> bytes:
         "headline": sc.get("headline"),
         "subline": sc.get("subline"),
         "featured": sc.get("featured") or [],
-        "banners": [b for b in (sc.get("banners") or []) if b.get("active", True) and (b.get("image") or b.get("title"))],
-        "trust": sc.get("trust") or [],
+        # O1-04 d/k: los mismos de /showcase (sin banners de relleno; sellos con dato verificable)
+        "banners": sv.public_banners(sc.get("banners") or [], cfg.get("domain")),
+        "trust": sv.public_trust(sc.get("trust") or [], business_of(cfg).get("hours")),
     }
 
     version = sv.get_catalog_version(t)

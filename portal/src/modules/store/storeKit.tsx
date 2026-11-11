@@ -190,7 +190,7 @@ export const IC = {
 /** icono por nombre de categoria (los nombres los pone Crimson; si no calza ninguno, la camara de la marca) */
 const CAT_IC: [RegExp, string][] = [
   [/vigil|c[aá]mara|cctv|video/i, IC.cctv],
-  [/acceso|seguridad|alarma|cerradura/i, IC.lock],
+  [/control de acceso|seguridad|alarma|cerradura/i, IC.lock], // O1-04 g: «Accesorios» contiene «acceso»; el candado es de control de acceso
   [/red|wifi|switch|cable/i, IC.net],
   [/electrodom|refri|lavad|secador|cocina|horno|microond|licuad|freidor|cafeter|ventilad|aspirad/i, IC.appliance],
   [/smart|hogar|inteligente/i, IC.home],

@@ -94,16 +94,21 @@ def _catalogo(db):
 def test_portada_administrable_y_paginas(client, auth, db_session):
     _publicar(client)
     prods = _catalogo(db_session)
-    # sin eleccion de Andres, la portada arma destacados solos (con foto y precio) y trae los kits por defecto
+    # sin eleccion de Andres, la portada arma destacados solos (O1-04: solo lo comprable, con foto y precio) y trae
+    # los kits por defecto
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    mov = {"product_id": prods["DS-2CD1043G2-LIU"].id, "warehouse_id": main["id"], "kind": "entrada", "quantity": 2}
+    assert client.post("/stock/movements", json=mov).status_code == 201
     home = client.get("/public/store/crimson/showcase")
     assert home.status_code == 200, home.text
     h = home.json()
-    assert h["featured"] and all(p["image"] and not p["price_on_request"] for p in h["featured"])
+    assert h["featured_source"] == "auto" and [p["code"] for p in h["featured"]] == ["DS-2CD1043G2-LIU"]
+    assert all(p["image"] and not p["price_on_request"] for p in h["featured"])
     assert {c["name"] for c in h["categories"]} >= {"Videovigilancia", "Almacenamiento", "Redes"}
     vig = next(c for c in h["categories"] if c["name"] == "Videovigilancia")
     assert vig["path"] == "/c/videovigilancia" and vig["count"] == 5
     assert len(h["kits"]) == 3 and h["kits"][0]["items"] > 0 and Decimal(str(h["kits"][0]["total"])) > 0
-    assert len(h["trust"]) == 4
+    assert len(h["trust"]) == 3  # O1-04 k: «Soporte técnico» sin horario del comercio no se publica
 
     # Mi Tienda -> Vitrina: banners, destacados y textos propios
     r = client.put(
@@ -113,7 +118,7 @@ def test_portada_administrable_y_paginas(client, auth, db_session):
             "banners": [
                 {"title": "Promo NVR", "image": "https://cdn.example.com/b.jpg", "link": "/c/videovigilancia", "position": 2},
                 {"title": "Oculto", "active": False},
-                {"title": "Primero", "position": 1},
+                {"title": "Primero", "image": "https://cdn.example.com/p.jpg", "position": 1},  # O1-04: sin imagen no sale
             ],
             "featured": [prods["WD44PURZ"].id, 999999, prods["WD44PURZ"].id],
             "pages": {"envios": "Enviamos con Correos de CR."},
