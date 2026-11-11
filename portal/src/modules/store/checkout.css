@@ -180,3 +180,6 @@
 .ck-privacy { margin: 0; font-size: 13.5px; color: var(--text-2); line-height: 1.5; }
 .ck-holder { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 .ck-hold { margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--text); }
+
+/* O1-10b: «Incluye ₡... de IVA» bajo el total: dato secundario */
+.ck-totals .ck-iva span { font-size: .8125rem; color: var(--text-3, #6f6a74); }

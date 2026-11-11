@@ -4,7 +4,7 @@
    calcula otro, no se crea el pedido. La clave de idempotencia hace que un doble clic devuelva el mismo pedido.
    Modo "cotizacion" (tienda solo catalogo): un formulario corto que llega al equipo como mensaje. */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Field, IC, Ico, local, money, newKey, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
+import { Field, IC, Ico, local, money, newKey, resumenConIva, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
 import { Prose } from "./storeKit";
 import { track, type GaItem } from "./analytics";
 import "./checkout.css";
@@ -551,12 +551,16 @@ function Summary({ quote, qErr, cart, cur, setQty, remove }: { quote: Quote | nu
       </ul>
       {quote ? (
         <div className="ck-totals">
-          <div className="sh-totrow"><span>Subtotal (sin IVA)</span><b>{money(quote.subtotal, cur)}</b></div>
-          {Number(quote.discount_total) > 0 && <div className="sh-totrow"><span>Descuento{quote.coupon ? ` (${quote.coupon})` : ""}</span><b>−{money(quote.discount_total, cur)}</b></div>}
-          <div className="sh-totrow"><span>Envío (sin IVA)</span><b>{quote.free_shipping ? "Gratis" : Number(quote.shipping) > 0 ? money(quote.shipping, cur) : "—"}</b></div>
-          {!quote.free_shipping && Number(quote.free_shipping_from) > 0 && <p className="sh-note" style={{ margin: 0 }}>Envío gratis en compras desde {money(quote.free_shipping_from as number, cur)}.</p>}
-          {(quote.taxes?.length ? quote.taxes : [{ rate: "13", amount: quote.tax_total }]).map((t) => <div key={t.rate} className="sh-totrow"><span>IVA {t.rate} %</span><b>{money(t.amount, cur)}</b></div>)}
-          <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(quote.total, cur)}</b></div>
+          {/* O1-10b: resumen para el consumidor, todo con IVA (las lineas del servidor: quote.lines[].total). Solo cambia
+              como se muestra: el total, expected_total y la clave del pedido son los mismos. */}
+          {(() => { const r = resumenConIva(quote); return (<>
+            <div className="sh-totrow"><span>Productos (IVA incluido)</span><b>{money(r.productos, cur)}</b></div>
+            {Number(quote.discount_total) > 0 && <p className="sh-note" style={{ margin: 0 }}>Ya incluye el descuento{quote.coupon ? ` del cupón ${quote.coupon}` : ""}.</p>}
+            <div className="sh-totrow"><span>Envío (IVA incluido)</span><b>{quote.free_shipping ? "Gratis" : r.envio > 0 ? money(r.envio, cur) : "—"}</b></div>
+            {!quote.free_shipping && Number(quote.free_shipping_from) > 0 && <p className="sh-note" style={{ margin: 0 }}>Envío gratis en compras desde {money(quote.free_shipping_from as number, cur)}.</p>}
+            <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(quote.total, cur)}</b></div>
+            <div className="sh-totrow ck-iva"><span>Incluye {money(quote.tax_total, cur)} de IVA</span></div>
+          </>); })()}
           <p className="sh-note" style={{ margin: 0 }}>Calculado por la tienda con los precios vigentes. Te enviamos la factura electrónica en un máximo de 1 día hábil.</p>
         </div>
       ) : <p className="sh-note" role="status">{qErr || "Calculando total…"}</p>}

@@ -5,7 +5,7 @@
    (36), el comprobante que subio el cliente se puede volver a abrir (34), "Rastrear mi pedido" en la confirmacion
    (40) y una caida pasajera del API ya no se presenta como "No encontramos ese pedido" (39). */
 import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
-import { Field, IC, Ico, fmtWhen, local, money, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
+import { Field, IC, Ico, fmtWhen, local, money, resumenConIva, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
 import "./checkout.css";
 
 type Pub = {
@@ -108,6 +108,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
   if (!o) return <div className="sh-wrap" style={{ paddingTop: 24 }}><div className="sh-skel" style={{ height: 360 }} /></div>;
 
   const cur = o.currency;
+  const resumen = resumenConIva(o);
   const wsp = o.whatsapp || store.whatsapp;
   const pickup = o.delivery?.type === "retiro";
   const closed = o.status === "cancelado" || o.status === "reembolsado";
@@ -272,11 +273,12 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
           <span className="sh-meta">Productos</span>
           <ul className="ck-olines">{o.lines.filter((l) => !l.shipping).map((l, i) => <li key={i}><span>{Number(l.quantity)} × {l.name}</span><b>{money(l.total, cur)}</b></li>)}</ul>
           <div className="ck-totals">
-            <div className="sh-totrow"><span>Subtotal (sin IVA)</span><b>{money(o.subtotal, cur)}</b></div>
-            {Number(o.discount_total) > 0 && <div className="sh-totrow"><span>Descuento{o.coupon_code ? ` (${o.coupon_code})` : ""}</span><b>−{money(o.discount_total, cur)}</b></div>}
-            <div className="sh-totrow"><span>Envío (sin IVA)</span><b>{Number(o.shipping) > 0 ? money(o.shipping, cur) : o.delivery?.type === "envio" ? "Gratis" : "—"}</b></div>
-            <div className="sh-totrow"><span>IVA</span><b>{money(o.tax_total, cur)}</b></div>
+            {/* O1-10b: el mismo resumen con IVA incluido del checkout */}
+            <div className="sh-totrow"><span>Productos (IVA incluido)</span><b>{money(resumen.productos, cur)}</b></div>
+            {Number(o.discount_total) > 0 && <p className="sh-note" style={{ margin: 0 }}>Ya incluye el descuento{o.coupon_code ? ` del cupón ${o.coupon_code}` : ""}.</p>}
+            <div className="sh-totrow"><span>Envío (IVA incluido)</span><b>{resumen.envio > 0 ? money(resumen.envio, cur) : o.delivery?.type === "envio" ? "Gratis" : "—"}</b></div>
             <div className="sh-totrow sh-totrow--big"><span>Total</span><b>{money(o.total, cur)}</b></div>
+            <div className="sh-totrow ck-iva"><span>Incluye {money(o.tax_total, cur)} de IVA</span></div>
           </div>
         </aside>
       </div>

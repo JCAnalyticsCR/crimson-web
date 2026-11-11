@@ -3,6 +3,17 @@ import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode 
 
 export const money = (v: string | number, cur = "CRC") =>
   new Intl.NumberFormat("es-CR", { style: "currency", currency: cur, currencyDisplay: "narrowSymbol", minimumFractionDigits: cur === "CRC" ? 0 : 2, maximumFractionDigits: cur === "CRC" ? 0 : 2 }).format(Number(v) || 0);
+/** O1-10b: el resumen con IVA incluido, armado con las lineas que ya calculo el servidor (lines[].total con IVA): los
+    productos por un lado y el envio (la tarifa final elegida) por otro. Si las lineas no suman el total (API viejo), el
+    envio se calcula como total menos productos para que el resumen nunca diga otra cosa que el total. */
+export function resumenConIva(q: { lines?: { total: number | string; shipping?: boolean }[]; total: number | string; shipping: number | string }): { productos: number; envio: number } {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const lines = q.lines || [];
+  const productos = r2(lines.filter((l) => !l.shipping).reduce((a, l) => a + Number(l.total || 0), 0));
+  const envio = lines.some((l) => l.shipping) ? r2(lines.filter((l) => l.shipping).reduce((a, l) => a + Number(l.total || 0), 0)) : Number(q.shipping) > 0 ? r2(Number(q.total) - productos) : 0;
+  return { productos, envio: Math.max(0, r2(Math.min(envio, Number(q.total) - productos))) };
+}
+
 export const wa = (phone: string, text: string) => `https://wa.me/${phone.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
 export const local = {
   get(k: string) { try { return localStorage.getItem(k); } catch { return null; } },
