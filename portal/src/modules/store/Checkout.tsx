@@ -6,7 +6,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Field, IC, Ico, local, money, newKey, resumenConIva, session, wa, type ApiFn, type StoreInfo } from "./shopkit";
 import { Prose } from "./storeKit";
-import { track, type GaItem } from "./analytics";
 import "./checkout.css";
 
 export type CartItem = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
@@ -120,15 +119,6 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
   useEffect(() => { api<Cfg>("/checkout-config").then(({ data }) => setCfg(data)).catch((e) => setCfgErr((e as Error).message)); }, [api]);
-  // GA4 (solo con consentimiento): una vez por visita al checkout
-  const gaItems = (): GaItem[] => cart.map((l) => ({ item_id: String(l.id), item_name: l.name, price: l.price, quantity: l.qty }));
-  const begun = useRef(false);
-  useEffect(() => {
-    if (begun.current || !cart.length) return;
-    begun.current = true;
-    track("begin_checkout", { currency: cart[0].currency, value: cart.reduce((a, l) => a + l.price * l.qty, 0), items: gaItems() });
-  }, [cart.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // valores por defecto que dependen de la configuracion
   const pickupRate = cfg?.shipping_rates.find((r) => r.zone === "retiro") || null;
   const canPickup = !!cfg && (!!pickupRate || !!cfg.pickup?.address);
@@ -301,7 +291,6 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
       session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)
-      if (!data.duplicate) track("purchase", { transaction_id: data.number, currency: data.currency, value: Number(data.total), items: gaItems() });
       session.set(`crimson-shop:placed:${data.number}`, JSON.stringify({ email: data.email, pay: data.pay }));
       if (data.pay?.checkout_url) { onPlaced(data); window.location.assign(data.pay.checkout_url); return; }
       onPlaced(data);

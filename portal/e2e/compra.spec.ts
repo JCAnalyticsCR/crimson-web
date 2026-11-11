@@ -23,7 +23,7 @@ test("la tienda local está sembrada: seis productos, cada uno en su estado, SIN
   // tarjeta sin llave de ONVO: el API la ofrece solo como pago simulado (y solo fuera de produccion)
   expect(cfg.methods.map((m: { code: string; simulated: boolean }) => [m.code, m.simulated])).toEqual([["sinpe", false], ["tarjeta", true]]);
   expect(cfg.shipping_rates.map((r: { name: string; display_amount: number }) => [r.name, Number(r.display_amount)])).toContainEqual([ENVIO.nombre, ENVIO.monto]);
-  expect((await (await servidor.get(`${API}/site`)).json()).analytics.ga4_id).toBeNull(); // sin medicion
+  expect((await (await servidor.get(`${API}/site`)).json()).analytics).toBeUndefined(); // sin medicion (EX-NOGA)
 });
 
 test("compra SINPE completa: del catálogo a «Mi pedido» con las instrucciones de pago", async ({ page, servidor }) => {

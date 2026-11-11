@@ -449,11 +449,12 @@ def test_seo_por_dominio_metas_datos_estructurados_sitemap_y_301(client, auth, d
     assert client.get("/public/seo/exists", headers={**H, "X-Original-URI": "/c/nada?x=1"}).status_code == 403
     assert client.get("/public/seo/exists", headers={**H, "X-Original-URI": f"/p/disco-{prods['WD44PURZ'].id}"}).status_code == 204
     assert client.get("/public/seo/exists/p/x-1", headers={"X-Store-Host": "portal.crimsoncr.com"}).status_code == 204
-    # GA4: se guarda en Ajustes y se expone (el navegador lo carga solo con consentimiento)
-    assert client.get("/public/store/crimson/site").json()["analytics"]["ga4_id"] is None
-    assert client.put("/store/showcase", json={"ga4_id": "UA-123"}).status_code == 422
-    client.put("/store/showcase", json={"ga4_id": "G-0PQ0N2M5TF"})
-    assert client.get("/public/store/crimson/site").json()["analytics"]["ga4_id"] == "G-0PQ0N2M5TF"
+    # EX-NOGA: nada de Google Analytics. Un panel viejo puede mandar el id: se descarta y nunca se expone
+    assert "analytics" not in client.get("/public/store/crimson/site").json()
+    assert client.put("/store/showcase", json={"ga4_id": "G-0PQ0N2M5TF"}).status_code == 200
+    assert "analytics" not in client.get("/public/store/crimson/site").json()
+    assert "ga4_id" not in client.get("/store/showcase").json()
+    assert "ga4_id" not in ((db_session.get(Tenant, t.id).settings.get("store") or {}).get("showcase") or {})
 
     # 301 de las direcciones de Fygaro
     def go(uri):

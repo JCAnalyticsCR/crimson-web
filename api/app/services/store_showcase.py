@@ -139,8 +139,7 @@ def showcase_cfg(store: dict) -> dict:
         "headline": sc.get("headline") or "",
         "subline": sc.get("subline") or "",
         "seo_description": sc.get("seo_description") or "",
-        # Google Analytics 4 (Fygaro usaba uno): solo se carga si la persona acepta la medicion en la tienda
-        "ga4_id": sc.get("ga4_id") or "",
+        # EX-NOGA: sin Google Analytics; un ga4_id viejo guardado en los ajustes se ignora al leer
     }
 
 

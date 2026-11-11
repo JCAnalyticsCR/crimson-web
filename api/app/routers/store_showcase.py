@@ -136,7 +136,9 @@ class ShowcaseIn(BaseModel):
     headline: str | None = Field(None, max_length=120)
     subline: str | None = Field(None, max_length=300)
     seo_description: str | None = Field(None, max_length=300)
-    ga4_id: str | None = Field(None, pattern=r"^(|G-[A-Z0-9]{4,16})$")
+    # EX-NOGA (decision del dueno: nada de Google Analytics ni Ads): un panel viejo todavia puede mandarlo; se acepta y
+    # se descarta, nunca se guarda ni se expone
+    ga4_id: str | None = Field(None, max_length=40)
     banners: list[BannerIn] | None = Field(None, max_length=12)
     featured: list[int] | None = Field(None, max_length=24)
     kits: list[KitIn] | None = Field(None, max_length=8)
@@ -355,6 +357,7 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     store = {**STORE_DEFAULTS, **(st.get("store") or {})}
     sc = dict(store.get("showcase") or {})
     patch = data.model_dump(exclude_unset=True)
+    patch.pop("ga4_id", None)  # EX-NOGA
     if "featured" in patch:
         own = set(db.scalars(select(Product.id).where(Product.tenant_id == t.id, Product.id.in_(patch["featured"] or [])))) if patch["featured"] else set()
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
@@ -710,12 +713,11 @@ def store_snapshot_endpoint(slug: str, response: Response, if_none_match: str | 
 
 @pub.get("/site")
 def site(slug: str, response: Response, db: Session = Depends(get_db)):
-    """Datos livianos que toda vista necesita: por ahora la medicion (GA4), que el navegador solo activa con
-    consentimiento explicito de la persona."""
-    t = _tenant(db, slug)
-    sc = sv.showcase_cfg(store_cfg(t))
+    """Datos livianos de la vista. EX-NOGA: la tienda no mide con Google (ni ninguna herramienta de terceros): ya no
+    trae «analytics». Se deja la ruta para las pestanas con JavaScript viejo (la piden y no encuentran nada que cargar)."""
+    _tenant(db, slug)
     response.headers["Cache-Control"] = "public, max-age=300"
-    return {"analytics": {"ga4_id": sc["ga4_id"] or None}}
+    return {}
 
 
 @pub.get("/showcase")

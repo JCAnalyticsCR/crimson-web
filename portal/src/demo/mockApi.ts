@@ -165,7 +165,7 @@ async function route(path: string, sp: URLSearchParams, method: string, init?: R
       payment_methods: METHODS.map((x) => ({ name: x.label, instructions: "" })),
     });
   }
-  if (GET && sub === "/site") return json({ analytics: { ga4_id: null } }); // sin medicion: la demo no carga nada de terceros
+  if (GET && sub === "/site") return json({}); // sin medicion (EX-NOGA): la tienda no carga nada de terceros
   if (GET && sub === "/showcase") {
     // titular y bajada que se prueban en «Detrás de escena» → Mi Tienda → Vitrina (solo esta sesion)
     let v: { headline?: unknown; subline?: unknown } = {};

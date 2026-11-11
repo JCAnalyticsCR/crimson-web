@@ -14,8 +14,7 @@ import { type PubProduct } from "./Blocks";
 import CategoryPage from "./CategoryPage";
 import Checkout from "./Checkout";
 import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
-import Consent from "./Consent";
-import { track } from "./analytics";
+
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
 import { businessLines, catSlugs, freeShipGap, normAvail, rateText, safeStore, StoreProvider, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
@@ -141,8 +140,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
       if (found) return c.map((l) => (l.key === key ? { ...l, qty: cap(l.qty + qty), max } : l));
       return [...c, { key, id: p.id, variant_id: variant?.id ?? null, name: variant ? `${p.name} · ${variant.name}` : p.name, image: p.image, price: Number(variant?.display_price ?? p.display_price), currency: p.display_currency, qty: cap(qty), max }];
     });
-    const price = Number(variant?.display_price ?? p.display_price);
-    track("add_to_cart", { currency: p.display_currency, value: price * qty, items: [{ item_id: String(p.id), item_name: variant ? `${p.name} · ${variant.name}` : p.name, price, quantity: qty }] });
+
     if (!calm() && navigator.userActivation?.isActive) navigator.vibrate?.(10);
     window.clearTimeout(toastT.current);
     setToast(p.name);
@@ -374,7 +372,6 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
       {toast && <div className="sh-toast" role="status"><Ico d={IC.check} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38vw" }}>Agregado: {toast}</span><button onClick={() => { setToast(null); setDrawer(true); }}>Ir {isShop ? "al carrito" : "a la cotización"}</button></div>}
 
-      <Consent />
 
       {compare.length > 0 && rel !== "/comparar" && !v && (rel.startsWith("/c/") || rel === "/catalogo" || rel === "/buscar") && (
         <div className="vt-cmptray" role="region" aria-label="Comparador">

@@ -46,7 +46,7 @@ def test_seis_productos_cada_uno_en_su_estado(client, db_session):
         ("Fast Crimson", "gam", D("5311.00")),
     }
     assert D(str(cfg["free_shipping_from"])) == D("50000.00") and cfg["terms_required"] and not cfg["verify_email"] and not cfg["auto_invoice"]
-    assert client.get(f"{PUB}/site").json() == {"analytics": {"ga4_id": None}}  # sin medicion
+    assert client.get(f"{PUB}/site").json() == {}  # sin medicion (EX-NOGA: nada de Google ni de terceros)
     # la semilla no crea usuarios ni contrasenas (los que hay son de conftest)
     assert db_session.scalars(select(User.email)).all() == ["admin@crimsonapp.com"]
 

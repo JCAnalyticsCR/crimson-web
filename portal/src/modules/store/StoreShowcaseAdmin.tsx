@@ -1,6 +1,6 @@
 /* Mi Tienda -> Vitrina: lo que se ve en la portada de la tienda propia (titular, banners, destacados, kits,
-   sellos), las paginas propias (envios, garantias, preguntas frecuentes, terminos y privacidad), la medicion
-   (GA4, solo con consentimiento) y los datos de vitrina por producto (precio anterior, ficha PDF, especificaciones). */
+   sellos), las paginas propias (envios, garantias, preguntas frecuentes, terminos y privacidad) y los datos de vitrina
+   por producto (precio anterior, ficha PDF, especificaciones). Sin medicion: nada de Google ni de terceros (EX-NOGA). */
 import { useEffect, useState } from "react";
 import { api, fmtMoney, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -27,7 +27,7 @@ const ROLE_NAMES: Record<string, string> = { cam_out: "Cámaras exteriores", cam
 type Trust = { icon: string; title: string; text: string };
 type Faq = { q: string; a: string };
 type Showcase = {
-  headline: string; subline: string; seo_description: string; ga4_id: string; banners: Banner[]; featured: number[]; kits: Kit[]; trust: Trust[];
+  headline: string; subline: string; seo_description: string; banners: Banner[]; featured: number[]; kits: Kit[]; trust: Trust[];
   faq: Faq[]; pages: { envios: string; garantias: string }; legal: { terms?: string; privacy?: string };
   /* state/label: disponibilidad de la funcion unica (lo que ve el cliente) */
   featured_products: { id: number; name: string; code: string; show_on_web: boolean; state?: string | null; label?: string | null }[];
@@ -40,7 +40,7 @@ type Showcase = {
 const vendible = (state?: string | null) => state === "en_bodega" || state === "bajo_pedido";
 type PShow = { id: number; name: string; code: string; price: number | null; currency: string; compare_price: number | null; datasheet_url: string | null; specs: Record<string, string>; derived_specs: Record<string, string>; path: string };
 
-const TABS = ["Portada", "Destacados y kits", "Páginas", "Por producto", "Medición"] as const;
+const TABS = ["Portada", "Destacados y kits", "Páginas", "Por producto"] as const; // EX-NOGA: sin «Medición» (nada de Google)
 
 export default function StoreShowcaseAdmin() {
   const { toast } = useSession();
@@ -99,11 +99,7 @@ export default function StoreShowcaseAdmin() {
 
           {tab === "Por producto" && <ProductShowcase />}
 
-          {tab === "Medición" && (
-            <div style={{ display: "grid", gap: 10, maxWidth: 560 }}>
-              <Field label="Google Analytics 4 (id de medición)" hint="Fygaro usaba G-0PQ0N2M5TF. Vacío = sin medición. Con id, la tienda pregunta a cada visitante y solo carga Analytics si acepta."><input className="input input--mono" style={{ textAlign: "left" }} defaultValue={d.ga4_id} placeholder="G-XXXXXXXXXX" onBlur={(e) => e.target.value.trim().toUpperCase() !== d.ga4_id && save({ ga4_id: e.target.value.trim().toUpperCase() })} /></Field>
-            </div>
-          )}
+
         </div>
       )}
     </Card>

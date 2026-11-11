@@ -5,7 +5,7 @@
    `tsc -b` compila todo src/ con noUnusedLocals: renombrar algo, cambiar las props de un componente o quitar una clase
    aqui puede poner el CI en rojo o mover una pantalla que no es la vitrina. Antes de tocar, buscar el nombre en src/.
    - storeKit.tsx: ademas de la vitrina (PublicStore, StoreHome, CategoryPage, ProductPage, KitBuilder, StorePages,
-     Checkout, Consent) lo importa la demo de src/demo/propuestas: venta/A1Instalacion.tsx (AvailBadge, IC, Ico,
+     Checkout) lo importa la demo de src/demo/propuestas: venta/A1Instalacion.tsx (AvailBadge, IC, Ico,
      PriceTag, money), venta/A3Cotizacion.tsx (IC, Ico, PriceTag, money), venta/piezas.tsx (IC, Ico, Viewfinder) y
      cliente/piezas.tsx (IC).
    - catalogFilter.ts: CategoryPage, ProductPage, StoreHome y useSnapshot.ts; toma de aqui los tipos Avail y VProd.
