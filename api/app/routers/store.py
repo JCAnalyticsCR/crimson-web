@@ -17,6 +17,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
 from ..models import Category, Coupon, Customer, Invoice, Order, Product, ProductVariant, StorePage, Tenant
+from ..services import catalog_fichas as cfichas
 from ..services import catalog_text as ctext
 from ..services import fygaro_legacy
 from ..services import store_inventory as sinv
@@ -624,7 +625,8 @@ def _prod_pub(
 ):
     main = next((i.get("url") for i in (p.images or []) if i.get("main")), (p.images or [{}])[0].get("url") if p.images else None)
     rate = float(p.taxes[0].tax.rate) if p.taxes else 13
-    desc = p.description_store or p.description_invoice
+    # O3-06: la descripcion propia aprobada o la de tienda si sirve; nunca la de factura (mayusculas con codigo interno)
+    desc = cfichas.store_description(p)
     if compact and desc and len(desc) > 180:
         desc = desc[:177].rstrip() + "…"
     out = {

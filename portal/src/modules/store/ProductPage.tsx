@@ -10,6 +10,7 @@ import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 import { conNombreVisible } from "./storeNames";
+import { Descripcion } from "./fichaTexto";
 
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
@@ -266,7 +267,7 @@ ${url}`) : "";
         )}
         {verDesc && (
           <Fold id="desc" title="Descripción">
-            <p className="sh-desc">{d.description}</p>
+            <Descripcion texto={d.description} />
           </Fold>
         )}
         {Object.keys(d.specs).length > 0 && (

@@ -148,3 +148,49 @@ def family_specs(shown_type: str, name: str) -> dict[str, str]:
         if m := _W.search(n):
             out["Potencia"] = f"{m.group(1).replace(',', '.')} W"
     return out
+# ---------------------------------------------------------------- descripcion por plantilla (O3-06)
+_SKIP = ("Tipo", "Marca", "Modelo")
+
+
+def _low(k: str) -> str:
+    return k[:1].lower() + k[1:]
+
+
+def describe(p, shown_type: str, specs: dict[str, str]) -> str | None:
+    """Una frase con los mismos datos de la ficha y, con 3 datos o mas, de 3 a 5 viñetas. Sin adjetivos."""
+    from .catalog_text import shown_name
+    from .product_names import tidy
+
+    items = [(k, str(v).strip()) for k, v in specs.items() if k not in _SKIP and str(v).strip() and not empty_value(v)]
+    if not items:
+        return None
+    name = (getattr(p, "web_name", None) or "").strip() or tidy(p.name) or shown_name(p)
+    d = dict(items)
+    t = fold(shown_type)
+    if "parlante" in t and d.get("Potencia"):
+        extra = [x for x in ("Bluetooth" if d.get("Bluetooth") else None, f"protección {d['Protección']}" if d.get("Protección") else None) if x]
+        sentence = f"{name}, de {d['Potencia']} de potencia" + (f", con {' y '.join(extra)}" if extra else "") + "."
+    elif t.startswith("camara") and d.get("Resolución"):
+        sentence = f"{name}, con resolución de {d['Resolución']}" + (f" y lente de {d['Lente']}" if d.get("Lente") else "") + "."
+    elif t == "ups" and d.get("Capacidad"):
+        sentence = f"{name}, de {d['Capacidad']}" + (f" y {d['Potencia']}" if d.get("Potencia") else "") + "."
+    else:
+        k1, v1 = items[0]
+        sentence = f"{name}. {k1}: {v1}."
+    sentence = INTERNAL.sub("", sentence).replace(" .", ".")
+    if len(items) < 3:
+        return sentence
+    bullets = "\n".join(f"- {k}: {v}" for k, v in items[:5])
+    return f"{sentence}\n{bullets}"
+
+
+def meta_description(p, specs: dict[str, str] | None, limit: int = 155) -> str | None:
+    """Meta descripcion corta: los primeros datos de la ficha, sin rellenos ni codigos internos."""
+    items = [(k, v) for k, v in (specs or {}).items() if k not in _SKIP and not empty_value(v)]
+    if not items:
+        return None
+    out = "; ".join(f"{k}: {v}" for k, v in items[:4])
+    out = INTERNAL.sub("", out).strip(" ;")
+    if len(out) > limit:
+        out = out[: limit - 1].rsplit(" ", 1)[0].rstrip(" ;:,") + "…"
+    return out

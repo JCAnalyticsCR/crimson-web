@@ -93,8 +93,8 @@ def in_sync_window(now: datetime | None = None) -> bool:
 
 
 def _norm(v: object) -> object:
-    if isinstance(v, str):
-        return " ".join(v.split()) or None
+    if isinstance(v, str):  # espacios de mas fuera, pero los saltos de linea (viñetas) se conservan
+        return "\n".join(" ".join(x.split()) for x in v.splitlines() if x.strip()) or None
     if isinstance(v, dict):
         return {str(k): str(x) for k, x in v.items()} or None
     return v

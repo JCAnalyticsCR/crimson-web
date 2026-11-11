@@ -25,6 +25,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
+from ..services import catalog_fichas as cfichas
 from ..services import catalog_text as ctext
 from ..services import category_paths
 from ..services import product_typing as pt
@@ -1210,7 +1211,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
     response.headers["Cache-Control"] = "public, max-age=60"
     return {
         **out,
-        "description": p.description_store or p.description_invoice,
+        "description": cfichas.store_description(p),  # O3-06: nunca la de factura
         "specs": ctx.specs(p),
         "datasheet_url": p.datasheet_url,
         "net_price": net,

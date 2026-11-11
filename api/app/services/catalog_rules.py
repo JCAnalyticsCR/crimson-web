@@ -5,13 +5,16 @@ externo, y ninguna publica nada (solo proponen borradores que un administrador a
 - web_name (O3-03, «nombre_v1»): product_names.commercial_name.
 - web_specs (O3-05, «ficha_v1»): las viñetas «- Clave: valor» de la descripcion (sin rellenos) y lo que el nombre dice
   con numero y unidad por familia. Solo se copia el dato, nada se interpreta.
+- web_description (O3-06, «descripcion_v1»): solo para lo que no tiene texto propio (o solo la linea del proveedor en
+  mayusculas); una frase de plantilla por familia y de 3 a 5 viñetas con los datos de la ficha APROBADA (web_specs) o
+  escrita a mano (specs). Sin adjetivos que el dato no sostenga.
 """
 
 from __future__ import annotations
 
 from . import catalog_drafts as cd
 from . import product_names
-from .catalog_fichas import family_specs, specs_from_text
+from .catalog_fichas import describe, family_specs, specs_from_text, store_description
 
 
 def _name(p, ctx: cd.GenCtx):
@@ -25,5 +28,16 @@ def _specs(p, ctx: cd.GenCtx):
     return (out or None), ("pocos datos" if len(out) == 1 else None)
 
 
+def _description(p, ctx: cd.GenCtx):
+    if (p.web_description or "").strip() or store_description(p) is not None:
+        return None, None  # ya tiene texto propio: no se propone otro
+    specs = {**(p.web_specs or {}), **(p.specs or {})}
+    if not specs:
+        return None, None  # sin ficha aprobada no hay de donde sacar datos (no se inventa)
+    text = describe(p, ctx.dtype(p), specs)
+    return text, ("pocos datos" if text and "\n" not in text else None)
+
+
 cd.register("web_name", "nombre_v1", _name)
 cd.register("web_specs", "ficha_v1", _specs)
+cd.register("web_description", "descripcion_v1", _description)

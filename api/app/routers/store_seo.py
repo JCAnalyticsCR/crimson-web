@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..models import Product, Tenant
+from ..services import catalog_fichas as cfichas
 from ..services import catalog_text as ctext
 from ..services import category_paths, fygaro_legacy
 from ..services import store_showcase as sv
@@ -177,7 +178,12 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         state = c["availability"]["state"]
         url = base + c["path"]
         shown = ctext.shown_name(p)  # O3-01: el nombre comercial aprobado (o el de siempre)
-        desc = re.sub(r"\s+", " ", (p.description_store or p.description_invoice or p.name)).strip()
+        # O3-06: la descripcion que se ve en la ficha (nunca la de factura); si es una lista de datos, los datos
+        own = cfichas.store_description(p)
+        if own and not cfichas.is_bullet_text(own):
+            desc = re.sub(r"\s+", " ", cfichas.INTERNAL.sub("", own)).strip()
+        else:  # la lista que muestra la ficha; sin ella, la ficha aprobada o escrita a mano
+            desc = cfichas.meta_description(p, cfichas.specs_from_text(own) if own else (p.web_specs or p.specs), 400) or ""
         price = Decimal(str(c["display_price"]))
         crumbs = [("Tienda", "/")]
         if c.get("category_path"):
@@ -199,7 +205,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             "@type": "Product",
             "name": shown,
             "sku": ctext.public_code(p),  # O3-02: nunca «EUR-...»
-            "description": desc[:500],
+            "description": (desc or shown)[:500],
             "image": [_abs(base, u) for u in (c["images"][:5] or ([c["image"]] if c["image"] else []))],
             "category": c.get("category") or c.get("type") or None,
             "offers": offer,
@@ -343,10 +349,23 @@ def _product_description(p: Product, c: dict, price: Decimal, desc: str) -> str:
         head = " ".join(x for x in (c.get("type"), ctext.shown_brand(p), c.get("model")) if x) or ctext.shown_name(p)
         precio = f" a {_money(price, c['display_currency'])} con IVA" if price > 0 else ""
         avail = (c.get("availability") or {}).get("label") or ""
-        return f"{head}{precio}." + (f" {avail.rstrip('.')}." if avail else "") + " Envío a todo Costa Rica y factura electrónica."
-    return (
-        (f"{desc[:200]} · " if desc else "") + ("Precio con IVA incluido. " if price > 0 else "") + "Envío a todo Costa Rica, factura electrónica y soporte local."
-    )
+        return _fit(f"{head}{precio}." + (f" {avail.rstrip('.')}." if avail else ""), " Envío a todo Costa Rica y factura electrónica.")
+    tail = (" Precio con IVA." if price > 0 else "") + " Envío a todo Costa Rica."
+    return _fit(desc, tail) if desc else _fit(ctext.shown_name(p) + ".", tail)
+
+
+META_MAX = 155  # O3-06: meta descripcion de 155 caracteres o menos
+
+
+def _fit(text: str, tail: str) -> str:
+    """texto + cola en META_MAX caracteres: se corta el texto (por palabra), nunca la cola"""
+    text = " ".join(text.split())
+    if text and text[-1] not in ".!?…":
+        text += "."
+    room = META_MAX - len(tail)
+    if len(text) > room:
+        text = text[: room - 1].rsplit(" ", 1)[0].rstrip(" ,;:·-") + "…"
+    return (text + tail)[:META_MAX]
 
 
 @seo.get("/head", response_class=PlainTextResponse)
