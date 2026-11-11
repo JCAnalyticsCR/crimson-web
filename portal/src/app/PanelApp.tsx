@@ -16,6 +16,7 @@ const Customers = lazy(() => import("../modules/crm/Customers"));
 const Products = lazy(() => import("../modules/catalog/Products"));
 const CabysBulk = lazy(() => import("../modules/catalog/CabysBulk"));
 const Margins = lazy(() => import("../modules/catalog/Margins"));
+const ContentReview = lazy(() => import("../modules/catalog/ContentReview"));
 const Settings = lazy(() => import("../modules/Settings"));
 const PayPage = lazy(() => import("../modules/pay/PayPage"));
 const QuotePage = lazy(() => import("../modules/pay/QuotePage"));
@@ -216,6 +217,7 @@ function App() {
         <Route path="/productos" element={g("catalog.ver", <Products />)} />
         <Route path="/productos/cabys" element={g("catalog.editar", <CabysBulk />)} />
         <Route path="/productos/margenes" element={g("catalog.costos", <Margins />)} />
+        <Route path="/productos/contenido" element={g("catalog.editar", <ContentReview />)} />
         <Route path="/inventario" element={g("inventory.ver", <Inventory />)} />
         <Route path="/mi-tienda" element={g("settings.configurar", <Store />)} />
         <Route path="/mi-tienda/pruebas" element={g("settings.configurar", <TestShop />)} />

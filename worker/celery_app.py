@@ -151,6 +151,25 @@ def rebuild_snapshot(tenant_id: int) -> dict:
     return {"tenant_id": tenant_id, "ok": True}
 
 
+@celery.task(name="catalog.drafts_generate")
+def catalog_drafts_generate(tenant_id: int, field: str, category_id: int | None = None, user_id: int | None = None) -> dict:
+    """O3-11: propone contenido de la tienda (borradores) por lotes de 50 con commit por lote. Nunca aplica nada (eso
+    lo hace un administrador en «Contenido por aprobar») y no corre en la ventana de la sincronizacion del lunes."""
+    from app.core.db import SessionLocal
+    from app.models import Tenant
+    from app.services import catalog_drafts
+
+    if catalog_drafts.in_sync_window():
+        return {"skipped": "ventana de la sincronizacion con el proveedor (lunes 02:45-05:30)"}
+    with SessionLocal() as db:
+        t = db.get(Tenant, tenant_id)
+        if t is None:
+            return {"skipped": "empresa no encontrada"}
+        out = catalog_drafts.generate(db, t, field, category_id=category_id, user_id=user_id, simulate=False, commit=True, published_only=True)
+        db.commit()
+    return out
+
+
 @celery.task(name="sales.run_recurrences")
 def run_recurrences() -> int:
     from app.core.db import SessionLocal

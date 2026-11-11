@@ -764,6 +764,10 @@ def product_from_item(
     sc.link(db, it, prod, "creado", user_id, fx=fx)
     if cost is not None and it.cost is None:
         prod.cost = cost  # costo cargado a mano: sync_product no lo pisa mientras el proveedor no publique el suyo
+    # O3-11: cada alta deja sus borradores de contenido (nombre comercial, ficha...) en el lote de altas; nada se aplica
+    from . import catalog_drafts
+
+    catalog_drafts.on_new_product(db, prod)
     return prod
 
 

@@ -47,6 +47,7 @@ from .routers import (
     sales,
     stock,
     store,
+    store_catalog,
     store_checkout,
     store_seo,
     store_showcase,
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(store_test.router)  # Tienda de pruebas (ONVO modo Test), solo panel y solo admin (/store/pruebas)
     app.include_router(invoice_proofs_router.router)  # comprobantes de la pagina de pago de facturas (/pagar)
     app.include_router(store_showcase.router)
+    app.include_router(store_catalog.router)  # O3-11: Contenido por aprobar
     app.include_router(store_showcase.pub)
     app.include_router(store_seo.seo)
     app.include_router(reception.router)
