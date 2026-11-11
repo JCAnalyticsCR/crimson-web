@@ -171,7 +171,10 @@ def run(
 ) -> dict:
     """Planifica (y con apply=True aplica) la importacion. Devuelve {summary, rows, redirects}. No hace commit."""
     from ..routers.media import public_url, save_media
+    from . import price_history
 
+    if apply:
+        price_history.set_source(db, "lote")  # historial de precios (O0-07): importacion masiva, no una edicion a mano
     tid = tenant.id
     state = dict((tenant.settings or {}).get("fygaro") or {})
     pmap: dict[str, dict] = dict(state.get("products") or {})

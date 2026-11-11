@@ -11,7 +11,7 @@
 downgrade: borra la tabla, su indice y las dos columnas. Ningun precio se toca ni al subir ni al bajar.
 
 Revision ID: b7d3e5f1a924
-Revises: a1c4e7b9d203
+Revises: c8e2f1a4b937
 Create Date: 2026-11-10 12:00:00
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b7d3e5f1a924"
-down_revision: str | None = "a1c4e7b9d203"
+down_revision: str | None = "c8e2f1a4b937"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

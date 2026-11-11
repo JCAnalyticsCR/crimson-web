@@ -209,10 +209,11 @@ def plan(db: Session, t: Tenant, cid: int, margin: Decimal, *, include_own: bool
 
 def apply(db: Session, t: Tenant, cid: int, margin: Decimal, *, include_own: bool, token: str, user_id: int | None, ip: str | None = None) -> dict:
     """Guarda el margen de la categoria y aplica EXACTAMENTE la vista previa confirmada. Sin commit."""
-    from . import margin_guard
+    from . import margin_guard, price_history
     from . import store_showcase as sv
     from .documents import audit
 
+    price_history.set_source(db, "lote")  # historial de precios (O0-07): un precio para toda la categoria
     pl = plan(db, t, cid, margin, include_own=include_own)
     if pl["token"] != token:
         raise Stale("Los precios cambiaron desde la vista previa (costo, tipo de cambio o catálogo). Revísela de nuevo.")

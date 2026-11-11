@@ -280,3 +280,148 @@ def d(v) -> Decimal:
 
 def _aware(dt: datetime | None) -> datetime | None:
     return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
+
+
+# --- cierre de la Ola 0 (hallazgos de la revision) ---------------------------------------------------------------
+
+
+def test_revertir_un_savepoint_no_pierde_el_cambio_de_precio_ya_vaciado(db_session):
+    p = _producto(db_session, price="1000")
+    p.price = Decimal("2000")
+    db_session.flush()  # el cambio ya esta en la base y fuera de session.dirty
+    sp = db_session.begin_nested()
+    sp.rollback()  # un savepoint que falla (p. ej. margin_guard.config) no debe borrar los pendientes
+    db_session.commit()
+    filas = _filas(db_session, p.id)
+    assert [d(f.price_net) for f in filas] == [Decimal("1000"), Decimal("2000")]
+
+
+def test_lo_creado_dentro_de_un_savepoint_revertido_no_deja_fila(db_session):
+    t = _tenant(db_session)
+    sp = db_session.begin_nested()
+    q = Product(tenant_id=t.id, code="SP-0001", name="Producto ficticio savepoint", price=Decimal("700"), currency="CRC")
+    db_session.add(q)
+    db_session.flush()
+    sp.rollback()
+    db_session.commit()
+    assert db_session.scalar(select(sa.func.count()).select_from(ProductPriceHistory).where(ProductPriceHistory.product_id.is_(None))) == 0
+    assert db_session.scalar(select(sa.func.count()).select_from(Product).where(Product.code == "SP-0001")) == 0
+
+
+def test_confirmar_un_savepoint_no_escribe_el_historial_a_media_transaccion(db_session):
+    p = _producto(db_session, price="1000")
+    p.price = Decimal("1500")
+    with db_session.begin_nested():
+        pass
+    assert len(_filas(db_session, p.id)) == 1  # todavia nada: se escribe con el commit real
+    db_session.commit()
+    filas = _filas(db_session, p.id)
+    assert [d(f.price_net) for f in filas] == [Decimal("1000"), Decimal("1500")]
+
+
+def test_cambio_masivo_de_precios_hace_lecturas_en_bloque(db_session):
+    t = _tenant(db_session)
+    iva = db_session.scalar(select(Tax).where(Tax.tenant_id == t.id, Tax.rate == 13))
+    prods = []
+    for i in range(60):
+        p = Product(tenant_id=t.id, code=f"MAS-{i:04d}", name=f"Masivo ficticio {i}", price=Decimal("1000"), currency="CRC")
+        if iva is not None:
+            p.taxes.append(ProductTax(tax_id=iva.id))
+        db_session.add(p)
+        prods.append(p)
+    db_session.commit()
+    for p in prods:
+        p.price = Decimal("1100")
+    selects: list[str] = []
+    engine = db_session.get_bind()
+
+    def _cuenta(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", _cuenta)
+    try:
+        db_session.commit()
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", _cuenta)
+    # productos + impuestos + ultima fila: unas pocas lecturas, no tres por producto
+    assert len(selects) <= 5, len(selects)
+    for p in prods[:3]:
+        assert d(_filas(db_session, p.id)[-1].price_net) == Decimal("1100")
+    assert db_session.scalar(select(sa.func.count()).select_from(ProductPriceHistory).where(ProductPriceHistory.price_net == Decimal("1100"))) == 60
+
+
+def test_retener_o_liberar_por_margen_mueve_web_updated_at(db_session):
+    p = _producto(db_session)
+    antes = datetime(2026, 3, 3, tzinfo=UTC)
+    p.web_updated_at = antes
+    db_session.commit()
+    # solo datos internos del guardian: no se mueve
+    p.margin_info = {"margin_pct": "5"}
+    p.margin_flagged_at = datetime.now(UTC)
+    db_session.commit()
+    db_session.refresh(p)
+    assert _aware(p.web_updated_at) == antes
+    # retener: la tienda pasa a «Consultar»
+    p.margin_hold = True
+    db_session.commit()
+    db_session.refresh(p)
+    retenido = _aware(p.web_updated_at)
+    assert retenido > antes
+    p.web_updated_at = antes
+    db_session.commit()
+    # liberar: vuelve el precio
+    p.margin_hold = False
+    db_session.commit()
+    db_session.refresh(p)
+    assert _aware(p.web_updated_at) > antes
+    assert len(_filas(db_session, p.id)) == 1  # el precio guardado no cambio: sin fila nueva
+
+
+def test_dos_impuestos_dan_siempre_la_tasa_del_de_menor_id(db_session):
+    t = _tenant(db_session)
+    iva13 = db_session.scalar(select(Tax).where(Tax.tenant_id == t.id, Tax.rate == 13))
+    if iva13 is None:
+        iva13 = Tax(tenant_id=t.id, name="IVA 13 % (ficticio)", rate=13, rate_code="08")
+        db_session.add(iva13)
+    iva1 = Tax(tenant_id=t.id, name="IVA 1 % (ficticio)", rate=1, rate_code="02")
+    db_session.add(iva1)
+    db_session.commit()
+    p = Product(tenant_id=t.id, code="DOS-0001", name="Dos impuestos ficticio", price=Decimal("1000"), currency="CRC")
+    p.taxes.append(ProductTax(tax_id=iva13.id))
+    db_session.add(p)
+    db_session.flush()
+    p.taxes.append(ProductTax(tax_id=iva1.id))
+    db_session.commit()
+    assert d(_filas(db_session, p.id)[-1].tax_rate) == Decimal(13)
+    for nombre, precio in (("Dos impuestos renombrado", "1100"), ("Dos impuestos otra vez", "1200")):
+        db_session.expire_all()
+        p = db_session.get(Product, p.id)
+        assert [pt.tax_id for pt in p.taxes] == [iva13.id, iva1.id]  # relacion ordenada por id
+        p.name, p.price = nombre, Decimal(precio)
+        db_session.commit()
+    assert {d(f.tax_rate) for f in _filas(db_session, p.id)} == {Decimal(13)}
+    assert len(_filas(db_session, p.id)) == 3
+
+
+def test_margen_por_categoria_queda_como_lote(client, auth, db_session):
+    from tests.test_margen_categoria import _base
+
+    x = _base(db_session, auth["tenant"]["id"])
+    prev = client.post(f"/catalog/margins/{x['audio'].id}/preview", json={"margin_pct": 35}).json()
+    r = client.post(f"/catalog/margins/{x['audio'].id}/apply", json={"margin_pct": 35, "token": prev["token"]})
+    assert r.status_code == 200, r.text
+    f = _filas(db_session, x["a"].id)[-1]
+    assert f.source == "lote" and d(f.price_net) == Decimal(1000) and f.changed_by == _admin_id(db_session)
+
+
+def test_importacion_de_fygaro_queda_como_lote(db_session, tmp_path):
+    from app.services import fygaro_import
+    from tests.test_fygaro_import import _catalog, _images_dir
+
+    t = _tenant(db_session)
+    tope = db_session.scalar(select(sa.func.max(ProductPriceHistory.id))) or 0  # lo que ya traia la semilla
+    fygaro_import.run(db_session, t, _catalog(), apply=True, images_dir=_images_dir(tmp_path), download_images=False, update_prices=True)
+    db_session.commit()
+    filas = list(db_session.scalars(select(ProductPriceHistory).where(ProductPriceHistory.id > tope)))
+    assert filas and {f.source for f in filas} == {"lote"}

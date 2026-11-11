@@ -102,7 +102,10 @@ class Product(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     web_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hidden_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan")
+    # Orden fijo (el de menor id primero): taxes[0] de la tienda, del snapshot y del historial de precios (O0-07) es el
+    # mismo en cada carga y el mismo que usa la fila «inicial» de la migracion (ORDER BY pt.id). Sin order_by, Postgres
+    # los devuelve en cualquier orden cuando un producto tiene dos o mas impuestos.
+    taxes: Mapped[list["ProductTax"]] = relationship(cascade="all, delete-orphan", order_by="ProductTax.id")
 
 
 class ProductTax(Base):
