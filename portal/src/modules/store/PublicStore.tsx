@@ -69,6 +69,9 @@ const IC = {
   lock: "M6 11h12v10H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3M12 15v2",
 };
 
+/** O2-05: el orden de las categorias en la cabecera y el pie (Seguridad primero) */
+const PRIORIDAD = [/segur|vigil|c[aá]mara|cctv/i, /redes|conectiv|wifi/i, /respaldo|energ|\bups\b/i, /smart|hogar|dom[oó]tic/i, /audio|sonido/i];
+
 const Spin = () => <div className="vt-spin"><span className="spinner" /></div>;
 
 export default function PublicStore({ slug: slugProp, hostMode = false }: { slug?: string; hostMode?: boolean }) {
@@ -158,6 +161,10 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer]);
 
+  // O2-05: la lupa abre el buscador a todo el ancho (celular y tableta); se cierra al cambiar de vista
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => setSearchOpen(false), [loc.pathname]);
+
   // ---------- comparador (hasta 3, por visitante) ----------
   const cmpKey = `crimson-shop:cmp:${slug}`;
   const [compare, setCompare] = useState<number[]>(() => { try { return (JSON.parse(safeStore.get(cmpKey) || "[]") as number[]).slice(0, 3); } catch { return []; } });
@@ -208,6 +215,8 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const hasWa = !!S.whatsapp;
   const quoteText = (lines: Line[]) => `Hola ${S.name}, quiero cotizar:\n${lines.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}`;
   const slugs = catSlugs(home.categories);
+  // O2-05: chips por prioridad del negocio (orden fijo hasta que exista el orden editable, O3-07b), no alfabeticos
+  const chips = PRIORIDAD.map((re) => home.categories.find((c) => re.test(c.name))).filter((c, i, all): c is Cat => !!c && all.indexOf(c) === i);
   const L = (p: string) => `${base}${p}` || "/";
   const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k];
   // O1-09: envio visible antes del checkout (solo en la tienda que vende; nada si el API no lo manda)
@@ -244,37 +253,38 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
           {hours && hasWa && <span className="vt-strip__m"> · WhatsApp {hours}</span>}
         </p>
       ) : null}
-      <header className="sh-head vt-head">
+      {/* O2-05: una sola fila fija (56 px en celular y tableta, 64 en escritorio): logo, buscador (lupa en celular),
+          WhatsApp, «Mi pedido» (escritorio) y carrito. Las categorias van debajo y no son fijas. */}
+      <header className="sh-head vt-head" data-search={searchOpen || undefined}>
         <div className="sh-wrap">
           <div className="sh-head__row">
             <Link className="sh-logo" to={L("/")} aria-label={`${S.name}, inicio de la tienda`}>
               {S.logo_url ? <img src={S.logo_url} alt="" height={30} /> : <b>{S.name}</b>}
-              <span className="sh-meta">Tienda</span>
             </Link>
-            <nav className="vt-mainnav" aria-label="Principal">
-              <Link to={L("/catalogo")} aria-current={rel === "/catalogo" ? "page" : undefined}>Catálogo</Link>
-              <Link to={L("/arma-tu-sistema")} aria-current={rel === "/arma-tu-sistema" ? "page" : undefined}>Armá tu sistema</Link>
-              <Link to={L("/asesoria")} aria-current={rel === "/asesoria" ? "page" : undefined}>Asesoría</Link>
-            </nav>
             <SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} />
             <div className="sh-head__actions">
-              {hasWa && <a className="sh-btn sh-btn--ghost sh-btn--sm sh-hide-m" href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} /><span className="vt-hide-l">WhatsApp</span></a>}
-              {compare.length > 0 && <Link className="sh-btn sh-btn--ghost sh-btn--sm vt-cmpbtn" to={L("/comparar")} aria-label={`Comparar ${compare.length} producto(s)`}><Ico d={IC.compare} /><span className="sh-badge sh-badge--ink">{compare.length}</span></Link>}
-              <button className="sh-btn sh-btn--sm sh-cartbtn" data-bump={bump % 2} onClick={() => setDrawer(true)} aria-label={`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}>
-                <Ico d={IC.bag} /><span className="sh-hide-m">{isShop ? "Carrito" : "Cotización"}</span>
-                {count > 0 && <span className="sh-badge" key={bump}>{count > 99 ? "99+" : count}</span>}
+              <button type="button" className="vt-iconbtn vt-show-m" aria-label={searchOpen ? "Cerrar la búsqueda" : "Buscar productos"} aria-expanded={searchOpen} aria-controls="vt-search-m" onClick={() => setSearchOpen(!searchOpen)}><Ico d={searchOpen ? IC.x : IC.search} size={20} /></button>
+              {hasWa && <a className="vt-iconbtn vt-headwa" href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp (se abre WhatsApp)"><Ico d={IC.wa} size={20} /><span className="vt-hide-m" aria-hidden="true">WhatsApp</span></a>}
+              {isShop && <button type="button" className="vt-headlink vt-hide-m" onClick={() => go({ v: "mi-pedido" })}>Mi pedido</button>}
+              {compare.length > 0 && <Link className="vt-iconbtn vt-cmpbtn" to={L("/comparar")} aria-label={`Comparar ${compare.length} producto(s)`}><Ico d={IC.compare} size={20} /><span className="sh-badge sh-badge--ink" aria-hidden="true">{compare.length}</span></Link>}
+              <button type="button" className="sh-btn sh-btn--sm sh-cartbtn" data-bump={bump % 2} onClick={() => setDrawer(true)} aria-label={`${isShop ? "Carrito" : "Cotización"}: ${count} artículo(s)`}>
+                <Ico d={IC.bag} /><span className="vt-hide-m" aria-hidden="true">{isShop ? "Carrito" : "Cotización"}</span>
+                {count > 0 && <span className="sh-badge" key={bump} aria-hidden="true">{count > 99 ? "99+" : count}</span>}
               </button>
             </div>
           </div>
-          <div className="sh-head__search-m"><SearchBox value={qInput} onChange={setQInput} onSubmit={submitSearch} /></div>
-          <nav className="vt-quick" aria-label="Accesos rápidos">
-            <Link to={L("/arma-tu-sistema")} className="vt-quick__hot"><Ico d={IC.cam} size={16} />Armá tu sistema</Link>
-            <Link to={L("/catalogo")}>Catálogo</Link>
-            {home.categories.map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
-            <Link to={L("/asesoria")}>Asesoría</Link>
-          </nav>
+          {searchOpen && <div className="sh-head__search-m" id="vt-search-m"><SearchBox value={qInput} onChange={setQInput} onSubmit={(e) => { submitSearch(e); setSearchOpen(false); }} autoFocus /></div>}
         </div>
       </header>
+      {/* categorias por prioridad del negocio (no alfabeticas); no son fijas. En escritorio cierra con «Más» */}
+      <nav className="vt-quick" aria-label="Categorías">
+        <div className="sh-wrap vt-quick__row">
+          <Link to={L("/arma-tu-sistema")} className="vt-quick__hot" aria-current={rel === "/arma-tu-sistema" ? "page" : undefined}><Ico d={IC.cam} size={16} />Armá tu sistema</Link>
+          {chips.map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)} aria-current={rel === `/c/${slugs[c.id]}` ? "page" : undefined}>{c.name}</Link>)}
+          <Link to={L("/asesoria")} aria-current={rel === "/asesoria" ? "page" : undefined}>Asesoría</Link>
+          <Link to={L("/catalogo")} aria-current={rel === "/catalogo" ? "page" : undefined}>{chips.length < home.categories.length ? "Más" : "Catálogo"}</Link>
+        </div>
+      </nav>
       </>}
 
       <main id="contenido" tabIndex={-1} style={{ outline: "none" }}>
@@ -310,36 +320,36 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         )}
       </main>
 
+      {/* O2-05: pie sobre noche con identidad. Rejilla de 4, 2 y 1 columnas: comprar (la especialidad primero), ayuda,
+          contacto y la linea legal con los datos del comercio (O1-17). Sin sellos sin dato. */}
       <footer className="sh-foot">
         <div className="sh-wrap">
+          <div className="sh-foot__brand"><b>{S.name}</b><span>{S.tagline || "Seguridad electrónica, redes y respaldo eléctrico en Costa Rica."}</span></div>
           <div className="sh-foot__grid">
-            <div><b>{S.name}</b><span>{S.tagline || "Seguridad electrónica, redes y soporte técnico en Costa Rica."}</span>
-              <span className="vt-foot__seal sh-meta">Factura electrónica · Soporte local · Garantía</span>
+            <div className="vt-foot__col"><h2 className="sh-foot__h">Comprar</h2>
+              <Link to={L("/arma-tu-sistema")}>Armá tu sistema</Link>
+              {chips.map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
+              <Link to={L("/catalogo")}>Catálogo completo</Link>
             </div>
-            <div><span className="sh-meta">Comprar</span>
-              <div className="vt-foot__col">
-                <Link to={L("/catalogo")}>Catálogo completo</Link>
-                {home.categories.slice(0, 5).map((c) => <Link key={c.id} to={L(`/c/${slugs[c.id]}`)}>{c.name}</Link>)}
-                <Link to={L("/arma-tu-sistema")}>Armá tu sistema</Link>
-              </div>
+            <div className="vt-foot__col"><h2 className="sh-foot__h">Ayuda</h2>
+              <Link to={L("/asesoria")}>Asesoría personalizada</Link>
+              <Link to={L("/info/preguntas-frecuentes")}>Preguntas frecuentes</Link>
+              <Link to={L("/info/envios")}>Envíos y devoluciones</Link>
+              <Link to={L("/info/garantias")}>Garantías</Link>
+              {isShop && <button type="button" onClick={() => go({ v: "mi-pedido" })}>Mi pedido</button>}
             </div>
-            <div><span className="sh-meta">Ayuda</span>
-              <div className="vt-foot__col">
-                <Link to={L("/asesoria")}>Asesoría personalizada</Link>
-                <Link to={L("/info/preguntas-frecuentes")}>Preguntas frecuentes</Link>
-                <Link to={L("/info/envios")}>Envíos y devoluciones</Link>
-                <Link to={L("/info/garantias")}>Garantías</Link>
-                {hasWa && <a href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer">WhatsApp {S.whatsapp}</a>}
-              </div>
+            <div className="vt-foot__col"><h2 className="sh-foot__h">Contacto</h2>
+              {hasWa && <a href={wa(S.whatsapp, `Hola ${S.name}, tengo una consulta.`)} target="_blank" rel="noopener noreferrer">WhatsApp {S.whatsapp}<span className="sh-sr"> (se abre WhatsApp)</span></a>}
+              {S.business?.phone && <a href={`tel:${S.business.phone.replace(/[^\d+]/g, "")}`}>Tel. {S.business.phone}</a>}
+              {S.business?.email && <a href={`mailto:${S.business.email}`}>{S.business.email}</a>}
+              {hours && <span className="sh-foot__note">Horario: {hours}</span>}
+              <a href="https://crimsoncr.com/#soporte" rel="noopener">Reportar una falla</a>
+              <a href="https://crimsoncr.com" rel="noopener">crimsoncr.com</a>
             </div>
-            <div><span className="sh-meta">Crimson</span>
-              <div className="vt-foot__col">
-                <a href="https://crimsoncr.com" rel="noopener">crimsoncr.com</a>
-                <a href="https://crimsoncr.com/#soporte" rel="noopener">Reportar una falla</a>
-                {isShop && <button type="button" onClick={() => go({ v: "mi-pedido" })}>Mi pedido</button>}
-                {legalOn("terms") && <Link to={L("/info/terminos")}>Términos y condiciones</Link>}
-                {legalOn("privacy") && <Link to={L("/info/privacidad")}>Política de privacidad</Link>}
-              </div>
+            <div className="vt-foot__col"><h2 className="sh-foot__h">Legal</h2>
+              {legalOn("terms") && <Link to={L("/info/terminos")}>Términos y condiciones</Link>}
+              {legalOn("privacy") && <Link to={L("/info/privacidad")}>Política de privacidad</Link>}
+              {home.shipping_public?.invoice && <span className="sh-foot__note">Factura electrónica en cada compra</span>}
             </div>
           </div>
           {/* O1-17: quien vende. Solo lo que Mi Tienda tenga lleno */}
@@ -390,11 +400,11 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   );
 }
 
-function SearchBox({ value, onChange, onSubmit }: { value: string; onChange: (v: string) => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void }) {
+function SearchBox({ value, onChange, onSubmit, autoFocus = false }: { value: string; onChange: (v: string) => void; onSubmit: (e: FormEvent<HTMLFormElement>) => void; autoFocus?: boolean }) {
   return (
     <form className="sh-search" role="search" onSubmit={onSubmit}>
       <Ico d={IC.search} />
-      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscá por producto, marca o modelo" aria-label="Buscar productos" enterKeyHint="search" />
+      <input type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscá por producto, marca o modelo" aria-label="Buscar productos" enterKeyHint="search" autoFocus={autoFocus} />
       {value && <button type="button" className="sh-search__clear" onClick={() => onChange("")} aria-label="Borrar búsqueda"><Ico d={IC.x} size={16} /></button>}
     </form>
   );

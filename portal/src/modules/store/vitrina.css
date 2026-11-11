@@ -24,26 +24,55 @@
 }
 .vt-h1 { font-family: var(--font); font-size: var(--fs-6); letter-spacing: -.02em; margin: 0 0 18px; line-height: 1.05; }
 
-/* ---------- cabecera ---------- */
-.vt-head .sh-head__row { gap: 18px; }
-.vt-mainnav { display: flex; gap: 2px; }
-.vt-mainnav a { min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: var(--r-pill); font-weight: 400; font-size: var(--fs-1); color: var(--text-2); white-space: nowrap; }
-.vt-mainnav a[aria-current="page"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); border-radius: 0; }
-@media (hover: hover) { .vt-mainnav a:hover { color: var(--ink); background: var(--bg-2); } }
-@media (max-width: 1023px) { .vt-mainnav { display: none; } }
-.vt-head .sh-search { max-width: 460px; }
+/* ---------- cabecera (O2-05): una sola fila fija; las categorias van debajo y no son fijas ---------- */
+.vt-head .sh-head__row { min-height: 64px; gap: 16px; }
+.vt-head .sh-search { flex: 1 1 360px; max-width: 560px; }
+.vt-head .sh-logo img { height: 30px; }
+.vt-iconbtn, .vt-headlink { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 44px; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-pill); background: none; color: var(--ink); font: inherit; font-size: var(--fs-1); font-weight: 700; cursor: pointer; white-space: nowrap; }
+.vt-headwa { box-shadow: inset 0 0 0 1px var(--line-2); }
+@media (hover: hover) { .vt-iconbtn:hover, .vt-headlink:hover { background: var(--paper-2); } }
+.sh-head__search-m { padding-bottom: 10px; }
+.sh-head__search-m .sh-search { max-width: none; }
+@media (max-width: 1023px) {
+  .vt-head .sh-head__row { min-height: 56px; gap: 6px; }
+  .vt-head .sh-head__row > .sh-search { display: none; }
+  .vt-headwa { box-shadow: none; padding: 0; }
+  .vt-head .sh-cartbtn { width: 44px; min-width: 44px; padding: 0; }
+}
 .sh-badge--ink { background: var(--ink); }
 .vt-cmpbtn { position: relative; }
-/* el contador del carrito "late" una vez al agregar (lo que la persona toco) */
+/* el contador del carrito «late» una vez al agregar (lo que la persona toco) */
 @media (prefers-reduced-motion: no-preference) {
   .sh-cartbtn .sh-badge { animation: vt-pop var(--dur-drawer) var(--ease-enter); }
 }
 @keyframes vt-pop { 0% { transform: scale(.4); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
-.vt-quick { display: none; gap: 6px; overflow-x: auto; padding: 0 0 10px; scrollbar-width: none; scroll-snap-type: x proximity; margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad); }
-.vt-quick::-webkit-scrollbar { display: none; }
-.vt-quick a { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--hair-2); background: var(--surface); font-size: var(--fs-1); font-weight: 400; scroll-snap-align: start; white-space: nowrap; }
+/* categorias por prioridad: chips que deslizan en celular; en escritorio, una fila de 44 px */
+.vt-quick { background: var(--paper); border-bottom: 1px solid var(--line); }
+.vt-quick__row { display: flex; gap: 6px; overflow-x: auto; padding-block: 8px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.vt-quick__row::-webkit-scrollbar { display: none; }
+.vt-quick a { flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: var(--r-pill); border: 1px solid var(--line-2); background: var(--surface); font-size: var(--fs-1); scroll-snap-align: start; white-space: nowrap; }
 .vt-quick a.vt-quick__hot { background: var(--ink); color: #fff; border-color: var(--ink); }
-@media (max-width: 1023px) { .vt-quick { display: flex; } }
+.vt-quick a[aria-current="page"]:not(.vt-quick__hot) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); font-weight: 700; }
+@media (min-width: 1024px) {
+  .vt-quick__row { flex-wrap: wrap; overflow: visible; padding-block: 0; gap: 2px; }
+  .vt-quick a { border: 0; background: none; border-radius: 0; padding: 0 12px; }
+  .vt-quick a.vt-quick__hot { background: none; color: var(--ink); font-weight: 700; padding-left: 0; }
+  .vt-quick a[aria-current="page"]:not(.vt-quick__hot) { box-shadow: inset 0 -2px 0 var(--ink); }
+  .vt-quick a:last-child { margin-left: auto; text-decoration: underline; text-underline-offset: 3px; }
+}
+@media (hover: hover) and (min-width: 1024px) { .vt-quick a:hover { text-decoration: underline; text-underline-offset: 3px; } }
+
+/* ---------- pie (O2-05): noche, rejilla de 4, 2 y 1 columnas ---------- */
+.shop .sh-foot { background: var(--night); color: var(--on-night-2); margin-top: var(--sec); padding: 48px 0 calc(28px + env(safe-area-inset-bottom)); font-size: var(--fs-1); }
+.sh-foot__brand { display: grid; gap: 4px; margin-bottom: 28px; max-width: 52ch; }
+.sh-foot__brand b { color: var(--on-night); font-size: var(--fs-4); letter-spacing: -.02em; }
+.shop .sh-foot__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 24px; }
+@media (max-width: 1023px) { .shop .sh-foot__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 559px) { .shop .sh-foot__grid { grid-template-columns: minmax(0, 1fr); } }
+.sh-foot__h { margin: 0 0 6px; font-size: var(--fs-1); font-weight: 700; color: var(--on-night); }
+.vt-foot__col { display: grid; align-content: start; min-width: 0; }
+.shop .sh-foot a, .shop .sh-foot button { color: var(--on-night-2); min-height: 44px; overflow-wrap: anywhere; text-align: left; }
+.sh-foot__note { display: flex; align-items: center; min-height: 44px; }
 
 /* ---------- marco de visor ---------- */
 .vt-vf { position: relative; overflow: hidden; background: var(--vt-tile); display: grid; place-items: center; isolation: isolate; color: var(--text-3); }
@@ -723,8 +752,6 @@ span.vt-kitres__img { display: grid; place-items: center; background: var(--vt-i
 .shop:has(.sh-toast) .vt-cmptray { bottom: calc(76px + env(safe-area-inset-bottom)); }
 
 /* ---------- pie ---------- */
-.vt-foot__col { display: grid; }
-.vt-foot__seal { display: block; margin-top: 12px; color: var(--muted-dark) !important; }
 
 /* reducir movimiento: rama propia. Mismo contenido, nada se desplaza: sin lupa, sin brillo de esqueletos
    (con duracion casi cero y repeticion infinita parpadearia), sin punto REC titilando, rieles sin snap forzado */

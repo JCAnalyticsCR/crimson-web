@@ -120,11 +120,7 @@
 .sh-head__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .sh-cartbtn { position: relative; }
 .sh-badge { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: var(--r-pill); background: var(--crimson); color: #fff; font: 700 var(--fs-0)/20px var(--font); text-align: center; }
-.sh-head__search-m { display: none; padding-bottom: 12px; }
 @media (max-width: 767px) {
-  .sh-head__row > .sh-search { display: none; }
-  .sh-head__search-m { display: block; }
-  .sh-head__search-m .sh-search { max-width: none; }
   .sh-logo .sh-meta { display: none; }
   .sh-hide-m { display: none !important; }
 }

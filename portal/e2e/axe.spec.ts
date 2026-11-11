@@ -7,7 +7,7 @@ import { PANTALLAS } from "./soporte/pantallas";
 import { cargarTodo, expect, test } from "./soporte/tienda";
 
 /** reglas que ya no se toleran */
-const BLOQUEAN = ["color-contrast"];
+const BLOQUEAN = ["color-contrast", "link-name", "button-name"]; // O2-05: ningun enlace o boton sin nombre
 /** pantallas que se migran despues (O2-11): siguen en modo informe */
 const AUN_NO = new Set<string>(["checkout", "checkout-confirmar"]);
 
