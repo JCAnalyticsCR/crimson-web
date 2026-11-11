@@ -32,13 +32,19 @@ def fold(s: object) -> str:
 
 
 _QDASH = re.compile(r"(?<=\d)\s?\?\s?(?=\d)")  # «0?40 °C»: el guion del proveedor llego como «?»
+_QRANGE = re.compile(r"(?<=[A-Za-z])\s?\?\s?(?=\d)")  # «60 Hz ? 20 kHz», «20Hz?20kHz»: tambien es un rango
+_QINCH = re.compile(r"(?<=\d)\?(?=[\s,;.)]|$)")  # «woofer de 10? y tweeter de 1?»: las pulgadas (″)
 _QMINUS = re.compile(r"(?:(?<=^)|(?<=\s))\?(?=\d)")  # «?15 °C»: el signo menos
 
 
 def clean_value(v: str) -> str:
-    """Valor de la ficha: el «?» que dejo un guion mal codificado vuelve a ser guion, y un valor largo se corta en el
-    ultimo separador (coma, punto y coma o espacio) con «…», nunca a media palabra."""
-    v = _QMINUS.sub("−", _QDASH.sub("–", v))
+    """Valor de la ficha: el «?» que dejo un caracter mal codificado vuelve a ser lo que era (guion de rango, signo
+    menos o pulgadas), y un valor largo se corta en el ultimo separador (coma, punto y coma o espacio) con «…», nunca a
+    media palabra."""
+    v = _QDASH.sub("–", v)
+    v = _QRANGE.sub(" – ", v)
+    v = _QINCH.sub("″", v)
+    v = _QMINUS.sub("−", v)
     if len(v) <= VALUE_MAX:
         return v
     cut = v[: VALUE_MAX - 1]

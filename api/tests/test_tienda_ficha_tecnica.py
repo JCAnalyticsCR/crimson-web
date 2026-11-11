@@ -135,3 +135,13 @@ def test_valores_largos_se_cortan_en_un_separador_y_el_guion_mal_codificado_se_c
     assert len(v) <= VALUE_MAX and v.endswith("…") and not v[:-1].endswith((" ", ","))
     assert v[:-1].split()[-1] in {w.strip(",") for w in largo.split()}  # la ultima palabra esta completa
     assert s["Temperatura"] == "0–40 °C, −15–45 °C almacenado"
+
+
+def test_rangos_y_pulgadas_mal_codificados_se_corrigen():
+    from app.services.catalog_fichas import clean_value
+
+    assert clean_value("respuesta de frecuencia 60 Hz ? 20 kHz") == "respuesta de frecuencia 60 Hz – 20 kHz"
+    assert clean_value("20Hz?20kHz") == "20Hz – 20kHz"
+    assert clean_value("woofer de 10? y tweeter de 1?, 89 dB") == "woofer de 10″ y tweeter de 1″, 89 dB"
+    assert clean_value("2 woofers de 8? y 2 tweeters de 2?") == "2 woofers de 8″ y 2 tweeters de 2″"
+    assert clean_value("¿Incluye control? Sí") == "¿Incluye control? Sí"  # una pregunta de verdad no se toca
