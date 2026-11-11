@@ -28,7 +28,7 @@ Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
                                     -- respalde (30 dias vendido a ese precio o mas); hoy ningun producto lo trae
       "web_featured": true | false,
       "image": "https://..." | null, -- primera imagen (para la tarjeta de lista)
-      "type": "Camara IP" | null,   -- product_type()
+      "type": "Camara IP" | null,   -- O1-08: el tipo que se muestra (product_typing.display_type), no el de los kits
       "created_ts": 1729500000,     -- unix seconds (para ordenar "reciente")
       "availability": {
         "state": "en_bodega"|"bajo_pedido"|"agotado"|"servicio",
@@ -59,7 +59,7 @@ Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
     ...
   ],
 
-  "types": [                        -- tipos (product_type) con conteo
+  "types": [                        -- tipos que se muestran (display_type) con conteo
     {"name": "Camara IP", "count": 87},
     ...
   ],
@@ -144,11 +144,11 @@ def build(db: Session, t, ctx) -> bytes:
                 "display_price": float(price_with_tax),
                 "web_featured": bool(p.web_featured),
                 "image": img,
-                "type": sv.product_type(p),
+                "type": ctx.dtype(p),  # O1-08: el tipo que se muestra y se filtra (el funcional queda para los kits)
                 "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
                 "availability": _avail(own),
                 # O1-14: nombre, marca, modelo, codigo, SKU, categoria y tipo, normalizados (services/store_search)
-                "sf": sv.search_text(p, ctx.cat_name.get(p.category_id)),
+                "sf": sv.search_text(p, ctx.cat_name.get(p.category_id), ctx.dtype(p)),
             }
         )
         if p.id in backed and price_with_tax > 0:
@@ -175,7 +175,7 @@ def build(db: Session, t, ctx) -> bytes:
     # tipos
     types_count: dict[str, int] = {}
     for p in pool:
-        t_ = sv.product_type(p)
+        t_ = ctx.dtype(p)
         if t_:
             types_count[t_] = types_count.get(t_, 0) + 1
     types = [{"name": k, "count": n} for k, n in sorted(types_count.items(), key=lambda x: -x[1])]

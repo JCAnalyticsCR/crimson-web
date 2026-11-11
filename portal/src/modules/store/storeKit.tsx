@@ -331,7 +331,7 @@ export function ProductCard({ p, avail, n, eager = false }: { p: VProd; avail?: 
         </Viewfinder>
       </Link>
       <div className="vt-card__body">
-        <span className="sh-meta vt-card__meta">{[p.brand, p.type || p.category].filter(Boolean).join(" · ") || " "}</span>
+        <span className="sh-meta vt-card__meta">{[p.brand, p.category || p.type].filter(Boolean).join(" · ") || " "}</span>
         <Link to={to(p.path)} className="vt-card__name">{p.name}</Link>
         <AvailBadge a={a} compact />
         <div className="vt-card__foot">

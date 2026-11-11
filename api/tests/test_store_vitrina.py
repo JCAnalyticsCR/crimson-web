@@ -186,6 +186,11 @@ def test_ficha_por_direccion_amigable(client, auth, db_session):
     cam.compare_price = Decimal(80)
     cam.datasheet_url = "https://cdn.example.com/ficha.pdf"
     db_session.commit()
+    # O1-08: «¿Qué necesito además?» solo sale con algún sugerido que se pueda comprar (y nunca uno agotado)
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    for code in ("DS-7608NXI-K1/8P", "WD44PURZ"):
+        mov = {"product_id": prods[code].id, "warehouse_id": main["id"], "kind": "entrada", "quantity": 2}
+        assert client.post("/stock/movements", json=mov).status_code == 201
     path = f"/p/camara-ip-hikvision-bullet-4mp-2-8mm-ip67-poe-{cam.id}"
     r = client.get(f"/public/store/crimson/item/{path.split('/')[-1]}")
     assert r.status_code == 200, r.text

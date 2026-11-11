@@ -27,8 +27,8 @@ test("[O1-03] ficha en celular: precio de 30 px o más e «IVA incluido» de 14 
   expect(px(await precio.locator("small").evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(14);
 });
 
-test.fixme("[O1-08] la tarjeta de una barra de sonido no dice «Cámara»", async ({ page }) => {
-  // hoy: «Resonar · Cámara WiFi» (la palabra «inalámbrico» del nombre la clasifica como cámara)
+test("[O1-08] la tarjeta de una barra de sonido no dice «Cámara»", async ({ page }) => {
+  // antes: «Resonar · Cámara WiFi» (la palabra «inalámbrico» del nombre la clasificaba como cámara)
   await page.goto("/c/audio");
   await tiendaLista(page);
   const tarjeta = page.locator(".vt-card", { hasText: "Barra de sonido" });

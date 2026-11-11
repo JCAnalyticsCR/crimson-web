@@ -272,12 +272,26 @@ def _num(s: str) -> str:
     return s.replace(",", ".")
 
 
-def derive_specs(p: Product) -> dict[str, str]:
+# valores de relleno de las fichas del proveedor («Micrófono: No indicado»): no son un dato
+NO_DATA = re.compile(r"[^\n;|]*\bno (?:indicado|aplica|especificado)\b[^\n;|]*")
+
+
+def _no_data(v: object) -> bool:
+    return bool(NO_DATA.fullmatch(fold(v).strip().rstrip(".")))
+
+
+def derive_specs(p: Product, shown: str | None = None) -> dict[str, str]:
     """Especificaciones legibles a partir del nombre y la descripcion (Fygaro no las tenia en campos).
-    Las que Andres edite a mano (product.specs) mandan sobre las deducidas."""
+    Las que Andres edite a mano (product.specs) mandan sobre las deducidas.
+    shown (O1-08): el tipo que muestra la tienda (product_typing.display_type). Con el, la ficha dice ese tipo, sin
+    camara no deduce lente, vision nocturna ni microfono, y se ignoran los «No indicado / No aplica / No especificado».
+    Sin el (armador de kits, equipment_reco) todo queda como siempre, con el tipo funcional."""
     name = fold(p.name)
-    text = name + " \n " + fold(p.description_store or p.description_invoice or "")[:1500]
-    t = product_type(p)
+    desc = fold(p.description_store or p.description_invoice or "")[:1500]
+    if shown is not None:
+        desc = NO_DATA.sub(" ", desc)
+    text = name + " \n " + desc
+    t = product_type(p) if shown is None else shown
     out: dict[str, str] = {}
     if t:
         out["Tipo"] = t
@@ -344,7 +358,7 @@ def derive_specs(p: Product) -> dict[str, str]:
     if t == "UPS" and (m := _RX["va"].search(text)):
         out["Capacidad"] = f"{m.group(1)} VA"
     for k, v in (p.specs or {}).items():
-        if str(k).strip():
+        if str(k).strip() and not (shown is not None and _no_data(v)):
             out[str(k).strip()[:40]] = str(v).strip()[:120]
     return out
 
@@ -369,18 +383,19 @@ def ports(p: Product) -> int | None:
 
 
 # ---------------------------------------------------------------- busqueda tolerante (regla unica: store_search, O1-14)
-def search_text(p: Product, cat_name: str | None) -> str:
-    """campo de busqueda del producto (el mismo sf del snapshot): nombre, marca, modelo, codigo, SKU, categoria y tipo"""
+def search_text(p: Product, cat_name: str | None, ptype: str | None = None) -> str:
+    """campo de busqueda del producto (el mismo sf del snapshot): nombre, marca, modelo, codigo, SKU, categoria y tipo.
+    ptype: el tipo que muestra la tienda (O1-08); sin el, el funcional."""
     from . import store_search as ss
 
-    return ss.search_field(p.name, p.brand, p.model, p.code, p.supplier_sku, cat_name, product_type(p))
+    return ss.search_field(p.name, p.brand, p.model, p.code, p.supplier_sku, cat_name, product_type(p) if ptype is None else ptype)
 
 
-def search_score(p: Product, cat_name: str | None, terms: list[str], hay: str | None = None) -> int:
+def search_score(p: Product, cat_name: str | None, terms: list[str], hay: str | None = None, ptype: str | None = None) -> int:
     """0 = no coincide. La regla vive en services/store_search (la misma del navegador)."""
     from . import store_search as ss
 
-    return ss.score(" ".join(terms), name=p.name, brand=p.brand, model=p.model, code=p.code, category=cat_name, sf=hay or search_text(p, cat_name))
+    return ss.score(" ".join(terms), name=p.name, brand=p.brand, model=p.model, code=p.code, category=cat_name, sf=hay or search_text(p, cat_name, ptype))
 
 
 def split_terms(q: str) -> list[str]:
@@ -999,13 +1014,15 @@ FEATURED_TYPES = (
 )
 
 
-def default_featured(prods: list[Product], limit: int = 8, prefer: set[int] | None = None) -> list[Product]:
+def default_featured(prods: list[Product], limit: int = 8, prefer: set[int] | None = None, type_of: Callable[[Product], str] | None = None) -> list[Product]:
     """Destacados cuando Andres no eligio: uno por tipo de equipo que mas se vende (camara, grabador, switch...),
     con foto y precio, el de precio mas representativo (la mediana del tipo, no el mas barato ni el mas caro).
-    prefer: ids de lo que se puede comprar ya (services/availability); si un tipo tiene alguno, se elige entre ellos."""
+    prefer: ids de lo que se puede comprar ya (services/availability); si un tipo tiene alguno, se elige entre ellos.
+    type_of (O1-08): el tipo que muestra la tienda; una barra de sonido no representa a las camaras WiFi."""
+    type_of = type_of or product_type
     out: list[Product] = []
     for t in FEATURED_TYPES:
-        c = sorted((p for p in _priced(prods) if p.images and product_type(p) == t), key=_list_price)
+        c = sorted((p for p in _priced(prods) if p.images and type_of(p) == t), key=_list_price)
         if prefer and any(p.id in prefer for p in c):
             c = [p for p in c if p.id in prefer]
         if c:

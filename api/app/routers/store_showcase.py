@@ -24,6 +24,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
+from ..services import product_typing as pt
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.documents import audit
@@ -458,7 +459,8 @@ def showcase_product_get(pid: int, p: Principal = Depends(require("catalog", "ve
         "compare_price": pr.compare_price if precios else None,
         "datasheet_url": pr.datasheet_url,
         "specs": pr.specs or {},
-        "derived_specs": sv.derive_specs(pr),
+        # O1-08: lo que la ficha muestra, con el tipo que se muestra (no el funcional de los kits)
+        "derived_specs": sv.derive_specs(pr, pt.display_type(pr, *pt.category_chain(_categories(db, p.tenant.id)).get(pr.category_id, (None, None)))),
         "path": sv.product_path(pr),
     }
 
@@ -580,6 +582,12 @@ class Ctx:
         self.cats = _categories(db, t.id)
         self.cat_name = {c.id: c.name for c in self.cats}
         self.cat_slug = sv.category_slugs(self.cats)
+        self.cat_chain = pt.category_chain(self.cats)
+
+    def dtype(self, p: Product) -> str:
+        """el tipo que se muestra y se filtra (O1-08, services/product_typing); el funcional (kits) es sv.product_type"""
+        leaf, top = self.cat_chain.get(p.category_id, (None, None))
+        return pt.display_type(p, leaf, top)
 
     def card(self, p: Product, own: dict | None, variants: list | None = None, full: bool = False) -> dict:
         out = _prod_pub(p, variants, own, self.pricer, self.cat_name, compact=not full)
@@ -592,7 +600,7 @@ class Ctx:
             {
                 "path": sv.product_path(p),
                 "model": p.model,
-                "type": sv.product_type(p),
+                "type": self.dtype(p),
                 "compare_display_price": cmp,
                 "price_on_request": price <= 0,
                 "category_path": f"/c/{self.cat_slug[p.category_id]}" if p.category_id in self.cat_slug else None,
@@ -759,7 +767,7 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     sellable = {p.id for p in pool if _sellable(stock.get(p.id))}
     featured = [by_id[i] for i in sc["featured"] if i in by_id and by_id[i] in pool]
     if not featured:  # sin eleccion de Andres: uno por tipo de equipo, con foto y precio, primero lo que se puede comprar
-        featured = sv.default_featured(pool, prefer=sellable)
+        featured = sv.default_featured(pool, prefer=sellable, type_of=ctx.dtype)
     fresh = [p for p in sorted(pool, key=lambda p: (_created(p), p.id), reverse=True) if p.images and p not in featured][:8]
     kits = []
     photo_prods = _kit_products(db, t.id, sc["kits"])
@@ -850,7 +858,7 @@ def catalog(
         wanted = [i for i in want if i in by_id]
         full_ids = {p.id: p for p in _load_full(db, wanted)}
         rows = [full_ids[i] for i in wanted if i in full_ids]
-        return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p)} for p in rows], "total": len(rows)}
+        return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p, ctx.dtype(p))} for p in rows], "total": len(rows)}
     # Ajustes: los agotados ocultos (todos, o los que agoto el proveedor) no se listan; la ficha directa abre
     prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
 
@@ -871,18 +879,18 @@ def catalog(
         allowed = _descendants(ctx, cid)
         prods = [p for p in prods if p.category_id in allowed]
 
+    types = {p.id: ctx.dtype(p) for p in prods}  # O1-08: el tipo que se muestra (filtro ?tipo=, facetas y busqueda)
     terms = sv.split_terms(q or "")
     scores: dict[int, int] = {}
     if terms:
         for p in prods:
-            s = sv.search_score(p, ctx.cat_name.get(p.category_id), terms)
+            s = sv.search_score(p, ctx.cat_name.get(p.category_id), terms, ptype=types[p.id])
             if s:
                 scores[p.id] = s
         prods = [p for p in prods if p.id in scores]
 
     disp = {p.id: _gross(ctx.pricer.of(p, p.price), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
     av = {p.id: (stock_all.get(p.id) or {}).get("state") for p in prods}
-    types = {p.id: sv.product_type(p) for p in prods}
     brands_sel = {b.lower() for b in (brand or []) if b}
 
     def keep(p: Product, skip: str = "") -> bool:
@@ -1026,19 +1034,42 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         raise HTTPException(404, "Producto no encontrado")
     ctx = Ctx(db, t)
     prods = _published(db, t.id)
-    ptype = sv.product_type(p)
-    related = [r for r in prods if r.id != p.id and r.category_id == p.category_id and sv.product_type(r) == ptype and r.images]
+    # O1-08: relacionados y «¿Qué necesito además?» por el tipo que se muestra (una barra de sonido no es «Cámara
+    # WiFi»); sin ocultos ni agotados y primero lo que se puede comprar. La disponibilidad se pide solo para un tramo
+    # acotado de candidatos (no para todo el catalogo).
+    ptype = ctx.dtype(p)
+    related = [r for r in prods if r.id != p.id and r.category_id == p.category_id and ctx.dtype(r) == ptype and r.images]
     related += [r for r in prods if r.id != p.id and r not in related and r.category_id == p.category_id and r.images]
     related += [r for r in prods if r.id != p.id and r not in related and p.brand and r.brand == p.brand and r.images]
-    related = sorted(related[:24], key=lambda r: (r.brand != p.brand, _rank_default(r)))[:8]
-    groups = []
-    for title, kinds, why in ACCESSORY_RULES.get(ptype, []):
-        cands = [r for r in prods if r.id != p.id and sv.product_type(r) in kinds and r.price and Decimal(str(r.price)) > 0]
+    related = sorted(related[:48], key=lambda r: (r.brand != p.brand, _rank_default(r)))
+    rules = ACCESSORY_RULES.get(ptype, []) if ptype.startswith(("Cámara", "Grabador")) else []  # solo camaras y grabadores
+    cand_groups = []
+
+    def of_kind(r: Product, kinds: tuple[str, ...]) -> bool:
+        # una camara sugerida tiene que mostrarse como camara; discos, memorias o UPS valen por su tipo funcional aunque
+        # vivan en una categoria de otra familia («Computo > Memorias»)
+        f = sv.product_type(r)
+        return ctx.dtype(r) in kinds or (f in kinds and not f.startswith("Cámara"))
+
+    for title, kinds, why in rules:
+        cands = [r for r in prods if r.id != p.id and of_kind(r, kinds) and r.price and Decimal(str(r.price)) > 0]
         cands.sort(key=lambda r: (r.brand != p.brand, not r.images, Decimal(str(r.price))))
-        if cands:
-            groups.append({"title": title, "reason": why, "items": cands[:3]})
-    every = [p] + related + [r for g in groups for r in g["items"]]
-    stock = _stock_map(db, t.id, every)
+        cand_groups.append((title, why, cands[:12]))
+    stock = _stock_map(db, t.id, [p, *related, *(r for _, _, c in cand_groups for r in c)])
+
+    def shown(r: Product) -> bool:  # ni oculto (ajustes) ni agotado
+        row = stock.get(r.id) or {}
+        return not row.get("ocultar") and row.get("state") != "agotado"
+
+    def buyable_first(rs: list[Product]) -> list[Product]:
+        return sorted((r for r in rs if shown(r)), key=lambda r: not _sellable(stock.get(r.id)))  # sorted es estable
+
+    related = buyable_first(related)[:8]
+    groups = []
+    for title, why, cands in cand_groups:
+        items = buyable_first(cands)[:3]
+        if any(_sellable(stock.get(r.id)) for r in items):  # sin un sugerido comprable el bloque no se muestra
+            groups.append({"title": title, "reason": why, "items": items})
     out = ctx.card(p, stock.get(p.id), _variants(db, [p.id]).get(p.id), full=True)
     rate = Decimal(str(out["tax_rate"]))
     gross = Decimal(str(out["display_price"]))
@@ -1054,7 +1085,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
     return {
         **out,
         "description": p.description_store or p.description_invoice,
-        "specs": sv.derive_specs(p),
+        "specs": sv.derive_specs(p, ctx.dtype(p)),
         "datasheet_url": p.datasheet_url,
         "net_price": net,
         "tax_amount": (gross - net).quantize(Decimal("0.01")),

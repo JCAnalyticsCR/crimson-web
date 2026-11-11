@@ -21,6 +21,8 @@ type Showcase = {
 
 const TRUST_IC: Record<string, string> = { shield: IC.shield, tool: IC.tool, truck: IC.truck, doc: IC.doc, chat: IC.chat, clock: IC.clock };
 const isExternal = (u: string) => /^https?:\/\//.test(u);
+/** O1-08: el rotulo «CAM 0X · tipo» del muro solo va sobre camaras (por categoria o por el tipo que muestra el API) */
+const isCam = (p: VProd) => /c[aá]mara|camera/i.test(p.category || "") || /^c[aá]mara/i.test(p.type || "");
 
 /** hora local tipo timecode del monitor (se fija al cargar: no es un reloj que repinte) */
 const stamp = () => new Intl.DateTimeFormat("es-CR", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
@@ -175,7 +177,7 @@ export default function StoreHome() {
           </div>
           <div className="vt-wall" aria-hidden="true">
             {wall.length ? wall.map((p, i) => (
-              <Viewfinder key={p.id} className="vt-wall__cell" label={`CAM 0${i + 1} · ${(p.type || p.category || "").toUpperCase().slice(0, 14)}`} right={i === 0 ? `${time} · REC` : undefined} live={i === 0}>
+              <Viewfinder key={p.id} className="vt-wall__cell" label={isCam(p) ? `CAM 0${i + 1} · ${(p.type || p.category || "").toUpperCase().slice(0, 14)}` : undefined} right={i === 0 ? `${time} · REC` : undefined} live={i === 0}>
                 <img src={p.image!} alt="" loading="lazy" decoding="async" width={300} height={300} />
               </Viewfinder>
             )) : Array.from({ length: 4 }, (_, i) => <div key={i} className="vt-wall__cell vt-wall__cell--empty" />)}

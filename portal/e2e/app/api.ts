@@ -15,7 +15,7 @@
    retrasoItem = ms de espera de /item (O1-03: el desglose no se pinta con datos a medias);
    fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda);
    comercio = datos del comercio, titulares del pago y plazo de la reserva en la portada y el checkout (O1-17). */
-import { Catalog, productPath, productType, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
+import { Catalog, productPath, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
 import { installMockApi } from "../../src/demo/mockApi";
 import type { SnapProduct } from "../../src/modules/store/catalogFilter";
 import { CATALOGO, COMERCIO_E2E, DISPONIBILIDAD } from "./datos";
@@ -44,7 +44,7 @@ function snapshot() {
   const prods = c.prods;
   const products: SnapProduct[] = prods.map((p, i) => ({
     id: p.id, path: productPath(p), name: p.name, brand: p.brand, model: null, code: p.code, category_id: p.cat,
-    display_price: c.gross(p), web_featured: false, image: p.images[0] || null, type: productType(p) || null,
+    display_price: c.gross(p), web_featured: false, image: p.images[0] || null, type: c.displayType(p) || null,
     created_ts: 1_760_000_000 + Number(p.mod) * 86_400 + i, // mas nuevo = `mod` mas alto, como el orden «Novedades» del mock
     availability: dispo(p.id),
     sf: sf(p),
@@ -58,7 +58,7 @@ function snapshot() {
     v: 2, version: "1762800000000", built_at: "2026-11-10T18:00:00+00:00", currency: "CRC", n: products.length,
     products,
     categories: c.tree(c.counts()), // arbol con hijas en `children`, como lo manda el API (useSnapshot lo aplana)
-    brands: cuenta((p) => p.brand), types: cuenta((p) => productType(p) || null),
+    brands: cuenta((p) => p.brand), types: cuenta((p) => c.displayType(p) || null),
     showcase: { headline: null, subline: null, featured: [], banners: [], trust: DEFAULT_TRUST },
   };
 }

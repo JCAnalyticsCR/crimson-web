@@ -75,6 +75,8 @@ const TYPE_RULES: [string, string[], string[]][] = [
   ["Cable", ["cable", "bobina", "utp"], []],
   ["Conector", ["conector", "rj45", "rj-45"], []],
 ];
+/** familias (categoria de primer nivel) donde vale el tipo funcional: product_typing.FUNCTIONAL_FAMILY */
+const FUNCTIONAL_FAMILY = ["seguridad", "videovigilancia", "vigilancia", "cctv", "camara", "camaras", "acceso", "alarma", "alarmas", "redes", "red", "conectividad", "networking", "cableado", "cable", "cables", "energia", "respaldo", "ups", "almacenamiento"];
 const typeCache = new Map<number, string>();
 export function productType(p: RawProduct): string {
   const hit = typeCache.get(p.id);
@@ -253,6 +255,20 @@ export class Catalog {
     [...this.cats].sort((a, b) => a.id - b.id).forEach((c) => { let s = slugify(c.name, 60); if (seen.has(s)) s = `${s}-${c.id}`; seen.add(s); this.catSlug.set(c.id, s); });
   }
 
+  /** Tipo que se muestra (api/app/services/product_typing.display_type, O1-08), simplificado: fuera de seguridad, redes y
+      energia es la subcategoria; dentro, el funcional, pero «Cámara …» solo con categoria o palabra de camara. */
+  displayType(p: RawProduct): string {
+    const leaf = p.cat != null ? this.cats.find((c) => c.id === p.cat) : undefined;
+    let top = leaf;
+    for (let i = 0; top && top.parent != null && i < 6; i++) top = this.cats.find((c) => c.id === top!.parent) ?? top;
+    const fam = fold(top?.name ?? "").match(/[a-z0-9]+/g) ?? [];
+    if (leaf && !fam.some((w) => FUNCTIONAL_FAMILY.includes(w))) return leaf.name;
+    const t = productType(p);
+    if (!t.startsWith("Cámara")) return t;
+    const camOk = /(camaras?|cameras?|bullet|domos?|turret|ptz)/.test(fold(p.name)) || /(camaras?|cameras?|cctv|videovigilancia)/.test(fold(`${leaf?.name ?? ""} ${top?.name ?? ""}`));
+    return camOk ? t : leaf && leaf !== top ? leaf.name : "";
+  }
+
   // ---------- precios: CRC sin IVA -> colones con IVA ----------
   /** Precio neto en CRC sin IVA. Usa `crc` si el producto lo trae; si no, usd × fx (catálogo legacy). */
   net(p: RawProduct) { return "crc" in p && p.crc > 0 ? p.crc : round2(p.usd * this.fx); }
@@ -269,7 +285,7 @@ export class Catalog {
       featured: false, description: desc,
       image: p.images[0] || null, images: full ? p.images : p.images.slice(0, 2), category_id: p.cat, category: p.cat ? this.catName.get(p.cat) ?? null : null,
       brand: p.brand, tax_rate: p.rate, item_type: "producto", variants: [], availability: { ...AVAIL[p.avail] },
-      display_currency: "CRC", display_price: grossPrice, path: productPath(p), model: null, type: productType(p),
+      display_currency: "CRC", display_price: grossPrice, path: productPath(p), model: null, type: this.displayType(p),
       compare_display_price: null, price_on_request: grossPrice <= 0,
       category_path: p.cat && this.catSlug.has(p.cat) ? `/c/${this.catSlug.get(p.cat)}` : null,
     };
@@ -406,7 +422,7 @@ export class Catalog {
     const st = (p: RawProduct) => AVAIL[p.avail].state;
     const keep = (p: RawProduct, skip = "") => {
       if (skip !== "brand" && brandsSel.size && !brandsSel.has((p.brand || "").toLowerCase())) return false;
-      if (skip !== "type" && type && productType(p) !== type) return false;
+      if (skip !== "type" && type && this.displayType(p) !== type) return false;
       if (skip !== "price") {
         const g = this.gross(p);
         if (minP !== null && g < minP) return false;
@@ -424,7 +440,7 @@ export class Catalog {
     const priced: number[] = [];
     for (const p of prods) {
       if (p.brand && keep(p, "brand")) fb.set(p.brand, (fb.get(p.brand) || 0) + 1);
-      const t = productType(p);
+      const t = this.displayType(p);
       if (t && keep(p, "type")) ft.set(t, (ft.get(t) || 0) + 1);
       if (keep(p, "avail")) {
         const s = st(p);
