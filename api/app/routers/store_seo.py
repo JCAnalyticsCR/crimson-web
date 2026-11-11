@@ -25,7 +25,7 @@ from ..services import store_showcase as sv
 from ..services.availability import settings_of
 from ..services.store_seo import BUYABLE_STATES, organization_ld, schema_availability
 from .store import _stock_of, business_of, store_cfg
-from .store_showcase import Ctx, _categories, _published
+from .store_showcase import Ctx, _categories
 
 seo = APIRouter(prefix="/public/seo", tags=["publico"])
 
@@ -272,22 +272,48 @@ def seo_noscript(host: str | None = Query(None, max_length=200), x_store_host: s
 
 
 def _sitemap(db: Session, t: Tenant, base: str) -> str:
-    cats = _categories(db, t.id)
-    slugs = sv.category_slugs(cats)
-    prods = _published(db, t.id)
-    used = {p.category_id for p in prods}
-    today = date.today().isoformat()
-    urls = [(base + "/", today, "1.0"), (base + "/catalogo", today, "0.8"), (base + "/arma-tu-sistema", None, "0.7"), (base + "/asesoria", None, "0.6")]
-    urls += [(f"{base}/c/{slugs[c.id]}", today, "0.7") for c in cats if c.id in used]
-    cfg = store_cfg(t)
-    legal = cfg.get("legal") or {}
+    """O1-07: el sitemap es el catalogo VISIBLE, el mismo del snapshot (no vuelve a cargar todos los publicados):
+    fichas que la tienda lista, categorias con productos visibles (las madre incluidas), paginas informativas con
+    contenido y /catalogo. Sin priority (Google la ignora); lastmod solo con product.web_updated_at (O0-07: la ultima
+    vez que cambio algo que el cliente ve), nunca la fecha de una sincronizacion. Las fichas ocultas no salen aqui pero
+    siguen respondiendo (OutOfStock): noindex recien tras 60 dias ocultas (hidden_since, O3-01).
+    Tres sentencias o menos: el snapshot, sus fechas web_updated_at y nada mas (el tenant ya viene cargado)."""
+    import gzip
+    import json
+
+    from ..services.store_snapshot import get_or_rebuild
+
+    gz, _ = get_or_rebuild(db, t.id)
+    snap = json.loads(gzip.decompress(gz))
+    prods = snap.get("products") or []
+    shown = {int(x["id"]) for x in prods}
+    when = {
+        pid: ts.date().isoformat()
+        for pid, ts in db.execute(
+            select(Product.id, Product.web_updated_at).where(
+                Product.tenant_id == t.id, Product.active, Product.show_on_web, Product.web_updated_at.is_not(None)
+            )
+        )
+        if pid in shown
+    }
+
+    def cats(nodes: list) -> list[str]:
+        out = []
+        for c in nodes or []:
+            if c.get("count") and c.get("slug"):
+                out.append(c["slug"])
+            out += cats(c.get("children") or [])
+        return out
+
+    urls: list[tuple[str, str | None]] = [(base + "/", None), (base + "/catalogo", None), (base + "/arma-tu-sistema", None), (base + "/asesoria", None)]
+    urls += [(f"{base}/c/{slug}", None) for slug in dict.fromkeys(cats(snap.get("categories") or []))]
+    legal = store_cfg(t).get("legal") or {}
     for k in sv.INFO_KINDS:
         if (k == "terminos" and not legal.get("terms")) or (k == "privacidad" and not legal.get("privacy")):
             continue
-        urls.append((f"{base}/info/{k}", None, "0.3"))
-    for p in prods:
-        urls.append((base + sv.product_path(p), (p.updated_at or p.created_at).date().isoformat() if (p.updated_at or p.created_at) else None, "0.6"))
-    body = "".join(f"<url><loc>{htmllib.escape(u)}</loc>{f'<lastmod>{lm}</lastmod>' if lm else ''}<priority>{pr}</priority></url>" for u, lm, pr in urls)
+        urls.append((f"{base}/info/{k}", None))
+    urls += [(base + x["path"], when.get(int(x["id"]))) for x in prods if x.get("path")]
+    body = "".join(f"<url><loc>{htmllib.escape(u)}</loc>{f'<lastmod>{lm}</lastmod>' if lm else ''}</url>" for u, lm in urls)
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>\n'
 
 

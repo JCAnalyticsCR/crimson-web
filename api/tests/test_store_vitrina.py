@@ -580,3 +580,58 @@ def test_sin_javascript_el_dominio_de_la_tienda_muestra_contacto_real(client, au
     html = client.get("/public/seo/noscript", headers={"X-Store-Host": "tienda.crimsoncr.com"}).text
     assert 'href="https://wa.me/50688889892"' in html and 'href="tel:+50622223333"' in html
     assert client.get("/public/seo/noscript", headers={"X-Store-Host": "portal.crimsoncr.com"}).text == ""
+
+
+def test_sitemap_fiel_al_catalogo_visible(client, auth, db_session):
+    """O1-07: el sitemap sale del snapshot (lo que la tienda lista), con las categorias madre, sin priority y con
+    lastmod solo donde hay web_updated_at; tres sentencias o menos."""
+    from datetime import UTC, datetime
+
+    import sqlalchemy as sa
+
+    _publicar(client)
+    prods = _catalogo(db_session)
+    t = db_session.scalar(select(Tenant).where(Tenant.slug == "crimson"))
+    madre = Category(tenant_id=t.id, name="Seguridad electrónica", show_on_web=True)
+    db_session.add(madre)
+    db_session.flush()
+    db_session.scalar(select(Category).where(Category.tenant_id == t.id, Category.name == "Videovigilancia")).parent_id = madre.id
+    prods["WD44PURZ"].web_updated_at = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
+    db_session.commit()
+    # con «ocultar agotados» la tienda solo lista lo que hay: el sitemap tambien
+    main = next(w for w in client.get("/warehouses").json() if w["is_default"])
+    for code in ("DS-2CD1043G2-LIU", "WD44PURZ"):
+        assert client.post("/stock/movements", json={"product_id": prods[code].id, "warehouse_id": main["id"], "kind": "entrada", "quantity": 3}).status_code == 201
+    assert client.put("/store/inventory/settings", json={"out_of_stock": "ocultar"}).status_code == 200
+    H = {"X-Store-Host": "tienda.crimsoncr.com"}
+    snap = client.get("/public/store/crimson/snapshot").json()
+
+    engine = db_session.get_bind()
+    sentencias: list[str] = []
+
+    def _cuenta(conn, cursor, statement, params, context, executemany):
+        sentencias.append(statement)
+
+    from app.routers.store_seo import _sitemap
+
+    sa.event.listen(engine, "before_cursor_execute", _cuenta)
+    try:
+        xml = _sitemap(db_session, t, "https://tienda.crimsoncr.com")
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", _cuenta)
+    assert len(sentencias) <= 3, sentencias
+    assert xml == client.get("/public/seo/sitemap.xml", headers=H).text
+
+    fichas = re.findall(r"<loc>https://tienda\.crimsoncr\.com(/p/[^<]+)</loc>", xml)
+    assert len(fichas) == snap["n"] == 2
+    assert sorted(fichas) == sorted(p["path"] for p in snap["products"])
+    assert "/c/seguridad-electronica<" in xml and "/c/videovigilancia<" in xml and "/c/almacenamiento<" in xml
+    assert "/c/redes<" not in xml  # sin productos visibles
+    assert "<priority>" not in xml
+    # lastmod = web_updated_at de cada ficha; las paginas sin fecha propia no inventan una
+    con_fecha = {pid: ts for pid, ts in db_session.execute(select(Product.id, Product.web_updated_at).where(Product.tenant_id == t.id)) if ts}
+    assert xml.count("<lastmod>") == len([p for p in snap["products"] if p["id"] in con_fecha]) >= 1
+    for p in snap["products"]:
+        if p["id"] in con_fecha:
+            assert f"{p['path']}</loc><lastmod>{con_fecha[p['id']].date().isoformat()}</lastmod>" in xml
+    assert "https://tienda.crimsoncr.com/</loc></url>" in xml and "/catalogo</loc></url>" in xml

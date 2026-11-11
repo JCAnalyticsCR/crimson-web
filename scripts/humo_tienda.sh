@@ -187,7 +187,7 @@ else
     falla "snapshot con n=$n_snap, menos que el minimo $N_MIN"
   fi
   if [ -n "$N_ESPERADO" ]; then
-    # hasta O1-07 el sitemap trae los agotados ocultos: la referencia es la ultima corrida buena, no el sitemap
+    # con HUMO_N_ESPERADO la referencia es la ultima corrida buena (antes de O1-07 el sitemap traia los ocultos)
     dife=$((N_ESPERADO - n_snap))
     [ "$dife" -lt 0 ] && dife=$((-dife))
     if [ "$dife" -gt "$TOL" ]; then
@@ -195,7 +195,7 @@ else
     else
       ok "snapshot n=$n_snap · esperado $N_ESPERADO (diferencia $dife, tolerancia $TOL)"
     fi
-    [ "$dif" -gt "$TOL" ] && aviso "sitemap con $n_sitemap fichas y snapshot con n=$n_snap (diferencia $dif; se corrige con O1-07)"
+    [ "$dif" -gt "$TOL" ] && aviso "sitemap con $n_sitemap fichas y snapshot con n=$n_snap (diferencia $dif; desde O1-07 el sitemap sale del snapshot y deberian coincidir)"
   elif [ "$dif" -gt "$TOL" ]; then
     falla "sitemap con $n_sitemap fichas y snapshot con n=$n_snap (diferencia $dif > $TOL)"
   else
