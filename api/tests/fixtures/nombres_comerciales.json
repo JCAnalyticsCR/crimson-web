@@ -1,0 +1,802 @@
+[
+ {
+  "proveedor": "Parlante jbl charge 6 45W rms bluetooth a prueba de agua JBLCHARGE6BLKAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Charge 6 · 45 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante JBL Flip 6 bluetooth IP67 azul JBLFLIP6BLUAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Flip 6 · Bluetooth · azul",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante jbl go 4 bluetooth portatil rojo JBLGO4REDAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Go 4 · Bluetooth · rojo",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante JBL Xtreme 4 100W bluetooth camuflado JBLXTREME4CAMOAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Xtreme 4 · 100 W · Bluetooth · camuflado",
+  "revisar": null
+ },
+ {
+  "proveedor": "PARLANTE JBL CLIP 5 BLUETOOTH NEGRO JBLCLIP5BLKAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Clip 5 · Bluetooth · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante Argom Ultrabass 20W bluetooth negro ARG-SP-3045BK",
+  "marca": "Argom",
+  "modelo": "ARG-SP-3045BK",
+  "tipo": "Parlantes",
+  "comercial": "Parlante Argom Ultrabass · 20 W · Bluetooth · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante Klip Xtreme Titan 10W bluetooth KBS-300",
+  "marca": "Klip Xtreme",
+  "modelo": "KBS-300",
+  "tipo": "Parlantes",
+  "comercial": "Parlante Klip Xtreme Titan · 10 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "proveedor": "Parlante Xiaomi Mi Portable 16W bluetooth negro",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Xiaomi Mi Portable · 16 W · Bluetooth · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Barra de sonido Thonet & Vander Kraftig 2.1 bluetooth 120W",
+  "marca": "Thonet & Vander",
+  "modelo": null,
+  "tipo": "Barras de sonido",
+  "comercial": "Barra de sonido Thonet & Vander Kraftig 2.1 · 120 W",
+  "revisar": null
+ },
+ {
+  "proveedor": "Barra de sonido LG S40T 300W bluetooth",
+  "marca": "LG",
+  "modelo": "S40T",
+  "tipo": "Barras de sonido",
+  "comercial": "Barra de sonido LG S40T · 300 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "proveedor": "Audifonos JBL Tune 520BT bluetooth blanco JBLT520BTWHTAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Audífonos",
+  "comercial": "Audífonos JBL Tune 520BT · blanco",
+  "revisar": null
+ },
+ {
+  "proveedor": "Audifonos inalambricos Oraimo FreePods 4 OEB-E04D",
+  "marca": "Oraimo",
+  "modelo": "OEB-E04D",
+  "tipo": "Audífonos",
+  "comercial": "Audífonos Oraimo FreePods 4 OEB-E04D",
+  "revisar": null
+ },
+ {
+  "proveedor": "Microfono Maono AU-PM421 USB condensador",
+  "marca": "Maono",
+  "modelo": "AU-PM421",
+  "tipo": "Micrófonos",
+  "comercial": "Micrófono Maono AU-PM421",
+  "revisar": null
+ },
+ {
+  "proveedor": "CAMARA IP HIKVISION DS-2CD1043G2-LIU BULLET 4MP 2.8MM POE 311326530",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD1043G2-LIU",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1043G2-LIU · 4 MP · PoE",
+  "revisar": null
+ },
+ {
+  "proveedor": "CAMARA IP HIKVISION DS-2CD1143G2-LIU DOMO 4MP 2.8MM",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD1143G2-LIU",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1143G2-LIU · 4 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara IP Hikvision DS-2CD2047G2-LU ColorVu 4MP bullet 2.8mm",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD2047G2-LU",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD2047G2-LU · 4 MP · ColorVu",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara IP Hikvision DS-2CD2143G2-I AcuSense domo 4MP",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD2143G2-I",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD2143G2-I · 4 MP · AcuSense",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara Hikvision DS-2CE16D0T-IT3F turbo HD bullet 2MP 3.6mm (O-STD)",
+  "marca": "Hikvision",
+  "modelo": "DS-2CE16D0T-IT3F",
+  "tipo": "Cámara analógica",
+  "comercial": "Cámara analógica Hikvision DS-2CE16D0T-IT3F · 2 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara Hikvision DS-2CE76H0T-ITPF domo turbo 5MP (E)",
+  "marca": "Hikvision",
+  "modelo": "DS-2CE76H0T-ITPF",
+  "tipo": "Cámara analógica",
+  "comercial": "Cámara analógica Hikvision DS-2CE76H0T-ITPF · 5 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara PTZ Hikvision DS-2DE4425IW-DE 4MP 25x IR 100m",
+  "marca": "Hikvision",
+  "modelo": "DS-2DE4425IW-DE",
+  "tipo": "Cámara PTZ",
+  "comercial": "Cámara PTZ Hikvision DS-2DE4425IW-DE · 4 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara WiFi Ezviz C6N 1080p interior pan tilt",
+  "marca": "EZVIZ",
+  "modelo": "C6N",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi EZVIZ C6N",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara WiFi EZVIZ H6c Pro 2K interior",
+  "marca": "EZVIZ",
+  "modelo": "H6C PRO",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi EZVIZ H6C Pro · 2K",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara WiFi Ezviz C3TN exterior 1080p vision nocturna",
+  "marca": "EZVIZ",
+  "modelo": "C3TN",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi EZVIZ C3TN",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara de seguridad Tapo C200 1080P WiFi audio bidireccional",
+  "marca": "TP-Link",
+  "modelo": "TAPO",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara de seguridad TP-Link Tapo C200 · WiFi",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara Tapo C310 3MP exterior WiFi TP-Link",
+  "marca": "Tp Link",
+  "modelo": "TAPO C310",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi TP-Link Tapo C310 · 3 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara IP Hikvision varifocaal DS-2CD2643G2-IZS 4MP 2.8-12mm",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD2643G2-IZS",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD2643G2-IZS · 4 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara IP hikvusion DS-2CD1023G2-LIU 2MP bullet",
+  "marca": "Hikvision",
+  "modelo": "DS-2CD1023G2-LIU",
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1023G2-LIU · 2 MP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara IP Mercusys MC200 1080p WiFi",
+  "marca": "Mercusys",
+  "modelo": "MC200",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara IP Mercusys MC200 · WiFi",
+  "revisar": null
+ },
+ {
+  "proveedor": "Camara Imou Ranger 2 IPC-A22EP 1080p WiFi",
+  "marca": "Imou",
+  "modelo": "IPC-A22EP",
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi Imou Ranger 2 IPC-A22EP",
+  "revisar": null
+ },
+ {
+  "proveedor": "Kit de camaras Hikvision 4 camaras 2MP DVR 4 canales disco 1TB",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Kits CCTV",
+  "comercial": "Kit de cámaras Hikvision · 2 MP",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "NVR HIKVISION DS-7608NXI-K1/8P 8 CANALES POE ACUSENSE",
+  "marca": "Hikvision",
+  "modelo": "DS-7608NXI-K1/8P",
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador NVR Hikvision DS-7608NXI-K1/8P · 8 canales · PoE",
+  "revisar": null
+ },
+ {
+  "proveedor": "NVR Hikvision DS-7104NI-Q1/4P 4CH PoE",
+  "marca": "Hikvision",
+  "modelo": "DS-7104NI-Q1/4P",
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador NVR Hikvision DS-7104NI-Q1/4P · 4 canales · PoE",
+  "revisar": null
+ },
+ {
+  "proveedor": "Grabador NVR HiLook NVR-108MH-D 8 canales",
+  "marca": "HiLook",
+  "modelo": "NVR-108MH-D",
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador HiLook NVR-108MH-D · 8 canales",
+  "revisar": null
+ },
+ {
+  "proveedor": "DVR Hikvision iDS-7204HQHI-M1/S 4 canales turbo AcuSense",
+  "marca": "Hikvision",
+  "modelo": "IDS-7204HQHI-M1/S",
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision iDS-7204HQHI-M1/S · 4 canales",
+  "revisar": null
+ },
+ {
+  "proveedor": "DVR Hikvision DS-7216HGHI-K1 16 canales 1080p lite",
+  "marca": "Hikvision",
+  "modelo": "DS-7216HGHI-K1",
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision DS-7216HGHI-K1 · 16 canales · PoE",
+  "revisar": null
+ },
+ {
+  "proveedor": "Disco duro Western Digital Purple 4TB videovigilancia WD43PURZ",
+  "marca": "Western Digital",
+  "modelo": "WD43PURZ",
+  "tipo": "Disco duro",
+  "comercial": "Disco duro Western Digital Purple · 4 TB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Disco duro de 2TB Western Digital Purple WD23PURZ",
+  "marca": "WD",
+  "modelo": "WD23PURZ",
+  "tipo": "Disco duro",
+  "comercial": "Disco duro Western Digital Purple WD23PURZ · 2 TB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Disco duro Seagate SkyHawk 6TB ST6000VX009",
+  "marca": "Seagate",
+  "modelo": "ST6000VX009",
+  "tipo": "Disco duro",
+  "comercial": "Disco duro Seagate SkyHawk · 6 TB",
+  "revisar": null
+ },
+ {
+  "proveedor": "HD INTERNO HIKVISION 1TB SATA VIDEOVIGILANCIA HS-HDD-1T",
+  "marca": "Hikvision",
+  "modelo": "HS-HDD-1T",
+  "tipo": "Disco duro",
+  "comercial": "Disco duro Hikvision HS-HDD-1T · 1 TB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Disco duro externo Adata HD330 2TB USB 3.2 azul",
+  "marca": "ADATA",
+  "modelo": "HD330",
+  "tipo": "Disco externo",
+  "comercial": "Disco duro externo ADATA HD330 · 2 TB · azul",
+  "revisar": null
+ },
+ {
+  "proveedor": "Memoria micro SD Hikvision 64GB clase 10 HS-TF-C1",
+  "marca": "Hikvision",
+  "modelo": "HS-TF-C1",
+  "tipo": "Memoria microSD",
+  "comercial": "Memoria microSD Hikvision HS-TF-C1 · 64 GB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Memoria microSD Kingston Canvas Select 128GB",
+  "marca": "Kingston",
+  "modelo": null,
+  "tipo": "Memoria microSD",
+  "comercial": "Memoria microSD Kingston Canvas Select · 128 GB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Switch PoE Hikvision 8 puertos DS-3E0109P-E/M",
+  "marca": "Hikvision",
+  "modelo": "DS-3E0109P-E/M",
+  "tipo": "Switch PoE",
+  "comercial": "Switch PoE Hikvision DS-3E0109P-E/M · 8 puertos",
+  "revisar": null
+ },
+ {
+  "proveedor": "Switch TP-Link TL-SG1005D 5 puertos gigabit",
+  "marca": "TP-LINK",
+  "modelo": "TL-SG1005D",
+  "tipo": "Switch",
+  "comercial": "Switch TP-Link TL-SG1005D · 5 puertos",
+  "revisar": null
+ },
+ {
+  "proveedor": "Switch PoE TP-Link TL-SF1008P 8 puertos 4 PoE",
+  "marca": "Tp Link",
+  "modelo": "TL-SF1008P",
+  "tipo": "Switch PoE",
+  "comercial": "Switch PoE TP-Link TL-SF1008P · 8 puertos",
+  "revisar": null
+ },
+ {
+  "proveedor": "Switch D-Link DES-1016A 16 puertos",
+  "marca": "D-LINK",
+  "modelo": "DES-1016A",
+  "tipo": "Switch",
+  "comercial": "Switch D-Link DES-1016A · 16 puertos",
+  "revisar": null
+ },
+ {
+  "proveedor": "Switch Mercusys MS108 8 puertos 10/100",
+  "marca": "Mercusys",
+  "modelo": "MS108",
+  "tipo": "Switch",
+  "comercial": "Switch Mercusys MS108 · 8 puertos",
+  "revisar": null
+ },
+ {
+  "proveedor": "Router TP-Link Archer AX23 WiFi 6 AX1800 doble banda",
+  "marca": "TP-Link",
+  "modelo": "ARCHER AX23",
+  "tipo": "Router",
+  "comercial": "Router TP-Link Archer AX23 · WiFi 6",
+  "revisar": null
+ },
+ {
+  "proveedor": "Router TP-Link Archer C6 AC1200 doble banda",
+  "marca": "TP-Link",
+  "modelo": "ARCHER C6",
+  "tipo": "Router",
+  "comercial": "Router TP-Link Archer C6 AC1200 · WiFi 5",
+  "revisar": null
+ },
+ {
+  "proveedor": "Router Mercusys MR70X AX1800 WiFi 6",
+  "marca": "Mercusys",
+  "modelo": "MR70X",
+  "tipo": "Router",
+  "comercial": "Router Mercusys MR70X AX1800 · WiFi 6",
+  "revisar": null
+ },
+ {
+  "proveedor": "Router Cudy WR3000 AX3000 WiFi 6",
+  "marca": "Cudy",
+  "modelo": "WR3000",
+  "tipo": "Router",
+  "comercial": "Router Cudy WR3000 AX3000 · WiFi 6",
+  "revisar": null
+ },
+ {
+  "proveedor": "Punto de acceso TP-Link EAP225 AC1350 techo PoE",
+  "marca": "TP-Link",
+  "modelo": "EAP225",
+  "tipo": "Punto de acceso WiFi",
+  "comercial": "Punto de acceso TP-Link EAP225 AC1350 · WiFi 5",
+  "revisar": null
+ },
+ {
+  "proveedor": "Punto de acceso Ubiquiti UniFi U6 Lite WiFi 6",
+  "marca": "Ubiquiti",
+  "modelo": "U6-LITE",
+  "tipo": "Punto de acceso WiFi",
+  "comercial": "Punto de acceso Ubiquiti UniFi U6 · WiFi 6",
+  "revisar": null
+ },
+ {
+  "proveedor": "Repetidor de señal WiFi TP-Link RE205 AC750 doble banda",
+  "marca": "TP-Link",
+  "modelo": "RE205",
+  "tipo": "Repetidores",
+  "comercial": "Repetidor WiFi TP-Link RE205 AC750 · WiFi 5",
+  "revisar": null
+ },
+ {
+  "proveedor": "Sistema mesh TP-Link Deco X20 WiFi 6 paquete de 2",
+  "marca": "TP-Link",
+  "modelo": "DECO X20",
+  "tipo": "Repetidores",
+  "comercial": "Sistema WiFi mesh TP-Link Deco X20",
+  "revisar": null
+ },
+ {
+  "proveedor": "Adaptador USB WiFi TP-Link Archer T2U Nano AC600",
+  "marca": "TP-Link",
+  "modelo": "ARCHER T2U NANO",
+  "tipo": "Adaptadores",
+  "comercial": "Adaptador USB TP-Link Archer T2U Nano",
+  "revisar": null
+ },
+ {
+  "proveedor": "UPS APC Back-UPS 600VA 330W 6 tomas BE600M1",
+  "marca": "APC",
+  "modelo": "BE600M1",
+  "tipo": "UPS",
+  "comercial": "UPS APC Back-UPS · 600 VA",
+  "revisar": null
+ },
+ {
+  "proveedor": "UPS CDP R-UPR758 750VA 375W 8 tomas",
+  "marca": "CDP",
+  "modelo": "R-UPR758",
+  "tipo": "UPS",
+  "comercial": "UPS CDP R-UPR758 · 750 VA",
+  "revisar": null
+ },
+ {
+  "proveedor": "UPS Forza NT-1012 1000VA 500W",
+  "marca": "Forza",
+  "modelo": "NT-1012",
+  "tipo": "UPS",
+  "comercial": "UPS Forza NT-1012 · 1000 VA",
+  "revisar": null
+ },
+ {
+  "proveedor": "Regulador de voltaje CDP R-AVR1008 1000VA 8 tomas",
+  "marca": "CDP",
+  "modelo": "R-AVR1008",
+  "tipo": "Reguladores",
+  "comercial": "Regulador de voltaje CDP R-AVR1008",
+  "revisar": null
+ },
+ {
+  "proveedor": "Power bank Xiaomi 10000mAh 22.5W negro",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Power banks",
+  "comercial": "Power bank Xiaomi · 10000 mAh · negro",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Power bank Anker PowerCore 20000mAh 20W",
+  "marca": "Anker",
+  "modelo": null,
+  "tipo": "Power banks",
+  "comercial": "Power bank Anker PowerCore · 20000 mAh",
+  "revisar": null
+ },
+ {
+  "proveedor": "Bateria portatil Argom 10000mAh blanca",
+  "marca": "Argom",
+  "modelo": null,
+  "tipo": "Power banks",
+  "comercial": "Power bank Argom · 10000 mAh · blanco",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Videoportero Hikvision DS-KIS204T kit 2 hilos",
+  "marca": "Hikvision",
+  "modelo": "DS-KIS204T",
+  "tipo": "Videoportero",
+  "comercial": "Videoportero Hikvision DS-KIS204T",
+  "revisar": null
+ },
+ {
+  "proveedor": "Timbre inteligente EZVIZ DB2C WiFi bateria",
+  "marca": "EZVIZ",
+  "modelo": "DB2C",
+  "tipo": "Timbres",
+  "comercial": "Timbre inteligente EZVIZ DB2C",
+  "revisar": null
+ },
+ {
+  "proveedor": "Control de acceso Hikvision DS-K1T320MFWX reconocimiento facial",
+  "marca": "Hikvision",
+  "modelo": "DS-K1T320MFWX",
+  "tipo": "Control de acceso",
+  "comercial": "Control de acceso Hikvision DS-K1T320MFWX",
+  "revisar": null
+ },
+ {
+  "proveedor": "Terminal Hikvision DS-K1T341AMF reconomiento facial con tarjeta",
+  "marca": "Hikvision",
+  "modelo": "DS-K1T341AMF",
+  "tipo": "Control de acceso",
+  "comercial": "Control de acceso Hikvision DS-K1T341AMF",
+  "revisar": null
+ },
+ {
+  "proveedor": "Cerradura magnetica Hikvision DS-K4H258S 280kg",
+  "marca": "Hikvision",
+  "modelo": "DS-K4H258S",
+  "tipo": "Cerradura",
+  "comercial": "Cerradura Hikvision DS-K4H258S",
+  "revisar": null
+ },
+ {
+  "proveedor": "Panel de alarma Hikvision AX PRO DS-PWA64-L-WE inalambrico",
+  "marca": "Hikvision",
+  "modelo": "DS-PWA64-L-WE",
+  "tipo": "Alarma",
+  "comercial": "Panel de alarma Hikvision AX Pro DS-PWA64-L-WE",
+  "revisar": null
+ },
+ {
+  "proveedor": "Sensor de movimiento Hikvision DS-PDP15P-EG2-WE inalambrico",
+  "marca": "Hikvision",
+  "modelo": "DS-PDP15P-EG2-WE",
+  "tipo": "Alarma",
+  "comercial": "Sensor de movimiento Hikvision DS-PDP15P-EG2-WE",
+  "revisar": null
+ },
+ {
+  "proveedor": "Sirena exterior Hikvision DS-PS1-E-WE inalambrica",
+  "marca": "Hikvision",
+  "modelo": "DS-PS1-E-WE",
+  "tipo": "Alarma",
+  "comercial": "Sirena Hikvision DS-PS1-E-WE",
+  "revisar": null
+ },
+ {
+  "proveedor": "Gabinete de pared 6U Nexxt con puerta de vidrio",
+  "marca": "Nexxt",
+  "modelo": null,
+  "tipo": "Gabinete",
+  "comercial": "Gabinete Nexxt",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Cable UTP cat6 Nexxt 305m exterior gris",
+  "marca": "Nexxt",
+  "modelo": null,
+  "tipo": "Cable",
+  "comercial": "Cable Nexxt · gris",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Bobina de cable UTP Cat5e Panduit 305 m azul",
+  "marca": "Panduit",
+  "modelo": null,
+  "tipo": "Cable",
+  "comercial": "Bobina de cable Panduit · azul",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Conector RJ45 cat6 Nexxt bolsa 100 unidades",
+  "marca": "Nexxt",
+  "modelo": null,
+  "tipo": "Conector",
+  "comercial": "Conector Nexxt",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Inyector PoE TP-Link TL-POE150S gigabit",
+  "marca": "TP-Link",
+  "modelo": "TL-POE150S",
+  "tipo": "Inyector PoE",
+  "comercial": "Inyector PoE TP-Link TL-POE150S",
+  "revisar": null
+ },
+ {
+  "proveedor": "Fuente de poder 12V 2A para camaras Epcom",
+  "marca": "Epcom",
+  "modelo": null,
+  "tipo": "Fuentes",
+  "comercial": "Fuente de poder Epcom",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Enchufe inteligente TP-Link Tapo P100 WiFi",
+  "marca": "TP-Link",
+  "modelo": "TAPO P100",
+  "tipo": "Enchufes inteligentes",
+  "comercial": "Enchufe inteligente TP-Link Tapo P100",
+  "revisar": null
+ },
+ {
+  "proveedor": "Enchufe inteligente EZVIZ T30 10A WiFi",
+  "marca": "EZVIZ",
+  "modelo": "T30",
+  "tipo": "Enchufes inteligentes",
+  "comercial": "Enchufe inteligente EZVIZ T30",
+  "revisar": null
+ },
+ {
+  "proveedor": "Bombillo inteligente Tapo L530E WiFi multicolor",
+  "marca": "TP-Link",
+  "modelo": "TAPO L530E",
+  "tipo": "Iluminación",
+  "comercial": "Bombillo inteligente TP-Link Tapo L530E",
+  "revisar": null
+ },
+ {
+  "proveedor": "Tira LED Govee 5m WiFi RGB H6154",
+  "marca": "Govee",
+  "modelo": "H6154",
+  "tipo": "Iluminación",
+  "comercial": "Tira LED Govee H6154",
+  "revisar": null
+ },
+ {
+  "proveedor": "Amazon Echo Dot 5ta generacion parlante inteligente Alexa azul",
+  "marca": "Amazon",
+  "modelo": null,
+  "tipo": "Asistentes de voz",
+  "comercial": "Asistente de voz Amazon Echo Dot 5ta · azul",
+  "revisar": null
+ },
+ {
+  "proveedor": "Amazon Fire TV Stick 4K control remoto por voz Alexa",
+  "marca": "Amazon",
+  "modelo": null,
+  "tipo": "Streaming",
+  "comercial": "Amazon Fire Tv Stick",
+  "revisar": "sin tipo"
+ },
+ {
+  "proveedor": "Monitor LG 24MR400 24 pulgadas IPS",
+  "marca": "LG",
+  "modelo": "24MR400",
+  "tipo": "Monitores",
+  "comercial": "Monitor LG 24MR400",
+  "revisar": null
+ },
+ {
+  "proveedor": "Teclado Logitech K120 USB español",
+  "marca": "Logitech",
+  "modelo": "K120",
+  "tipo": "Teclados",
+  "comercial": "Teclado Logitech K120",
+  "revisar": null
+ },
+ {
+  "proveedor": "Mouse Genius DX-110 USB negro",
+  "marca": "Genius",
+  "modelo": "DX-110",
+  "tipo": "Mouse",
+  "comercial": "Mouse Genius DX-110 · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Mouse inalambrico Logitech M170 gris",
+  "marca": "Logitech",
+  "modelo": "M170",
+  "tipo": "Mouse",
+  "comercial": "Mouse Logitech M170 · gris",
+  "revisar": null
+ },
+ {
+  "proveedor": "Capturadora Elgato HD60 X",
+  "marca": "Elgato",
+  "modelo": "HD60 X",
+  "tipo": "Streaming",
+  "comercial": "Capturadora de video Elgato HD60 X",
+  "revisar": null
+ },
+ {
+  "proveedor": "Memoria USB XPG ADATA UV128 64GB",
+  "marca": "XPG",
+  "modelo": "UV128",
+  "tipo": "Memorias USB",
+  "comercial": "Memoria USB XPG ADATA UV128 · 64 GB",
+  "revisar": null
+ },
+ {
+  "proveedor": "Soporte de pared Hikvision DS-1272ZJ-110 para domo",
+  "marca": "Hikvision",
+  "modelo": "DS-1272ZJ-110",
+  "tipo": "Accesorios CCTV",
+  "comercial": "Soporte Hikvision DS-1272ZJ-110",
+  "revisar": null
+ },
+ {
+  "proveedor": "Caja de conexiones Hikvision DS-1280ZJ-XS",
+  "marca": "Hikvision",
+  "modelo": "DS-1280ZJ-XS",
+  "tipo": "Accesorios CCTV",
+  "comercial": "Caja Hikvision DS-1280ZJ-XS",
+  "revisar": null
+ },
+ {
+  "proveedor": "Brazo de pared para camara PTZ Hikvision DS-1602ZJ",
+  "marca": "Hikvision",
+  "modelo": "DS-1602ZJ",
+  "tipo": "Accesorios CCTV",
+  "comercial": "Brazo Hikvision DS-1602ZJ",
+  "revisar": null
+ },
+ {
+  "proveedor": "Freidora de aire Winning Star 5L ST-9637 negra",
+  "marca": "Winning Star",
+  "modelo": "ST-9637",
+  "tipo": "Freidoras",
+  "comercial": "Freidora de aire Winning Star ST-9637 · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Licuadora Moonki MBL-1200 1.5L 600W",
+  "marca": "Moonki",
+  "modelo": "MBL-1200",
+  "tipo": "Licuadoras",
+  "comercial": "Licuadora Moonki MBL-1200",
+  "revisar": null
+ },
+ {
+  "proveedor": "Afeitadora Oraimo SmartShaver recargable",
+  "marca": "Oraimo",
+  "modelo": null,
+  "tipo": "Cuidado personal",
+  "comercial": "Afeitadora Oraimo SmartShaver",
+  "revisar": null
+ },
+ {
+  "proveedor": "Ventilador de pie Nova 16 pulgadas 3 velocidades blanco",
+  "marca": "Nova",
+  "modelo": null,
+  "tipo": "Ventiladores",
+  "comercial": "Ventilador Nova · blanco",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Hervidor electrico Logan 1.7L acero",
+  "marca": "Logan",
+  "modelo": null,
+  "tipo": "Hervidores",
+  "comercial": "Hervidor Logan",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Cargador Ugreen 65W USB-C GaN Nexode",
+  "marca": "Ugreen",
+  "modelo": null,
+  "tipo": "Cargadores",
+  "comercial": "Cargador Ugreen",
+  "revisar": "sin modelo"
+ },
+ {
+  "proveedor": "Mouse gamer Razer DeathAdder Essential negro",
+  "marca": "Razer",
+  "modelo": null,
+  "tipo": "Mouse",
+  "comercial": "Mouse Razer DeathAdder Essential · negro",
+  "revisar": null
+ },
+ {
+  "proveedor": "Producto generico sin marca 0 camaras",
+  "marca": null,
+  "modelo": null,
+  "tipo": "",
+  "comercial": null,
+  "revisar": null
+ }
+]

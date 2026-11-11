@@ -459,3 +459,5 @@ def drafts_out(db: Session, tid: int, bid: int) -> dict:
         ],
     }
 
+
+from . import catalog_rules  # noqa: E402, F401 - registra las reglas de cada campo (nombre, ficha, descripcion)
