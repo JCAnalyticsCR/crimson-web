@@ -95,6 +95,13 @@ Variables (todas opcionales):
 | `E2E_PYTHON` | Intérprete con las dependencias del API si no se usa `uv` (por defecto `uv run --locked python`) |
 | `E2E_PUERTO`, `E2E_API_PUERTO` | Cambiar los puertos 5301 y 8101 |
 
+El proxy `/api` del portal de la compra (`vite.compra.config.ts`) solo acepta un API de esta máquina
+(`http://127.0.0.1|localhost|[::1]:<puerto>`): otro `E2E_API_URL` corta el arranque. Cuando Playwright levanta el
+portal, además, fija `E2E_API_URL` al API que acaba de levantar, así una variable heredada no lo desvía.
+`E2E_DATABASE_URL` con una Postgres que ya tiene tablas solo se acepta si el nombre de la base dice `e2e`, `test`
+o `prueba`, y eso se revisa **antes** de migrar; las variables `RAILWAY_*` se buscan en el entorno original (dentro
+de `railway run` no arranca). `--forzar` de la semilla tiene el mismo candado de nombre.
+
 Para ver la tienda sembrada a mano: en `api/`, `uv run python -m scripts.tienda_e2e_local`; en `portal/`,
 `npx vite --config vite.compra.config.ts`; abrir `http://tienda.localhost:5301`.
 
@@ -155,25 +162,36 @@ Trabajo «Tienda · compra real en local (API + portal + Postgres)» de `.github
 con una Postgres de servicio (`E2E_DATABASE_URL`). Tarda pocos minutos; si un día pasa de 10, se mueve a un workflow
 nocturno y queda obligatoria antes de cada despliegue de dinero (`infra/DESPLIEGUE.md`).
 
+Si algo falla, los traces, las capturas de la falla y el informe HTML quedan 7 días en los artefactos del run:
+`e2e-compra` (este trabajo) y `e2e-portal` (vitest + playwright, que también guarda `e2e/informes/axe.md` y los
+diffs de las capturas).
+
 ## Capturas base
 
 Viven en `e2e/capturas-base/<sistema>/` y **sí se versionan**. Son por sistema porque las letras no se dibujan
-igual en Windows que en Linux. Hoy solo están las de **`win32`** (donde se trabaja la tienda). Donde no hay
-carpeta para el sistema, las pruebas de captura **se saltan con aviso** en vez de fallar: en el CI (Linux) todo
-lo demás se exige y las capturas quedan pendientes hasta generar las de Linux.
+igual en Windows que en Linux. Hoy solo están las de **`win32`** (donde se trabaja la tienda). En una máquina
+local sin carpeta para su sistema, las pruebas de captura **se saltan con aviso**. En el CI la falta de la carpeta
+es un **error**; mientras no existan las de Linux, el trabajo `portal-pruebas` declara `E2E_CAPTURAS_PENDIENTES=1`
+y el salto queda explícito en el workflow. **Pendiente** (antes de la Ola 2, que compara contra estas capturas):
+generar `e2e/capturas-base/linux/` con la receta de abajo, confirmarla y quitar esa variable de `ci.yml`. Hasta
+entonces, la comparación de capturas de la Ola 2 se hace a mano en Windows (`npm run e2e`).
 
 - Cambio de estilos a propósito: `npm run e2e:base`, revisar las imágenes que cambiaron y confirmarlas en el
   mismo commit. Un cambio que no debía mover nada y mueve una captura es justo lo que esto detecta.
-- Capturas de Linux (para que el CI también compare), con Docker encendido y la imagen de la misma versión
-  que `@playwright/test` en `package.json`:
+- Capturas de Linux (para que el CI también compare), con Docker encendido y **la misma imagen que usa el CI**
+  (`container.image` del trabajo `portal-pruebas` en `ci.yml`, que debe ser la versión de `@playwright/test`
+  de `package-lock.json`; el CI lo exige). Generarlas en otro Linux daría otras fuentes de respaldo y otro
+  antialias, y con `maxDiffPixelRatio 0.001` el CI quedaría en rojo:
 
   ```
-  docker run --rm --ipc=host -v "<ruta del repo>/portal:/work" -w /work mcr.microsoft.com/playwright:v1.64.1-noble sh -c "npm ci --no-audit --no-fund && npx playwright test capturas.spec.ts --update-snapshots"
+  docker run --rm --ipc=host -v "<ruta del repo>/portal:/work" -v /work/node_modules -w /work mcr.microsoft.com/playwright:v1.64.1-noble sh -c "npm ci --no-audit --no-fund && npx playwright test capturas.spec.ts --update-snapshots"
   ```
 
-  Deja `node_modules` con binarios de Linux: después, `npm ci` otra vez en Windows. Se confirma la carpeta
-  `e2e/capturas-base/linux/`. Sin Docker no hay forma local de generarlas (el 10/11 el servicio de Docker de
-  esta máquina estaba apagado y por eso no se hicieron); nada más de estas pruebas necesita Docker.
+  El `-v /work/node_modules` (un volumen anónimo encima) hace que el `npm ci` del contenedor **no** toque el
+  `node_modules` de Windows. Se confirma solo la carpeta `e2e/capturas-base/linux/` y se quita
+  `E2E_CAPTURAS_PENDIENTES` de `ci.yml` en el mismo commit. Sin Docker no hay forma local de generarlas (el 10/11
+  el servicio de Docker de esta máquina estaba apagado y por eso no se hicieron); nada más de estas pruebas
+  necesita Docker.
 - Lo que está fijo a la ventana (barra de compra del celular, botones del checkout) sale donde cae en la
   primera pantalla, encima de lo que haya debajo.
 - Los precios del catálogo ficticio son de 4 cifras. Un desborde que solo aparezca con precios de 6 cifras en

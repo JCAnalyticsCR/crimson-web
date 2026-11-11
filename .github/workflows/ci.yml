@@ -176,13 +176,24 @@ jobs:
 
   # Pruebas del portal (portal/e2e/README.md). Vitest: modulos puros. Playwright: la tienda en Chromium a 320, 360,
   # 375, 768 y 1280 px contra la tienda de pruebas (API simulado en el navegador y catalogo ficticio): no usa API,
-  # base, secretos ni internet. axe corre en modo informe (no bloquea hasta O2-02) y su resumen queda en el registro.
-  # Las capturas base son por sistema: mientras no exista portal/e2e/capturas-base/linux/ esas pruebas se saltan aqui.
+  # base, secretos ni internet. axe corre en modo informe (no bloquea hasta O2-02): su resumen queda en el registro y
+  # el detalle (e2e/informes/axe.md), los traces y el informe HTML quedan en el artefacto «e2e-portal» del run.
+  # Corre DENTRO de la imagen oficial de Playwright: las capturas base de Linux se generan con esa MISMA imagen
+  # (receta en portal/e2e/README.md), asi las fuentes y el rasterizado coinciden. Si cambia @playwright/test en
+  # package-lock.json, se cambia la imagen en el mismo commit (el primer paso lo exige).
+  # Las capturas base son por sistema. Mientras no exista portal/e2e/capturas-base/linux/ (pendiente: generarla con
+  # la receta, Docker), E2E_CAPTURAS_PENDIENTES=1 deja que esas pruebas se salten AQUI de forma explicita; sin esa
+  # variable, en CI la falta de la carpeta es un error y no un salto silencioso. Quitarla al subir las capturas.
   portal-pruebas:
     name: Portal · vitest + playwright
     needs: portal
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --user 1001
+    env:
+      E2E_CAPTURAS_PENDIENTES: "1"
     defaults:
       run:
         working-directory: portal
@@ -190,6 +201,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: La imagen de Playwright es la de package-lock.json
+        run: |
+          v=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")
+          test "$v" = "1.64.1" || { echo "::error::@playwright/test $v en package-lock.json y la imagen es v1.64.1: cambie container.image (y regenere las capturas linux)"; exit 1; }
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
@@ -200,10 +215,19 @@ jobs:
         run: npm test
       - name: Tipos de las pruebas de pantalla
         run: npm run e2e:tipos
-      - name: Chromium de Playwright (la version que fija package-lock.json) y sus librerias del sistema
-        run: npx playwright install --with-deps --only-shell chromium
-      - name: Pruebas de pantalla (playwright)
+      - name: Pruebas de pantalla (playwright, con el Chromium de la imagen)
         run: npm run e2e
+      - name: Guardar traces, diffs de capturas, informe HTML y axe.md
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-portal
+          path: |
+            portal/test-results/
+            portal/playwright-report/
+            portal/e2e/informes/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Compra REAL de punta a punta (plan de la tienda, O0-03; portal/e2e/README.md): el portal de verdad contra el API de
   # verdad sobre una Postgres de servicio, con la semilla ficticia (api/scripts/seed_tienda_e2e.py) y sin cobrar nada.
@@ -256,6 +280,17 @@ jobs:
       - name: Compra SINPE de punta a punta (375 y 768 px, con puntero y solo con teclado)
         run: npm run e2e:compra
         working-directory: portal
+      # datos 100 % ficticios y sin secretos (el arranque limpia el entorno): los traces no llevan nada real
+      - name: Guardar traces e informe HTML de la compra
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-compra
+          path: |
+            portal/test-results/compra/
+            portal/playwright-report/compra/
+          retention-days: 7
+          if-no-files-found: ignore
 
   nginx:
     name: Portal · imagen + nginx -t

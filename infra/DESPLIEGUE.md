@@ -187,14 +187,18 @@ y con `X-Robots-Tag: noindex`; una ficha y una categoría del sitemap (200, inde
 `/catalogo`; y una ficha inexistente con 404 real.
 
 Variables: `TIENDA_URL` (o el primer argumento), `TIENDA_SLUG`, `HUMO_TITULO` (texto que el `<title>` de la
-portada contiene; por defecto `Crimson`), `HUMO_TOLERANCIA` (5), `HUMO_EXIGIR_NOINDEX` (1; en 0 la falta de
-noindex en el JSON solo avisa: sirve únicamente mientras O0-05a no esté publicado) y `HUMO_HOST`.
+portada contiene; por defecto `Crimson`), `HUMO_TOLERANCIA` (5), `HUMO_N_ESPERADO` (el `n` del snapshot de la
+última corrida buena: con ella el snapshot se compara contra ese número y la diferencia con el sitemap solo avisa),
+`HUMO_N_MIN` (1; el snapshot nunca puede traer menos), `HUMO_EXIGIR_NOINDEX` (1; en 0 la falta de noindex en el
+JSON solo avisa: sirve únicamente mientras O0-05a no esté publicado) y `HUMO_HOST`.
 
 - **Fallas conocidas hoy (10/11/2026, única corrida contra producción, 9 GET en 11 s):** el sitemap trae 2 184
   fichas y el snapshot `n=726` (el sitemap incluye los agotados ocultos; lo corrige O1-07 «Sitemap fiel al catálogo
   visible»), y el JSON del API aún no lleva `noindex` (llega con O0-05a). Hasta que esas dos tareas estén
-  publicadas se corre con `HUMO_EXIGIR_NOINDEX=0 HUMO_TOLERANCIA=1500` y se compara la línea del sitemap con estos
-  números: si cambian mucho, es una falla nueva. Al publicar cada una, se quita su variable.
+  publicadas se corre con `HUMO_EXIGIR_NOINDEX=0 HUMO_N_ESPERADO=<n de la última corrida buena; hoy 726>` (la
+  tolerancia sigue en 5: **no** se agranda `HUMO_TOLERANCIA`, que con 1 500 dejaba pasar una caída de cientos de
+  productos). Si el catálogo cambia de verdad (altas o bajas), se actualiza `HUMO_N_ESPERADO` con el `n` nuevo
+  después de revisarlo. Al publicar O0-05a se quita `HUMO_EXIGIR_NOINDEX=0`; al publicar O1-07, `HUMO_N_ESPERADO`.
 - **Probar el propio guion** (tiene que salir con 1): `TIENDA_SLUG=crimsom bash scripts/humo_tienda.sh`.
 - **En local, contra nginx de verdad** (necesita Docker): con el entorno de «Compra real en local» levantado
   (`infra/docker-compose.e2e.yml`, ver `portal/e2e/README.md`),

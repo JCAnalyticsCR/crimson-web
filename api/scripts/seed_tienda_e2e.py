@@ -126,6 +126,35 @@ def revisar_entorno(database_url: str, env: str, entorno: dict | None = None) ->
         raise SemillaRechazada("DATABASE_URL no apunta a esta máquina ni al docker-compose: la semilla no corre contra una base remota.")
 
 
+MARCAS_DE_PRUEBA = ("e2e", "test", "prueba")
+
+
+def base_de_pruebas(database_url: str) -> bool:
+    """SQLite, o una Postgres cuyo nombre dice que es de pruebas (crimson_e2e, crimson_test...)."""
+    url = make_url(database_url)
+    if url.get_backend_name() == "sqlite":
+        return True
+    nombre = (url.database or "").lower()
+    return any(m in nombre for m in MARCAS_DE_PRUEBA)
+
+
+def revisar_base_antes_de_migrar(engine) -> None:
+    """Antes de migrar (no despues): una Postgres que ya tiene tablas solo se acepta si su nombre la marca como de
+    pruebas. Asi un tunel a una base real en localhost no recibe migraciones sin publicar antes de que la semilla se
+    niegue."""
+    from sqlalchemy import inspect as sa_inspect
+
+    if engine.url.get_backend_name() == "sqlite" or base_de_pruebas(engine.url.render_as_string(hide_password=False)):
+        return
+    with engine.connect() as conn:
+        tablas = sa_inspect(conn).get_table_names()
+    if tablas:
+        raise SemillaRechazada(
+            f"La base «{engine.url.database}» ya tiene tablas ({len(tablas)}) y su nombre no dice que sea de pruebas "
+            f"({', '.join(MARCAS_DE_PRUEBA)}): no se migra ni se siembra. Use una base vacía y desechable."
+        )
+
+
 def _aware(dt: datetime | None) -> datetime | None:
     return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
 
@@ -140,6 +169,9 @@ def sembrar(db: Session, *, forzar: bool = False) -> dict:
     from app.services import availability, store_snapshot
     from app.services import inventory as invsvc
 
+    if forzar and not base_de_pruebas(db.get_bind().url.render_as_string(hide_password=False)):
+        # --forzar reescribe settings.store de la empresa «crimson» (el mismo slug que produccion): solo en una base de pruebas
+        raise SemillaRechazada("--forzar solo se acepta en SQLite o en una Postgres con e2e, test o prueba en el nombre.")
     t = seed_base(db, demo=False)  # empresa, monedas, impuestos, bodegas y tipo de cambio; sin catalogo ni usuarios
     ajenos = db.scalars(
         select(Product.code).where(Product.tenant_id == t.id, Product.show_on_web, Product.active, ~Product.code.startswith(PREFIJO)).limit(3)

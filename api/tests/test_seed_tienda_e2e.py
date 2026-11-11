@@ -123,3 +123,57 @@ def test_candados_de_entorno_y_de_catalogo(db_session):
     t = db_session.scalar(select(Tenant).where(Tenant.slug == "crimson"))
     assert not ((t.settings or {}).get("store") or {}).get("published")
     assert db_session.scalars(select(Product).where(Product.code.startswith("E2E-"))).all() == []
+
+
+def test_base_de_pruebas_por_nombre():
+    assert semilla.base_de_pruebas("sqlite:///./x.db")
+    assert semilla.base_de_pruebas("postgresql+psycopg://u:p@localhost:5432/crimson_e2e")
+    assert semilla.base_de_pruebas("postgresql+psycopg://u:p@localhost:5432/crimson_test")
+    assert not semilla.base_de_pruebas("postgresql+psycopg://u:p@localhost:15432/railway")
+    assert not semilla.base_de_pruebas("postgresql+psycopg://u:p@postgres:5432/crimson")
+
+
+def test_postgres_con_tablas_y_sin_marca_se_rechaza_antes_de_migrar():
+    import sqlalchemy as sa
+    from sqlalchemy.engine import make_url
+
+    real = sa.create_engine("sqlite://")
+    with real.begin() as c:
+        c.execute(sa.text("CREATE TABLE product (id INTEGER PRIMARY KEY)"))
+
+    class Tunel:  # una "Postgres" en localhost (un tunel a la base real) que ya tiene tablas
+        url = make_url("postgresql+psycopg://u:p@localhost:15432/railway")
+
+        def connect(self):
+            return real.connect()
+
+    with pytest.raises(semilla.SemillaRechazada):
+        semilla.revisar_base_antes_de_migrar(Tunel())
+    Tunel.url = make_url("postgresql+psycopg://u:p@localhost:5432/crimson_e2e")
+    semilla.revisar_base_antes_de_migrar(Tunel())  # con marca de pruebas: pasa
+    semilla.revisar_base_antes_de_migrar(real)  # SQLite: pasa
+
+
+def test_tienda_e2e_local_rechaza_railway_antes_de_limpiar_y_sin_migrar(monkeypatch, tmp_path):
+    import os
+    import sys
+
+    from alembic import command
+    from scripts import tienda_e2e_local
+
+    llamadas = []
+    monkeypatch.setattr(command, "upgrade", lambda *a, **k: llamadas.append(a))
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setenv("E2E_DATABASE_URL", "postgresql://u:p@localhost:15432/railway")
+    for salida in ("stdout", "stderr"):  # la captura de pytest no siempre trae reconfigure()
+        monkeypatch.setattr(sys, salida, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
+    antes = dict(os.environ)
+    assert tienda_e2e_local.main(["--solo-preparar", "--datos", str(tmp_path / "datos")]) == 2
+    assert llamadas == []
+    assert dict(os.environ) == antes  # no alcanzo a limpiar ni a cambiar el entorno
+
+
+def test_forzar_solo_en_una_base_de_pruebas(db_session, monkeypatch):
+    monkeypatch.setattr(semilla, "base_de_pruebas", lambda url: False)
+    with pytest.raises(semilla.SemillaRechazada):
+        semilla.sembrar(db_session, forzar=True)

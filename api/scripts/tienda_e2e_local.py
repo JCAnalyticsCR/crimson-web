@@ -10,7 +10,9 @@ Lo levanta y lo apaga Playwright (`npm run e2e:compra` en portal/, ver portal/e2
 
 Que lo hace seguro:
 - La base es una SQLite nueva en cada arranque, en la carpeta temporal del sistema (fuera del repo). Con
-  E2E_DATABASE_URL usa esa base (el CI pasa una Postgres de servicio); solo se aceptan bases de esta maquina.
+  E2E_DATABASE_URL usa esa base (el CI pasa una Postgres de servicio); solo se aceptan bases de esta maquina, y si ya
+  tiene tablas, solo si su nombre la marca como de pruebas (e2e, test o prueba). Todo eso se revisa ANTES de migrar.
+- Las variables de Railway se buscan en el entorno original, antes de limpiarlo: dentro de `railway run` no arranca.
 - El entorno se limpia ANTES de cargar la aplicacion: fuera llaves de correo, ONVO, Eurocomp, Hacienda, BCCR, buzon
   IMAP, respaldo y variables de Railway. Tampoco se lee ningun .env: el proceso trabaja en la carpeta temporal.
   Resultado: ENV=local, el correo queda "simulado", la tarjeta en modo de prueba y nada sale a internet.
@@ -120,18 +122,28 @@ def main(argv: list[str] | None = None) -> int:
             viejo.unlink(missing_ok=True)  # base nueva en cada arranque
         database_url = f"sqlite:///{archivo.as_posix()}"
 
+    # Candado de Railway sobre el entorno ORIGINAL: entorno_limpio quita las RAILWAY_* y despues ya no se verian.
+    sys.path.insert(0, str(API))
+    from scripts import seed_tienda_e2e as semilla
+
+    try:
+        semilla.revisar_entorno(database_url, "local", dict(os.environ))
+    except semilla.SemillaRechazada as e:
+        print(f"[e2e-local] No arranca. {e}", file=sys.stderr, flush=True)
+        return 2
+
     limpio = entorno_limpio(dict(os.environ), database_url, args.base_url)
     os.environ.clear()
     os.environ.update(limpio)
     os.chdir(datos)
-    sys.path.insert(0, str(API))
 
     # desde aqui se puede cargar la aplicacion: Settings se arma al importar, ya con el entorno limpio
     from app.core.config import settings
-    from scripts import seed_tienda_e2e as semilla
+    from app.core.db import engine
 
     try:
-        semilla.revisar_entorno(settings.database_url, settings.env)
+        semilla.revisar_entorno(settings.database_url, settings.env)  # segunda barrera, ya con el entorno limpio
+        semilla.revisar_base_antes_de_migrar(engine)  # una base real con tablas se rechaza ANTES de migrarla
     except semilla.SemillaRechazada as e:
         print(f"[e2e-local] No arranca. {e}", file=sys.stderr, flush=True)
         return 2

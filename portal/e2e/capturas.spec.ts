@@ -4,7 +4,9 @@
    - Un cambio de estilos a proposito: `npm run e2e:base`, mirar el diff de las imagenes y confirmarlas en el mismo
      commit que el cambio.
    - Las capturas son por sistema (las letras no se dibujan igual en Windows que en Linux). Si no hay carpeta para el
-     sistema donde corre, la prueba se salta con aviso en vez de fallar. Ver e2e/README.md.
+     sistema donde corre: en una maquina local la prueba se salta con aviso; en CI es un ERROR (nadie depende de un
+     salto silencioso), salvo que el workflow declare E2E_CAPTURAS_PENDIENTES=1 mientras las de Linux no existan.
+     Ver e2e/README.md.
    - Lo fijo a la ventana (barra de compra del celular, botones del checkout) sale donde cae en la primera pantalla. */
 import { existsSync } from "node:fs";
 import { PANTALLAS } from "./soporte/pantallas";
@@ -15,7 +17,11 @@ for (const p of PANTALLAS.filter((x) => x.base)) {
     const archivo = info.snapshotPath(`${p.id}.png`);
     const carpeta = archivo.slice(0, Math.max(archivo.lastIndexOf("/"), archivo.lastIndexOf("\\")));
     const generando = info.config.updateSnapshots === "all" || info.config.updateSnapshots === "changed";
-    test.skip(!generando && !existsSync(carpeta), `sin capturas base para ${process.platform}: generarlas con «npm run e2e:base» (e2e/README.md)`);
+    const falta = !generando && !existsSync(carpeta);
+    if (falta && process.env.CI && process.env.E2E_CAPTURAS_PENDIENTES !== "1") {
+      throw new Error(`No hay capturas base para ${process.platform} (${carpeta}): en CI eso es un error. Generarlas con la receta de e2e/README.md.`);
+    }
+    test.skip(falta, `sin capturas base para ${process.platform}: generarlas con «npm run e2e:base» (e2e/README.md)`);
     await p.abrir(page);
     await cargarTodo(page);
     await expect(page).toHaveScreenshot(`${p.id}.png`, { fullPage: true });

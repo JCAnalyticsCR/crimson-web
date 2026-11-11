@@ -12,6 +12,11 @@ import react from "@vitejs/plugin-react";
 
 const PUERTO = Number(process.env.E2E_PUERTO) || 5301;
 const API = process.env.E2E_API_URL || `http://127.0.0.1:${Number(process.env.E2E_API_PUERTO) || 8101}`;
+/* el proxy crea pedidos en el API al que apunta: solo esta maquina, igual que el candado de playwright.compra.config.ts
+   (este proceso corre en Node y no lo cubre el --host-resolver-rules del navegador) */
+if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\/?$/.test(API)) {
+  throw new Error(`E2E_API_URL=${API}: solo puede apuntar a esta máquina (http://127.0.0.1:<puerto>).`);
+}
 const proxy = { "/api": { target: API, changeOrigin: true, rewrite: (p: string) => p.replace(/^\/api/, "") } };
 
 export default defineConfig({

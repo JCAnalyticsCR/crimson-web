@@ -8,7 +8,8 @@
 #   2. /robots.txt: 200 y la linea Sitemap
 #   3. /sitemap.xml: 200; cuantas direcciones /p/ trae
 #   4. /api/public/store/<slug>: 200 en JSON y con X-Robots-Tag: noindex (O0-05a)
-#   5. snapshot: su "n" frente a las /p/ del sitemap (mas o menos HUMO_TOLERANCIA)
+#   5. snapshot: su "n" frente a las /p/ del sitemap (mas o menos HUMO_TOLERANCIA); con HUMO_N_ESPERADO, frente a ese
+#      numero (y el sitemap solo avisa); nunca por debajo de HUMO_N_MIN
 #   6. una ficha y 7. una categoria del sitemap: 200, sin noindex, con canonica a su propia direccion
 #   8. /catalogo: 200 con <title>
 #   9. una ficha inexistente: 404 de verdad (no un 200 blando)
@@ -18,7 +19,10 @@
 #   TIENDA_URL            base de la tienda (por defecto https://tienda.crimsoncr.com; el argumento manda)
 #   TIENDA_SLUG           slug de la tienda en el API (crimson)
 #   HUMO_TITULO           texto que el <title> de la portada tiene que contener (Crimson)
-#   HUMO_TOLERANCIA       diferencia permitida entre el sitemap y el snapshot (5)
+#   HUMO_TOLERANCIA       diferencia permitida entre el sitemap (o HUMO_N_ESPERADO) y el snapshot (5)
+#   HUMO_N_ESPERADO       n del snapshot de la ultima corrida buena: mientras el sitemap y el snapshot no coincidan
+#                         (hasta O1-07) se compara contra este numero, y la diferencia con el sitemap solo avisa
+#   HUMO_N_MIN            el snapshot no puede traer menos productos que esto (por defecto 1)
 #   HUMO_EXIGIR_NOINDEX   1 = el JSON del API tiene que llevar noindex (por defecto); 0 = solo avisa (antes de O0-05a)
 #   HUMO_HOST             manda esta cabecera Host (probar un nginx local como si fuera tienda.*)
 # Prueba del propio guion (tiene que fallar):  TIENDA_SLUG=crimsom bash scripts/humo_tienda.sh
@@ -29,6 +33,9 @@ BASE="${BASE%/}"
 SLUG="${TIENDA_SLUG:-crimson}"
 TITULO="${HUMO_TITULO:-Crimson}"
 TOL="${HUMO_TOLERANCIA:-5}"
+N_ESPERADO="${HUMO_N_ESPERADO:-}"
+N_MIN="${HUMO_N_MIN:-1}"
+case "$TOL$N_MIN$N_ESPERADO" in *[!0-9]*) echo "HUMO_TOLERANCIA, HUMO_N_MIN y HUMO_N_ESPERADO son enteros" >&2; exit 2 ;; esac
 EXIGIR_NOINDEX="${HUMO_EXIGIR_NOINDEX:-1}"
 MAX=12
 UA="crimson-humo/1 (posdespliegue; solo GET)"
@@ -159,13 +166,34 @@ fi
 
 # 5. snapshot frente al sitemap
 get snapshot "$BASE/api/public/store/$SLUG/snapshot" --compressed
-n_snap="$(grep -o '"n"[[:space:]]*:[[:space:]]*[0-9]\+' "$tmp/snapshot.b" | head -n 1 | grep -o '[0-9]\+$')"
+# la clave "n" de la raiz con un lector de JSON si hay Python; si no, la primera "n" (el API la escribe primero)
+n_snap=""
+for py in python3 python; do
+  if command -v "$py" >/dev/null 2>&1; then
+    n_snap="$("$py" -c 'import json,sys; v=json.load(open(sys.argv[1],encoding="utf-8")).get("n"); print(v if isinstance(v,int) else "")' "$tmp/snapshot.b" 2>/dev/null)"
+    break
+  fi
+done
+[ -z "$n_snap" ] && n_snap="$(grep -o '"n"[[:space:]]*:[[:space:]]*[0-9]\+' "$tmp/snapshot.b" | head -n 1 | grep -o '[0-9]\+$')"
 if [ "$CODE" != 200 ] || [ -z "$n_snap" ]; then
   falla "snapshot: estado $CODE, sin el campo n"
 else
   dif=$((n_sitemap - n_snap))
   [ "$dif" -lt 0 ] && dif=$((-dif))
-  if [ "$dif" -gt "$TOL" ]; then
+  if [ "$n_snap" -lt "$N_MIN" ]; then
+    falla "snapshot con n=$n_snap, menos que el minimo $N_MIN"
+  fi
+  if [ -n "$N_ESPERADO" ]; then
+    # hasta O1-07 el sitemap trae los agotados ocultos: la referencia es la ultima corrida buena, no el sitemap
+    dife=$((N_ESPERADO - n_snap))
+    [ "$dife" -lt 0 ] && dife=$((-dife))
+    if [ "$dife" -gt "$TOL" ]; then
+      falla "snapshot con n=$n_snap y se esperaban $N_ESPERADO (diferencia $dife > $TOL)"
+    else
+      ok "snapshot n=$n_snap · esperado $N_ESPERADO (diferencia $dife, tolerancia $TOL)"
+    fi
+    [ "$dif" -gt "$TOL" ] && aviso "sitemap con $n_sitemap fichas y snapshot con n=$n_snap (diferencia $dif; se corrige con O1-07)"
+  elif [ "$dif" -gt "$TOL" ]; then
     falla "sitemap con $n_sitemap fichas y snapshot con n=$n_snap (diferencia $dif > $TOL)"
   else
     ok "snapshot n=$n_snap · sitemap $n_sitemap (diferencia $dif, tolerancia $TOL)"

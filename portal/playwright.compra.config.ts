@@ -75,7 +75,8 @@ export default defineConfig({
       timeout: 240_000,
       stdout: "ignore",
       stderr: "pipe",
-      env: { E2E_PUERTO: String(PUERTO), E2E_API_PUERTO: String(API_PUERTO) },
+      // E2E_API_URL fijo al API que levanta esta misma corrida: una variable heredada no puede desviar el proxy /api
+      env: { E2E_PUERTO: String(PUERTO), E2E_API_PUERTO: String(API_PUERTO), E2E_API_URL: `http://127.0.0.1:${API_PUERTO}` },
     },
   ],
 });
