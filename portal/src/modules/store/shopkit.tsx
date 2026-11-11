@@ -37,11 +37,21 @@ export const IC = {
 export type ApiFn = <T>(path: string, init?: RequestInit) => Promise<{ data: T; total: number | null }>;
 export type StoreInfo = { name: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  // etiqueta asociada por id (lectores de pantalla y autocompletar del navegador)
+/** Campo con etiqueta asociada por id (lectores de pantalla y autocompletar del navegador). `error` (O1-10a): el
+    mensaje queda debajo del campo, ligado con aria-describedby, y el campo se marca con aria-invalid. */
+export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: ReactNode }) {
   const id = useId();
-  const el = isValidElement(children) ? cloneElement(children as ReactElement<{ id?: string; "aria-describedby"?: string }>, { id, ...(hint ? { "aria-describedby": `${id}-h` } : {}) }) : children;
-  return <div className="sh-field"><label htmlFor={id}>{label}</label>{el}{hint && <small id={`${id}-h`} className="ck-hint">{hint}</small>}</div>;
+  const desc = [error ? `${id}-e` : "", hint ? `${id}-h` : ""].filter(Boolean).join(" ");
+  const el = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ id?: string; "aria-describedby"?: string; "aria-invalid"?: boolean }>, { id, ...(desc ? { "aria-describedby": desc } : {}), ...(error ? { "aria-invalid": true } : {}) })
+    : children;
+  return (
+    <div className="sh-field" data-error={error ? true : undefined}>
+      <label htmlFor={id}>{label}</label>{el}
+      {error && <small id={`${id}-e`} className="ck-ferr">{error}</small>}
+      {hint && <small id={`${id}-h`} className="ck-hint">{hint}</small>}
+    </div>
+  );
 }
 
 /** Clave de idempotencia: la misma mientras no cambie lo que se manda (doble clic = mismo pedido). */

@@ -158,3 +158,20 @@
   .ck-terms__foot .sh-btn { flex: 1 1 auto; }
   .ck-terms__foot .ck-link { flex-basis: 100%; }
 }
+
+/* ---------- O1-10a: errores bajo cada campo, ayuda por WhatsApp, cupon plegado y botones que caben ---------- */
+.ck-ferr { color: var(--crimson-dark); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.sh-field[data-error] input, .sh-field[data-error] select, .sh-field[data-error] textarea, .ck input[aria-invalid="true"]:not([type=radio]):not([type=checkbox]) { border-color: var(--crimson-dark); }
+/* todo campo a 16 px: iOS no hace zoom al enfocar */
+.ck input, .ck select, .ck textarea, .ck-coupon input { font-size: 16px; }
+.ck-cpn { display: grid; gap: 10px; justify-items: start; }
+.ck-cpn__toggle { min-height: 44px; font-weight: 600; }
+.ck-cpn__box { display: grid; gap: 8px; width: 100%; }
+.ck-coupon .sh-btn { flex: none; }
+.ck-help { margin: 0; display: grid; gap: 2px; justify-items: center; text-align: center; font-size: 14px; }
+.ck-help .ck-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; }
+.ck-help small { color: var(--text-3); font-size: 12.5px; }
+.ck-trust { margin: 0; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+/* «Atras» + «Confirmar pedido · total» caben a 320 px: el texto parte renglon en vez de salirse */
+.ck-actions .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
+.ck-actions .ck-go { min-width: 0; }

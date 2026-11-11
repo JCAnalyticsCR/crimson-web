@@ -19,7 +19,7 @@ type Cfg = {
   free_shipping_from: string | number | null; auto_invoice: boolean;
   /* el servidor revisa el dominio del correo (MX); sin el dato (API viejo) se asume que si */
   verify_email?: boolean;
-  /* reunion 2 (item 12): vendedores activos para "Vendedor que lo atendió" (vacia = Mi Tienda no lo habilita) */
+  /* reunion 2 (item 12): vendedores activos para "Vendedor que te atendió" (vacia = Mi Tienda no lo habilita) */
   /* id: referencia opaca (el id interno del usuario nunca sale a la página pública) */
   sellers?: { id: string; name: string }[];
 };
@@ -61,6 +61,11 @@ type Form = {
   method: string; coupon: string; notes: string; terms: boolean; save: boolean; website: string;
   seller?: string;
 };
+/* Etiqueta y ayuda del pago con tarjeta (O1-10a). Solo cambia lo que se MUESTRA: el codigo del metodo y la etiqueta
+   guardada en los pedidos (store_orders.METHOD_LABEL) no se tocan, y la palabra «tarjeta» se queda a proposito
+   (availability.card_keywords decide por palabra la reserva de 30 minutos). */
+const methodLabel = (m: Method) => (m.code === "tarjeta" ? "Tarjeta de crédito o débito" : m.label);
+const methodHint = (m: Method) => (m.code === "tarjeta" && !m.simulated ? "Pagás en la página segura de ONVO; nunca vemos los datos de tu tarjeta." : m.hint);
 const digits = (s: string) => s.replace(/\D/g, "");
 const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 
@@ -96,6 +101,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [couponOpen, setCouponOpen] = useState(() => !!(draft?.coupon || draft?.f?.coupon));
   const keyRef = useRef<string | null>(null);
   const errRef = useRef<HTMLUListElement>(null);
   const formTop = useRef<HTMLHeadingElement>(null);
@@ -197,30 +203,45 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
 
   const cur = quote?.currency || cfg?.currency || cart[0]?.currency || S.currency || "CRC";
   const idLen = f.inv === "fisica" ? 9 : 10;
-  const stepErrors = (s: number): string[] => {
-    const e: string[] = [];
+  /* errores por paso; `k` es el campo al que pertenece (data-f del control): el mensaje sale bajo el campo, ligado con
+     aria-describedby, y al enviar el foco va al primero (O1-10a). Sin campo propio (tarifa) solo va en el resumen. */
+  const stepErrors = (s: number): { k: string; m: string }[] => {
+    const e: { k: string; m: string }[] = [];
+    const add = (k: string, m: string) => e.push({ k, m });
     if (s === 0) {
-      if (f.name.trim().length < 2) e.push("Escribí tu nombre completo");
-      if (!okEmail(f.email)) e.push("Escribí un correo válido: ahí te llega la confirmación");
-      else if (mailBad && mail?.message) e.push(mail.message);
-      if (digits(f.phone).length < 8) e.push("Escribí un teléfono de 8 dígitos");
-      if (f.inv !== "consumidor" && digits(f.id_number).length !== idLen) e.push(f.inv === "fisica" ? "La cédula física tiene 9 dígitos" : "La cédula jurídica tiene 10 dígitos");
-      if (f.inv === "juridica" && f.company.trim().length < 2) e.push("Escribí la razón social");
+      if (f.name.trim().length < 2) add("name", "Escribí tu nombre completo");
+      if (!okEmail(f.email)) add("email", "Escribí un correo válido: ahí te llega la confirmación");
+      else if (mailBad && mail?.message) add("email", mail.message);
+      if (digits(f.phone).length < 8) add("phone", "Escribí un teléfono de 8 dígitos");
+      if (f.inv === "juridica" && f.company.trim().length < 2) add("company", "Escribí la razón social");
+      if (f.inv !== "consumidor" && digits(f.id_number).length !== idLen) add("id_number", f.inv === "fisica" ? "La cédula física tiene 9 dígitos" : "La cédula jurídica tiene 10 dígitos");
     }
     if (s === 1) {
       if (f.dtype === "envio") {
-        if (!f.province || !f.canton) e.push("Elegí provincia y cantón");
-        if (f.address.trim().length < 5) e.push("Escribí la dirección exacta (otras señas)");
-        if (cfg && cfg.shipping_rates.length && !f.rate) e.push("No hay una tarifa de envío para esa zona. Escribinos por WhatsApp.");
+        if (!f.province) add("province", "Elegí la provincia");
+        if (!f.canton) add("canton", "Elegí el cantón");
+        if (f.address.trim().length < 5) add("address", "Escribí la dirección exacta (otras señas)");
+        if (cfg && cfg.shipping_rates.length && !f.rate) add("rate", "No hay una tarifa de envío para esa zona. Escribinos por WhatsApp.");
       }
     }
-    if (s === 2 && !f.method) e.push("Elegí cómo vas a pagar");
-    if (s === 3 && cfg?.terms_required && !f.terms) e.push("Aceptá los términos y condiciones para continuar");
+    if (s === 2 && !f.method) add("method", "Elegí cómo vas a pagar");
+    if (s === 3 && cfg?.terms_required && !f.terms) add("terms", "Aceptá los términos y condiciones para continuar");
     return e;
   };
-  const errs = stepErrors(step);
+  const stepErrs = stepErrors(step);
+  const errs = stepErrs.map((x) => x.m);
+  /** el error de un campo, solo despues de intentar avanzar */
+  const fe = (k: string) => (touched ? stepErrs.find((x) => x.k === k)?.m : undefined) || undefined;
   const goStep = (n: number) => { setStep(n); setTouched(false); setErr(null); window.setTimeout(() => formTop.current?.focus({ preventScroll: false }), 0); window.scrollTo({ top: 0 }); };
-  const showErrs = () => { setTouched(true); window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0); };
+  /* al enviar con errores el foco va al primer campo con error (el resumen de arriba sigue como role=alert) */
+  const formRef = useRef<HTMLFormElement>(null);
+  const showErrs = (list = stepErrs) => {
+    setTouched(true);
+    window.setTimeout(() => {
+      const first = list.map((x) => formRef.current?.querySelector<HTMLElement>(`[data-f="${x.k}"]`)).find(Boolean);
+      if (first) { first.focus(); first.scrollIntoView({ block: "center" }); } else errRef.current?.scrollIntoView({ block: "center" });
+    }, 0);
+  };
   const next = async () => {
     if (errs.length) { showErrs(); return; }
     if (step === 0) {
@@ -243,10 +264,10 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     e?.preventDefault();
     if (step < 3) { await next(); return; }
     for (let s = 0; s < 4; s++) {
-      if (!stepErrors(s).length) continue;
-      if (s !== step) goStep(s);
-      setTouched(true);
-      window.setTimeout(() => errRef.current?.scrollIntoView({ block: "center" }), 0);
+      const list = stepErrors(s);
+      if (!list.length) continue;
+      if (s !== step) { goStep(s); window.setTimeout(() => showErrs(list), 0); return; }
+      showErrs(list);
       return;
     }
     if (!quote || busy) return;
@@ -285,6 +306,8 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   const method = methods.find((m) => m.code === f.method);
   const cantons = f.province ? cfg.provinces[f.province] || [] : [];
   const totalTxt = quote ? money(quote.total, cur) : "…";
+  // ayuda por WhatsApp (O1-10a): con las lineas del carrito y el total, para no tener que explicar nada de nuevo
+  const helpText = `Hola ${S.name}, tengo una duda con mi compra:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}${quote ? `\nTotal: ${money(quote.total, cur)}` : ""}`;
   const summary = <Summary quote={quote} qErr={qErr} cart={cart} cur={cur} setQty={setQty} remove={remove} />;
 
   return (
@@ -304,7 +327,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
         {summary}
       </details>
 
-      <form className="sh-checkout" onSubmit={submit} noValidate>
+      <form ref={formRef} className="sh-checkout" onSubmit={submit} noValidate>
         <div className="sh-form">
           <h1 ref={formTop} tabIndex={-1} style={{ outline: "none" }}><span className="ck-stepno">Paso {step + 1} de 4</span>{STEPS[step]}</h1>
           {/* honeypot: invisible para personas, los bots lo llenan */}
@@ -312,10 +335,10 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
 
           {step === 0 && (
             <fieldset className="sh-fieldset"><legend>Contacto</legend>
-              <Field label="Nombre completo"><input autoComplete="name" value={f.name} onChange={(e) => set("name", e.target.value)} required /></Field>
+              <Field label="Nombre completo" error={fe("name")}><input data-f="name" autoComplete="name" value={f.name} onChange={(e) => set("name", e.target.value)} required /></Field>
               <div className="sh-2">
                 <div>
-                  <Field label="Correo" hint="Ahí te llega la confirmación y el enlace para seguir tu pedido."><input type="email" inputMode="email" autoComplete="email" value={f.email} onChange={(e) => set("email", e.target.value)} onBlur={(e) => void checkMail(e.target.value)} aria-invalid={mailBad || undefined} required /></Field>
+                  <Field label="Correo" hint="Ahí te llega la confirmación y el enlace para seguir tu pedido." error={fe("email")}><input data-f="email" type="email" inputMode="email" autoComplete="email" value={f.email} onChange={(e) => set("email", e.target.value)} onBlur={(e) => void checkMail(e.target.value)} aria-invalid={mailBad || undefined} required /></Field>
                   {checkingMail && <p className="sh-note ck-mail" role="status">Revisando el correo…</p>}
                   {!checkingMail && mail && mail.email === f.email.trim() && (mailBad || mail.suggestion) && (
                     <p className={`ck-mail${mailBad ? " ck-mail--bad" : ""}`} role="status">
@@ -324,7 +347,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                     </p>
                   )}
                 </div>
-                <Field label="Teléfono / WhatsApp"><input type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} placeholder="8888 8888" required /></Field>
+                <Field label="Teléfono / WhatsApp" error={fe("phone")}><input data-f="phone" type="tel" inputMode="tel" autoComplete="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} placeholder="8888 8888" required /></Field>
               </div>
               <div className="sh-field"><span className="ck-label">Factura electrónica</span>
                 <div className="ck-seg" role="radiogroup" aria-label="Factura electrónica">
@@ -333,10 +356,10 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                   ))}
                 </div>
               </div>
-              {f.inv === "juridica" && <Field label="Razón social"><input autoComplete="organization" value={f.company} onChange={(e) => set("company", e.target.value)} /></Field>}
-              {f.inv !== "consumidor" && <Field label={f.inv === "fisica" ? "Cédula física (9 dígitos)" : "Cédula jurídica (10 dígitos)"}><input inputMode="numeric" value={f.id_number} onChange={(e) => set("id_number", e.target.value)} placeholder={f.inv === "fisica" ? "1 2345 6789" : "3 101 123456"} /></Field>}
+              {f.inv === "juridica" && <Field label="Razón social" error={fe("company")}><input data-f="company" autoComplete="organization" value={f.company} onChange={(e) => set("company", e.target.value)} /></Field>}
+              {f.inv !== "consumidor" && <Field label={f.inv === "fisica" ? "Cédula física (9 dígitos)" : "Cédula jurídica (10 dígitos)"} error={fe("id_number")}><input data-f="id_number" inputMode="numeric" value={f.id_number} onChange={(e) => set("id_number", e.target.value)} placeholder={f.inv === "fisica" ? "1 2345 6789" : "3 101 123456"} /></Field>}
               {!!cfg?.sellers?.length && (
-                <Field label="Vendedor que lo atendió (opcional)" hint="Si alguien de nuestro equipo le ayudó con esta compra, elíjalo aquí.">
+                <Field label="Vendedor que te atendió (opcional)" hint="Si alguien de nuestro equipo te ayudó con esta compra, elegilo aquí.">
                   <select value={f.seller || ""} onChange={(e) => set("seller", e.target.value)}>
                     <option value="">Nadie en particular</option>
                     {cfg.sellers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -358,11 +381,11 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               {f.dtype === "envio" && (
                 <fieldset className="sh-fieldset"><legend>Dirección de entrega</legend>
                   <div className="sh-2">
-                    <Field label="Provincia"><select autoComplete="address-level1" value={f.province} onChange={(e) => setF((x) => ({ ...x, province: e.target.value, canton: "" }))}><option value="">Elegí…</option>{Object.keys(cfg.provinces).map((p) => <option key={p}>{p}</option>)}</select></Field>
-                    <Field label="Cantón"><select autoComplete="address-level2" value={f.canton} onChange={(e) => set("canton", e.target.value)} disabled={!f.province}><option value="">{f.province ? "Elegí…" : "Primero la provincia"}</option>{cantons.map((c) => <option key={c}>{c}</option>)}</select></Field>
+                    <Field label="Provincia" error={fe("province")}><select data-f="province" autoComplete="address-level1" value={f.province} onChange={(e) => setF((x) => ({ ...x, province: e.target.value, canton: "" }))}><option value="">Elegí…</option>{Object.keys(cfg.provinces).map((p) => <option key={p}>{p}</option>)}</select></Field>
+                    <Field label="Cantón" error={fe("canton")}><select data-f="canton" autoComplete="address-level2" value={f.canton} onChange={(e) => set("canton", e.target.value)} disabled={!f.province}><option value="">{f.province ? "Elegí…" : "Primero la provincia"}</option>{cantons.map((c) => <option key={c}>{c}</option>)}</select></Field>
                   </div>
                   <Field label="Distrito"><input autoComplete="address-level3" value={f.district} onChange={(e) => set("district", e.target.value)} /></Field>
-                  <Field label="Dirección exacta (otras señas)"><textarea autoComplete="street-address" value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="Del parque 200 m norte, casa blanca de portón negro" /></Field>
+                  <Field label="Dirección exacta (otras señas)" error={fe("address")}><textarea data-f="address" autoComplete="street-address" value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="Del parque 200 m norte, casa blanca de portón negro" /></Field>
                   {Number(cfg.free_shipping_from) > 0 && <p className="ck-ok" style={{ fontWeight: 500 }}><Ico d={IC.truck} size={14} /> Envío gratis en compras desde {money(cfg.free_shipping_from as number, cur)}</p>}
                   {shipRates.length > 0 && (
                     <div className="sh-field"><span className="ck-label">Tarifa de envío</span>
@@ -385,25 +408,29 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
 
           {step === 2 && (
             <>
-              <fieldset className="sh-fieldset"><legend>¿Cómo vas a pagar?</legend>
-                <div className="sh-choice">{methods.map((m) => (
-                  <label key={m.code} className="sh-opt"><input type="radio" name="pay" checked={f.method === m.code} onChange={() => set("method", m.code)} />
-                    <span>{m.label}{m.simulated && <em className="ck-tag">Modo de prueba</em>}<small>{m.hint}</small></span><span /></label>
+              <fieldset className="sh-fieldset" aria-describedby={fe("method") ? "ck-err-method" : undefined}><legend>¿Cómo vas a pagar?</legend>
+                <div className="sh-choice">{methods.map((m, i) => (
+                  <label key={m.code} className="sh-opt"><input type="radio" name="pay" data-f={i === 0 ? "method" : undefined} checked={f.method === m.code} onChange={() => set("method", m.code)} aria-invalid={fe("method") ? true : undefined} />
+                    <span>{methodLabel(m)}{m.simulated && <em className="ck-tag">Modo de prueba</em>}<small>{methodHint(m)}</small></span><span /></label>
                 ))}</div>
+                {fe("method") && <small id="ck-err-method" className="ck-ferr">{fe("method")}</small>}
                 {hiddenCash && <p className="sh-note" style={{ margin: 0 }}>El pago en efectivo es solo para retiro en sitio.</p>}
                 {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tu pedido se confirma cuando subís el comprobante: hacelo cuanto antes.</p>}
-                {method?.code === "tarjeta" && (method.simulated
-                  ? <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>
-                  : <p className="sh-note" style={{ margin: 0 }}><Ico d={IC.lock} size={14} /> Te llevamos a la página segura de ONVO. Nunca vemos los datos de tu tarjeta.</p>)}
+                {method?.code === "tarjeta" && method.simulated && <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>}
               </fieldset>
-              <fieldset className="sh-fieldset"><legend>Cupón</legend>
-                <div className="ck-coupon">
-                  <input aria-label="Código de cupón" value={f.coupon} onChange={(e) => set("coupon", e.target.value.toUpperCase())} autoCapitalize="characters" placeholder="CÓDIGO" />
-                  {coupon ? <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => { setCoupon(null); set("coupon", ""); }}>Quitar</button>
-                    : <button type="button" className="sh-btn sh-btn--sm" onClick={applyCoupon} disabled={!f.coupon.trim()}>Aplicar</button>}
-                </div>
-                {coupon && <p className="ck-ok" role="status"><Ico d={IC.check} size={14} /> Cupón {coupon} aplicado</p>}
-              </fieldset>
+              <div className="ck-cpn">
+                <button type="button" className="ck-link ck-cpn__toggle" aria-expanded={couponOpen} aria-controls="ck-cupon" onClick={() => setCouponOpen((o) => !o)}>¿Tenés un cupón?</button>
+                {couponOpen && (
+                  <div id="ck-cupon" className="ck-cpn__box">
+                    <div className="ck-coupon">
+                      <input aria-label="Código de cupón" value={f.coupon} onChange={(e) => set("coupon", e.target.value.toUpperCase())} autoCapitalize="characters" placeholder="CÓDIGO" />
+                      {coupon ? <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => { setCoupon(null); set("coupon", ""); }}>Quitar</button>
+                        : <button type="button" className="sh-btn sh-btn--sm" onClick={applyCoupon} disabled={!f.coupon.trim()}>Aplicar</button>}
+                    </div>
+                    {coupon && <p className="ck-ok" role="status"><Ico d={IC.check} size={14} /> Cupón {coupon} aplicado</p>}
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -412,15 +439,16 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               <div className="sh-fieldset ck-review">
                 <div><span className="sh-meta">Contacto</span><b>{f.name}</b><span>{f.email} · {f.phone}</span>{f.inv !== "consumidor" && <span>Factura a {f.inv === "juridica" ? f.company : f.name} · céd. {digits(f.id_number)}</span>}<button type="button" className="ck-edit" onClick={() => goStep(0)}>Cambiar</button></div>
                 <div><span className="sh-meta">Entrega</span>{f.dtype === "retiro" ? <><b>Retiro en sitio</b><span>{cfg.pickup?.address}</span></> : <><b>{f.rate || "Envío"}</b><span>{[f.address, f.district, f.canton, f.province].filter(Boolean).join(", ")}</span></>}<button type="button" className="ck-edit" onClick={() => goStep(1)}>Cambiar</button></div>
-                <div><span className="sh-meta">Pago</span><b>{method?.label}</b>{coupon && <span>Cupón {coupon}</span>}<button type="button" className="ck-edit" onClick={() => goStep(2)}>Cambiar</button></div>
+                <div><span className="sh-meta">Pago</span><b>{method ? methodLabel(method) : ""}</b>{coupon && <span>Cupón {coupon}</span>}<button type="button" className="ck-edit" onClick={() => goStep(2)}>Cambiar</button></div>
               </div>
               <fieldset className="sh-fieldset"><legend>Nota del pedido</legend>
                 <Field label="¿Algo que debamos saber? (opcional)"><textarea value={f.notes} maxLength={1000} onChange={(e) => set("notes", e.target.value)} placeholder="Horario para recibir, referencia, instalación…" /></Field>
               </fieldset>
               <label className="ck-check">
-                <input type="checkbox" checked={f.terms} onChange={(e) => set("terms", e.target.checked)} />
+                <input type="checkbox" data-f="terms" checked={f.terms} onChange={(e) => set("terms", e.target.checked)} aria-invalid={fe("terms") ? true : undefined} aria-describedby={fe("terms") ? "ck-err-terms" : undefined} />
                 <span>Acepto los {S.legal?.terms ? <button type="button" className="ck-link" onClick={() => setShowTerms(true)} aria-haspopup="dialog">términos y condiciones</button> : "términos y condiciones"} de compra{cfg.terms_required ? "" : " (opcional)"}</span>
               </label>
+              {fe("terms") && <small id="ck-err-terms" className="ck-ferr">{fe("terms")}</small>}
             </>
           )}
 
@@ -432,6 +460,13 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               {step < 3 ? <>Continuar<Ico d={IC.next} size={16} /></> : busy ? "Enviando…" : <>Confirmar pedido · {totalTxt}</>}
             </button>
           </div>
+          {step === 3 && cfg.auto_invoice && <p className="ck-trust"><Ico d={IC.check} size={14} />Factura electrónica</p>}
+          {cfg.whatsapp && (
+            <p className="ck-help">
+              <a className="ck-link" href={wa(cfg.whatsapp, helpText)} target="_blank" rel="noopener noreferrer" aria-describedby="ck-help-wa"><Ico d={IC.wa} size={14} />¿Dudas? Escribinos por WhatsApp</a>
+              <small id="ck-help-wa">Se abre WhatsApp</small>
+            </p>
+          )}
         </div>
         <aside className="sh-summary sh-panel ck-aside" aria-label="Resumen del pedido">{summary}</aside>
       </form>
