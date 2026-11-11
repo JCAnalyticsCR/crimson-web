@@ -18,6 +18,8 @@ type Detail = VProd & {
   seo?: SeoBlock | null;
   /** O3-01 (aditivo): meses de garantia del fabricante; solo se publica con el candado legal (O1-00) */
   warranty_months?: number | null;
+  /** O3-04: «hogar» (audio, hogar...) no ofrece instalacion y sus sugeridos son «Combiná con» */
+  family?: "seguridad" | "hogar";
 };
 
 /** «¿Lo instalamos nosotros?» solo en seguridad y redes */
@@ -146,7 +148,8 @@ ${url}`) : "";
   const inCompare = ctx.compare.includes(d.id);
   const buyable = !ask && !soldOut;
   const enCarrito = ctx.cartQty?.(d.id) ?? 0;
-  const instalable = INSTALABLE.test([d.category, d.type, ...d.breadcrumbs.map((b) => b.name)].filter(Boolean).join(" "));
+  // O3-04: el API dice la familia (seguridad/hogar); sin ese dato, la regla de la vitrina por categoria y tipo
+  const instalable = d.family ? d.family !== "hogar" : INSTALABLE.test([d.category, d.type, ...d.breadcrumbs.map((b) => b.name)].filter(Boolean).join(" "));
   // fila de confianza: garantia y devoluciones solo con el candado legal (O1-00) y con el dato; sin candado, lo demas
   const factura = ctx.shipping?.invoice ?? true;
   const garantia = ctx.trustOk && d.warranty_months ? `Garantía: ${d.warranty_months} meses del fabricante` : "";
@@ -282,7 +285,7 @@ ${url}`) : "";
 
       {d.accessories.length > 0 && (
         <section className="vt-sec" aria-labelledby="vt-acc">
-          <div className="vt-sec__head"><div><span className="sh-eyebrow">Para que funcione completo</span><h2 id="vt-acc">¿Qué necesito además?</h2></div><Link className="vt-more" to={to("/arma-tu-sistema")}>Armar el sistema completo</Link></div>
+          <div className="vt-sec__head"><div><span className="sh-eyebrow">{d.family === "hogar" ? "De la misma línea" : "Para que funcione completo"}</span><h2 id="vt-acc">{d.family === "hogar" ? "Combiná con" : "¿Qué necesito además?"}</h2></div>{d.family !== "hogar" && <Link className="vt-more" to={to("/arma-tu-sistema")}>Armar el sistema completo</Link>}</div>
           <div className="vt-acc">
             {d.accessories.map((g) => (
               <div key={g.title} className="vt-acc__group">

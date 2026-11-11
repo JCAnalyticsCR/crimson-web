@@ -6,10 +6,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useFocusTrap, useHead, usePath, useStore, type SeoBlock, type VProd } from "./storeKit";
-import { filterCatalog, snapToVProd, type CatalogResult } from "./catalogFilter";
+import { filterCatalog, snapToVProd, type CatalogResult, type FamilyGroup } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
-type Facets = { brands: { name: string; count: number }[]; types: { name: string; count: number }[]; availability: { disponible: number; bajo_pedido: number }; price: { min: number; max: number } };
+type Facets = { brands: { name: string; count: number }[]; types: { name: string; count: number }[]; availability: { disponible: number; bajo_pedido: number }; price: { min: number; max: number }; groups?: FamilyGroup[] };
 type CatInfo = { id: number; name: string; slug: string; description: string | null; parent: { name: string; path: string } | null; children: { name: string; path: string }[] };
 type NavCat = { name: string; path: string; count: number };
 type Res = { items: VProd[]; total: number; category: CatInfo | null; facets: Facets; currency: string; nav: NavCat[]; seo?: SeoBlock | null };
@@ -30,6 +30,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   const min = sp.get("min") || "";
   const max = sp.get("max") || "";
   const disp = sp.get("disp") || "";
+  const ff = sp.getAll("f"); // O3-04: filtros propios de la familia («grupo:valor»)
   const sort = sp.get("orden") || "relevance";
 
   const qs = useMemo(() => {
@@ -41,8 +42,9 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     if (min) s.set("min_price", min);
     if (max) s.set("max_price", max);
     if (disp) s.set("avail", disp);
+    ff.forEach((x) => s.append("f", x));
     return s.toString();
-  }, [q, mode, cat, brands.join("|"), tipo, min, max, disp, sort]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, mode, cat, brands.join("|"), tipo, min, max, disp, sort, ff.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Snapshot: filtrado instantáneo en el navegador ─────────────────────────
   const { snap } = useSnapshot(ctx.slug);
@@ -61,12 +63,13 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
       min: min ? Number(min.replace(/\D/g, "")) : undefined,
       max: max ? Number(max.replace(/\D/g, "")) : undefined,
       avail: disp || undefined,
+      f: ff.length ? ff : undefined,
       sort,
       limit: 99999, // todos los resultados; paginamos localmente con displayLimit
       live,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort, live]);
+  }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort, live, ff.join("|")]);
 
   /** Cuántos productos mostrar en el modo snapshot: «Ver 24 más» lo guarda en ?pagina=N (O1-14; el mismo parámetro de
       O2-01c), así volver de una ficha no pierde el lugar. */
@@ -150,7 +153,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     setSp(n, { replace: true });
   }, [sp, setSp]);
   const clearAll = () => setSp(q ? new URLSearchParams({ q }) : new URLSearchParams(), { replace: true });
-  const activeCount = brands.length + (tipo ? 1 : 0) + (min || max ? 1 : 0) + (disp ? 1 : 0);
+  const activeCount = brands.length + (tipo ? 1 : 0) + (min || max ? 1 : 0) + (disp ? 1 : 0) + ff.length;
 
   const catMissing = mode === "category" && !!snapResult && !snapResult.category;
   const title = mode === "search" ? (q ? `Resultados para “${q}”` : "Buscar") : res?.category?.name || (mode === "category" ? "Categoría" : "Catálogo completo");
@@ -181,7 +184,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   if (res?.category?.parent) crumbs.push({ name: res.category.parent.name, path: res.category.parent.path });
   crumbs.push({ name: mode === "search" ? "Búsqueda" : title });
 
-  const filters = res && <Filters f={res.facets} cur={res.currency} brands={brands} tipo={tipo} min={min} max={max} disp={disp} set={set} />;
+  const filters = res && <Filters f={res.facets} cur={res.currency} brands={brands} tipo={tipo} min={min} max={max} disp={disp} ff={ff} set={set} />;
   return (
     <div className="sh-wrap vt-catalog">
       <Crumbs items={crumbs} />
@@ -216,6 +219,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
               {brands.map((b) => <button key={b} className="vt-tag" onClick={() => set({ marca: brands.filter((x) => x !== b) })}>{b}<Ico d={IC.x} size={14} /></button>)}
               {tipo && <button className="vt-tag" onClick={() => set({ tipo: null })}>{tipo}<Ico d={IC.x} size={14} /></button>}
               {(min || max) && <button className="vt-tag" onClick={() => set({ min: null, max: null })}>{min ? money(min, res?.currency) : "0"} – {max ? money(max, res?.currency) : "∞"}<Ico d={IC.x} size={14} /></button>}
+              {ff.map((x) => <button key={x} className="vt-tag" onClick={() => set({ f: ff.filter((y) => y !== x) })}>{x.slice(x.indexOf(":") + 1)}<Ico d={IC.x} size={14} /></button>)}
               {disp && <button className="vt-tag" onClick={() => set({ disp: null })}>{disp === "inmediata" ? "Entrega inmediata" : "Disponible o bajo pedido"}<Ico d={IC.x} size={14} /></button>}
               <button className="vt-clear" onClick={clearAll}>Limpiar todo</button>
             </div>
@@ -250,7 +254,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   );
 }
 
-function Filters({ f, cur, brands, tipo, min, max, disp, set }: { f: Facets; cur: string; brands: string[]; tipo: string; min: string; max: string; disp: string; set: (p: Record<string, string | string[] | null>) => void }) {
+function Filters({ f, cur, brands, tipo, min, max, disp, ff = [], set }: { f: Facets; cur: string; brands: string[]; tipo: string; min: string; max: string; disp: string; ff?: string[]; set: (p: Record<string, string | string[] | null>) => void }) {
   const [lo, setLo] = useState(min);
   const [hi, setHi] = useState(max);
   useEffect(() => { setLo(min); setHi(max); }, [min, max]);
@@ -274,6 +278,18 @@ function Filters({ f, cur, brands, tipo, min, max, disp, set }: { f: Facets; cur
           {f.types.map((t) => <label key={t.name} className="vt-check"><input type="radio" name="tipo" checked={tipo === t.name} onChange={() => set({ tipo: t.name })} /><span>{t.name}</span><i>{t.count}</i></label>)}
         </fieldset>
       )}
+      {(f.groups || []).map((g) => {
+        /* O3-04: filtros propios de la familia; uno por grupo (como «Tipo de equipo») */
+        const sel = ff.find((x) => x.startsWith(`${g.key}:`)) || "";
+        const others = ff.filter((x) => !x.startsWith(`${g.key}:`));
+        return (
+          <fieldset key={g.key} className="vt-fgroup">
+            <legend>{g.label}</legend>
+            <label className="vt-check"><input type="radio" name={`f-${g.key}`} checked={!sel} onChange={() => set({ f: others })} /><span>Todos</span></label>
+            {g.values.map((v) => <label key={v.name} className="vt-check"><input type="radio" name={`f-${g.key}`} checked={sel === `${g.key}:${v.name}`} onChange={() => set({ f: [...others, `${g.key}:${v.name}`] })} /><span>{v.name}</span><i>{v.count}</i></label>)}
+          </fieldset>
+        );
+      })}
       {f.brands.length > 0 && (
         <fieldset className="vt-fgroup">
           <legend>Marca</legend>

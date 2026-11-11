@@ -27,6 +27,8 @@ export type SnapProduct = {
   compare_display_price?: number | null;
   /** O2-06 (aditivo): datos clave de la tarjeta; un snapshot viejo no los trae */
   ks?: string[];
+  /** O3-04: familia (camaras, parlantes, switches, ups) y el valor de cada filtro propio, calculados por el API */
+  fam?: string; fa?: Record<string, string>;
 };
 
 export type SnapCategory = {
@@ -65,6 +67,8 @@ export type CatalogParams = {
   min?: number; max?: number;
   avail?: string; sort?: string;
   limit?: number; offset?: number;
+  /** O3-04: filtros propios de la familia, «grupo:valor» (?f=) */
+  f?: string[];
   /** O1-13: estado en vivo (/availability) de los productos que la pagina ya consulto; manda sobre el del snapshot
       para «Entrega inmediata» y el orden. Estados del API (en_bodega, bajo_pedido...) o de la vitrina (disponible, ultimas). */
   live?: Record<number, string>;
@@ -78,7 +82,43 @@ export type CatalogFacets = {
   types: { name: string; count: number }[];
   availability: { disponible: number; bajo_pedido: number };
   price: { min: number; max: number };
+  /** O3-04: filtros propios de la familia de la pagina (4 como maximo); falta en un API viejo */
+  groups?: FamilyGroup[];
 };
+export type FamilyGroup = { key: string; label: string; values: { name: string; count: number }[] };
+
+/* O3-04: los mismos grupos que api/app/services/family_filters.py (GROUPS y ORDER). Los valores ya vienen calculados
+   en el snapshot («fa»); aqui solo se cuentan y se filtran. */
+const FAMILY_GROUPS: Record<string, [string, string][]> = {
+  camaras: [["resolucion", "Resolución"], ["ambiente", "Interior o exterior"], ["conexion", "Conexión"]],
+  parlantes: [["potencia", "Potencia"], ["agua", "Resistencia al agua"]],
+  switches: [["puertos", "Puertos"], ["poe", "PoE"]],
+  ups: [["capacidad", "Capacidad"]],
+};
+const FAMILY_ORDER: Record<string, string[]> = {
+  resolucion: ["1 MP", "2 MP", "3 MP", "4 MP", "5 MP", "6 MP", "8 MP (4K)", "12 MP"],
+  ambiente: ["Interior", "Exterior"],
+  conexion: ["WiFi", "PoE", "Analógica"],
+  potencia: ["Menos de 10 W", "10 a 30 W", "30 a 100 W", "100 W o más"],
+  puertos: ["4 puertos", "5 puertos", "8 puertos", "16 puertos", "24 puertos", "48 puertos"],
+  poe: ["Con PoE", "Sin PoE"],
+  capacidad: ["Hasta 750 VA", "751 a 1500 VA", "Más de 1500 VA"],
+};
+/** «grupo:valor» -> {grupo: valor} (el ultimo gana), como family_filters.parse */
+export function parseFamilyFilters(values: string[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const v of values || []) { const i = v.indexOf(":"); if (i > 0 && i < v.length - 1) out[v.slice(0, i).trim()] = v.slice(i + 1).trim(); }
+  return out;
+}
+/** la familia de la pagina: la de 60 % o mas de lo que se ve (family_filters.dominant) */
+function dominantFamily(fams: (string | undefined)[]): string | null {
+  const seen = fams.filter(Boolean) as string[];
+  if (!fams.length || !seen.length) return null;
+  const n: Record<string, number> = {};
+  for (const f of seen) n[f] = (n[f] || 0) + 1;
+  const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
+  return best[1] / fams.length >= 0.6 ? best[0] : null;
+}
 
 export type CatalogResult = {
   items: SnapProduct[];
@@ -190,8 +230,9 @@ function cmpDefault(a: SnapProduct, b: SnapProduct): number {
 export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogResult {
   const {
     q = "", category, brands: brandsParam = [], tipo,
-    min, max, avail, sort = "relevance", limit = 24, offset = 0, live,
+    min, max, avail, sort = "relevance", limit = 24, offset = 0, live, f,
   } = params;
+  const ffil = parseFamilyFilters(f);
   /** el estado que manda: el vivo si la pagina ya lo pidio, si no el del snapshot */
   const stateOf = (p: SnapProduct): string => {
     const v = live?.[p.id];
@@ -277,6 +318,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
       if ((avail === "disponible" || avail === "inmediata") && st !== "en_bodega") return false;
       if (avail === "bajo_pedido" && st !== "en_bodega" && st !== "bajo_pedido") return false;
     }
+    for (const [g, v] of Object.entries(ffil)) if (skip !== g && (p.fa?.[g] ?? null) !== v) return false;
     return true;
   }
 
@@ -303,6 +345,21 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
     .filter((p) => keep(p, "price") && p.display_price > 0)
     .map((p) => p.display_price);
 
+  // O3-04: los filtros propios de la familia (solo en una categoria; el mismo calculo del API)
+  const pageFamily = catObj ? dominantFamily(pool.map((p) => p.fam)) : null;
+  const groups: FamilyGroup[] = [];
+  for (const [g, label] of (pageFamily ? FAMILY_GROUPS[pageFamily] || [] : []).slice(0, 4)) {
+    const cnt: Record<string, number> = {};
+    let n = 0;
+    for (const p of pool) { if (!keep(p, g)) continue; n++; const v = p.fa?.[g]; if (v) cnt[v] = (cnt[v] || 0) + 1; }
+    const sum = Object.values(cnt).reduce((a, b) => a + b, 0);
+    if (Object.keys(cnt).length > 1 || (sum > 0 && sum < n) || g in ffil) { // un grupo que no acota nada no se ofrece
+      const order = FAMILY_ORDER[g] || [];
+      const rank = (k: string) => (order.indexOf(k) >= 0 ? order.indexOf(k) : order.length);
+      groups.push({ key: g, label, values: Object.entries(cnt).sort(([a], [b]) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0)).map(([name, count]) => ({ name, count })) });
+    }
+  }
+
   const facets: CatalogFacets = {
     brands: Object.entries(fb)
       .sort(([a, na], [b, nb]) =>
@@ -318,6 +375,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
       min: priced.length ? Math.min(...priced) : 0,
       max: priced.length ? Math.max(...priced) : 0,
     },
+    groups,
   };
 
   // ── Ordenamiento ────────────────────────────────────────────────────────────

@@ -1,0 +1,228 @@
+{
+ "categoria": "Parlantes de prueba",
+ "madre": "Audio de prueba",
+ "productos": [
+  {
+   "id": 1,
+   "name": "Parlante JBL Charge 6 45W bluetooth a prueba de agua",
+   "price": 1900,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "30 a 100 W",
+    "agua": "Resistente al agua"
+   }
+  },
+  {
+   "id": 2,
+   "name": "Parlante JBL Go 4 bluetooth 4.2W IP67",
+   "price": 1500,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "Menos de 10 W",
+    "agua": "Resistente al agua"
+   }
+  },
+  {
+   "id": 3,
+   "name": "Parlante Argom Ultrabass 20W bluetooth",
+   "price": 1200,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "10 a 30 W"
+   }
+  },
+  {
+   "id": 4,
+   "name": "Parlante Xiaomi 16W bluetooth",
+   "price": 1300,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "10 a 30 W"
+   }
+  },
+  {
+   "id": 5,
+   "name": "Parlante JBL Xtreme 4 100W bluetooth IP67",
+   "price": 2000,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "100 W o más",
+    "agua": "Resistente al agua"
+   }
+  },
+  {
+   "id": 6,
+   "name": "Barra de sonido LG 300W bluetooth",
+   "price": 1800,
+   "type": "Parlantes de prueba",
+   "fam": "parlantes",
+   "fa": {
+    "potencia": "100 W o más"
+   }
+  }
+ ],
+ "casos": [
+  {
+   "f": [],
+   "ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "groups": [
+    {
+     "key": "potencia",
+     "label": "Potencia",
+     "values": [
+      {
+       "name": "Menos de 10 W",
+       "count": 1
+      },
+      {
+       "name": "10 a 30 W",
+       "count": 2
+      },
+      {
+       "name": "30 a 100 W",
+       "count": 1
+      },
+      {
+       "name": "100 W o más",
+       "count": 2
+      }
+     ]
+    },
+    {
+     "key": "agua",
+     "label": "Resistencia al agua",
+     "values": [
+      {
+       "name": "Resistente al agua",
+       "count": 3
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "f": [
+    "potencia:10 a 30 W"
+   ],
+   "ids": [
+    3,
+    4
+   ],
+   "groups": [
+    {
+     "key": "potencia",
+     "label": "Potencia",
+     "values": [
+      {
+       "name": "Menos de 10 W",
+       "count": 1
+      },
+      {
+       "name": "10 a 30 W",
+       "count": 2
+      },
+      {
+       "name": "30 a 100 W",
+       "count": 1
+      },
+      {
+       "name": "100 W o más",
+       "count": 2
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "f": [
+    "agua:Resistente al agua"
+   ],
+   "ids": [
+    1,
+    2,
+    5
+   ],
+   "groups": [
+    {
+     "key": "potencia",
+     "label": "Potencia",
+     "values": [
+      {
+       "name": "Menos de 10 W",
+       "count": 1
+      },
+      {
+       "name": "30 a 100 W",
+       "count": 1
+      },
+      {
+       "name": "100 W o más",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "key": "agua",
+     "label": "Resistencia al agua",
+     "values": [
+      {
+       "name": "Resistente al agua",
+       "count": 3
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "f": [
+    "potencia:30 a 100 W",
+    "agua:Resistente al agua"
+   ],
+   "ids": [
+    1
+   ],
+   "groups": [
+    {
+     "key": "potencia",
+     "label": "Potencia",
+     "values": [
+      {
+       "name": "Menos de 10 W",
+       "count": 1
+      },
+      {
+       "name": "30 a 100 W",
+       "count": 1
+      },
+      {
+       "name": "100 W o más",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "key": "agua",
+     "label": "Resistencia al agua",
+     "values": [
+      {
+       "name": "Resistente al agua",
+       "count": 1
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

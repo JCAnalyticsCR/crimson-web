@@ -8,6 +8,8 @@ externo, y ninguna publica nada (solo proponen borradores que un administrador a
 - web_description (O3-06, «descripcion_v1»): solo para lo que no tiene texto propio (o solo la linea del proveedor en
   mayusculas); una frase de plantilla por familia y de 3 a 5 viñetas con los datos de la ficha APROBADA (web_specs) o
   escrita a mano (specs). Sin adjetivos que el dato no sostenga.
+- web_type (O3-04, «tipo_v1»): solo para lo que hoy sale SIN tipo; el que dice el comienzo del nombre («Parlante…»,
+  «Router…») o, si no, la categoria en singular. La llave de los kits (product_type) no cambia.
 """
 
 from __future__ import annotations
@@ -38,6 +40,18 @@ def _description(p, ctx: cd.GenCtx):
     return text, ("pocos datos" if text and "\n" not in text else None)
 
 
+def _type(p, ctx: cd.GenCtx):
+    if ctx.dtype(p):
+        return None, None  # ya tiene tipo: no se propone otro
+    lead, _ = product_names._type_lead(product_names._clean_source(p.name))
+    if lead:
+        return lead, None
+    leaf = ctx.chain.get(p.category_id, (None, None))[0]
+    single = product_names._singular(leaf)
+    return (single, "tipo por categoria") if single else (None, None)
+
+
 cd.register("web_name", "nombre_v1", _name)
 cd.register("web_specs", "ficha_v1", _specs)
 cd.register("web_description", "descripcion_v1", _description)
+cd.register("web_type", "tipo_v1", _type)

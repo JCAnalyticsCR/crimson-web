@@ -28,6 +28,7 @@ from ..models import Category, Opportunity, Product, ProductTax, Tenant
 from ..services import catalog_fichas as cfichas
 from ..services import catalog_text as ctext
 from ..services import category_paths
+from ..services import family_filters as ff
 from ..services import product_typing as pt
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
@@ -649,9 +650,20 @@ class Ctx:
         self.cat_chain = pt.category_chain(self.cats)
 
     def dtype(self, p: Product) -> str:
-        """el tipo que se muestra y se filtra (O1-08, services/product_typing); el funcional (kits) es sv.product_type"""
+        """el tipo que se muestra y se filtra (O1-08, services/product_typing); el funcional (kits) es sv.product_type.
+        O3-04: el corregido a mano por producto (web_type) siempre gana."""
+        if p.web_type:
+            return p.web_type
         leaf, top = self.cat_chain.get(p.category_id, (None, None))
         return pt.display_type(p, leaf, top)
+
+    def leaf(self, p: Product) -> str | None:
+        return self.cat_chain.get(p.category_id, (None, None))[0]
+
+    def family(self, p: Product) -> str:
+        """O3-04: «seguridad» (seguridad, redes y energia) u «hogar» (audio, hogar, computo...): la ficha se adapta"""
+        top = self.cat_chain.get(p.category_id, (None, None))[1]
+        return "seguridad" if pt.functional_family(top) else "hogar"
 
     _frozen: set[int] | None = None
 
@@ -961,6 +973,7 @@ def catalog(
     min_price: Decimal | None = Query(None, ge=0),
     max_price: Decimal | None = Query(None, ge=0),
     avail: str | None = Query(None, pattern="^(disponible|bajo_pedido|inmediata)$"),
+    f: list[str] | None = Query(None, max_length=8),
     sort: str = Query("relevance", pattern=SORTS),
     ids: str | None = Query(None, max_length=200),
     limit: int = Query(24, ge=1, le=60),
@@ -1014,6 +1027,11 @@ def catalog(
                 scores[p.id] = s
         prods = [p for p in prods if p.id in scores]
 
+    # O3-04: filtros propios de la familia de la pagina (services/family_filters), con el mismo calculo del snapshot
+    ffil = ff.parse(f)
+    fam_of = {p.id: ff.family(types[p.id], ctx.leaf(p)) for p in prods}
+    page_family = ff.dominant(list(fam_of.values())) if cat_obj else None
+    fattrs = {p.id: ff.attrs(p, types[p.id], ctx.leaf(p)) for p in prods if fam_of[p.id]} if (page_family or ffil) else {}
     disp = {p.id: _gross(ctx.pricer.of(p, p.price), float(p.taxes[0].tax.rate) if p.taxes else 13) for p in prods}
     av = {p.id: (stock_all.get(p.id) or {}).get("state") for p in prods}
     # O3-02: la marca se compara en version compacta (una direccion vieja con «Tp Link» sigue filtrando TP-Link)
@@ -1036,6 +1054,9 @@ def catalog(
                 return False
             if avail == "bajo_pedido" and st not in ("en_bodega", "bajo_pedido"):
                 return False
+        for g, v in ffil.items():
+            if skip != g and (fattrs.get(p.id) or {}).get(g) != v:
+                return False
         return True
 
     rows = [p for p in prods if keep(p)]
@@ -1056,6 +1077,18 @@ def catalog(
             if st in ("en_bodega", "bajo_pedido"):
                 facet_av["bajo_pedido"] += 1
     priced = [disp[p.id] for p in prods if keep(p, "price") and disp[p.id] > 0]
+    groups = []
+    for g, label in ff.GROUPS.get(page_family or "", ())[: ff.MAX_GROUPS]:
+        cnt: dict[str, int] = {}
+        n_ = 0
+        for p in prods:
+            if keep(p, g):
+                n_ += 1
+                v = (fattrs.get(p.id) or {}).get(g)
+                if v:
+                    cnt[v] = cnt.get(v, 0) + 1
+        if len(cnt) > 1 or (cnt and sum(cnt.values()) < n_) or g in ffil:  # un grupo que no acota nada no se ofrece
+            groups.append({"key": g, "label": label, "values": ff.sort_values(g, cnt)})
 
     if sort == "relevance":  # primero lo que se puede comprar ya (lo propio), luego bajo pedido
         rows.sort(key=lambda p: (-scores.get(p.id, 0), sort_key(stock_all.get(p.id)), _rank_default(p)))
@@ -1100,6 +1133,7 @@ def catalog(
             "types": [{"name": k, "count": n} for k, n in sorted(facet_type.items(), key=lambda x: (-x[1], x[0]))],
             "availability": facet_av,
             "price": {"min": min(priced) if priced else 0, "max": max(priced) if priced else 0},
+            "groups": groups,  # O3-04: los de la familia de la pagina (4 como maximo)
         },
         "currency": ctx.pricer.currency,
         "nav": nav,
@@ -1165,11 +1199,20 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
     # WiFi»); sin ocultos ni agotados y primero lo que se puede comprar. La disponibilidad se pide solo para un tramo
     # acotado de candidatos (no para todo el catalogo).
     ptype = ctx.dtype(p)
-    related = [r for r in prods if r.id != p.id and r.category_id == p.category_id and ctx.dtype(r) == ptype and r.images]
-    related += [r for r in prods if r.id != p.id and r not in related and r.category_id == p.category_id and r.images]
-    related += [r for r in prods if r.id != p.id and r not in related and p.brand and r.brand == p.brand and r.images]
-    related = sorted(related[:48], key=lambda r: (r.brand != p.brand, _rank_default(r)))
-    rules = ACCESSORY_RULES.get(ptype, []) if ptype.startswith(("Cámara", "Grabador")) else []  # solo camaras y grabadores
+
+    # O3-04: relacionados por parecido real: mismo tipo y precio a mas o menos 30 %, los mas cercanos primero (y luego
+    # lo comprable primero, abajo). Si no alcanzan, mismo tipo en su categoria y despues su categoria. Antes: alfabetico.
+    def gross(r: Product) -> Decimal:
+        return _gross(ctx.pricer.of(r), float(r.taxes[0].tax.rate) if r.taxes else 13)
+
+    base = gross(p)
+    same = [r for r in prods if r.id != p.id and r.images and ctx.dtype(r) == ptype] if ptype else []
+    near = sorted((r for r in same if base > 0 and gross(r) > 0 and abs(gross(r) - base) <= base * Decimal("0.3")), key=lambda r: (abs(gross(r) - base), r.id))
+    related = near[:24]
+    related += [r for r in same if r not in related and r.category_id == p.category_id][: max(0, 24 - len(related))]
+    related += [r for r in prods if r.id != p.id and r not in related and r.category_id == p.category_id and r.images][: max(0, 24 - len(related))]
+    fam = ctx.family(p)
+    rules = ACCESSORY_RULES.get(ptype, []) if ptype.startswith(("Cámara", "Grabador")) and fam == "seguridad" else []  # solo camaras y grabadores
     cand_groups = []
 
     def of_kind(r: Product, kinds: tuple[str, ...]) -> bool:
@@ -1182,6 +1225,13 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         cands = [r for r in prods if r.id != p.id and of_kind(r, kinds) and r.price and Decimal(str(r.price)) > 0]
         cands.sort(key=lambda r: (r.brand != p.brand, not r.images, Decimal(str(r.price))))
         cand_groups.append((title, why, cands[:12]))
+    if fam == "hogar" and p.category_id in ctx.cat_chain:
+        # O3-04: en audio y hogar, «Combiná con»: otros tipos de la misma familia (misma categoria madre), con foto y precio
+        top = ctx.cat_chain[p.category_id][1]
+        mates = [r for r in prods if r.id != p.id and r.images and ctx.dtype(r) != ptype and ctx.cat_chain.get(r.category_id, (None, None))[1] == top and gross(r) > 0]
+        mates.sort(key=lambda r: (r.brand != p.brand, abs(gross(r) - base), r.id))
+        if mates:
+            cand_groups.append(("Combiná con", f"Más de {top}", mates[:12]))
     stock = _stock_map(db, t.id, [p, *related, *(r for _, _, c in cand_groups for r in c)])
 
     def shown(r: Product) -> bool:  # ni oculto (ajustes) ni agotado
@@ -1220,6 +1270,8 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         "related": [ctx.card(r, stock.get(r.id)) for r in related],
         "accessories": [{"title": g["title"], "reason": g["reason"], "items": [ctx.card(r, stock.get(r.id)) for r in g["items"]]} for g in groups],
         "whatsapp": ctx.cfg.get("whatsapp") or "",
+        # O3-04: la ficha se adapta: «¿Lo instalamos nosotros?» y «¿Qué necesito además?» solo en seguridad y redes
+        "family": fam,
         "seo": _seo(db, t, out["path"], ctx=ctx, card=out),
     }
 

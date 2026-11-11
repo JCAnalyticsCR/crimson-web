@@ -114,7 +114,7 @@ def build(db: Session, t, ctx) -> bytes:
         _published_light,
         _stock_map,
     )
-    from ..services import store_search
+    from ..services import family_filters, store_search
     from ..services import store_showcase as sv
     from ..services.brands import canonical_brand
     from ..services.catalog_text import public_code, shown_model
@@ -164,6 +164,13 @@ def build(db: Session, t, ctx) -> bytes:
         pc = public_code(p)
         if pc != (p.code or ""):
             items[-1]["public_code"] = pc  # O3-02: el codigo que ve el cliente, solo si difiere del propio
+        dt_ = ctx.dtype(p)
+        fam_ = family_filters.family(dt_, ctx.leaf(p))
+        if fam_:  # O3-04: la familia y los valores de sus filtros ya calculados (el navegador no los recalcula)
+            items[-1]["fam"] = fam_
+            fa_ = family_filters.attrs(p, dt_, ctx.leaf(p))
+            if fa_:
+                items[-1]["fa"] = fa_
         if p.web_name and p.web_name.strip() and p.web_name.strip() != p.name:
             # O3-01: nombre comercial aprobado (solo si hay: el snapshot no crece para el resto)
             items[-1]["display_name"] = p.web_name.strip()
