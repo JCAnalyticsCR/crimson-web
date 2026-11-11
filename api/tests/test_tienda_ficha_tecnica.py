@@ -145,3 +145,11 @@ def test_rangos_y_pulgadas_mal_codificados_se_corrigen():
     assert clean_value("woofer de 10? y tweeter de 1?, 89 dB") == "woofer de 10″ y tweeter de 1″, 89 dB"
     assert clean_value("2 woofers de 8? y 2 tweeters de 2?") == "2 woofers de 8″ y 2 tweeters de 2″"
     assert clean_value("¿Incluye control? Sí") == "¿Incluye control? Sí"  # una pregunta de verdad no se toca
+    assert clean_value("110–300 VCA (L?L)") == "110–300 VCA (L-L)"
+
+
+def test_un_dato_que_sigue_danado_se_omite():
+    from app.services.catalog_fichas import specs_from_text
+
+    s = specs_from_text("\n".join(["- Fiabilidad: temperatura de 0 ~ 40 ? y alta humedad", "- Puertos: 24"]))
+    assert s == {"Puertos": "24"}

@@ -45,6 +45,7 @@ def clean_value(v: str) -> str:
     v = _QRANGE.sub(" – ", v)
     v = _QINCH.sub("″", v)
     v = _QMINUS.sub("−", v)
+    v = re.sub(r"(?<=\b[A-Z])\?(?=[A-Z]\b)", "-", v)  # «L?L» (linea a linea)
     if len(v) <= VALUE_MAX:
         return v
     cut = v[: VALUE_MAX - 1]
@@ -82,7 +83,10 @@ def specs_from_text(text: str | None) -> dict[str, str]:
         k = (k[:1].upper() + k[1:])[:KEY_MAX]
         if k in out:
             continue
-        out[k] = clean_value(v)
+        v = clean_value(v)
+        if re.search(r"\?", re.sub(r"¿[^?]*\?", "", v)):
+            continue  # quedo un caracter danado del proveedor que no se puede reconstruir: mejor sin ese dato
+        out[k] = v
         if len(out) >= SPECS_MAX:
             break
     return out
