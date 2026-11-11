@@ -270,7 +270,7 @@ ${url}`) : "";
         )}
         {verDesc && (
           <Fold id="desc" title="Descripción">
-            <Descripcion texto={d.description} />
+            <Descripcion texto={d.description || ""} />
           </Fold>
         )}
         {Object.keys(d.specs).length > 0 && (

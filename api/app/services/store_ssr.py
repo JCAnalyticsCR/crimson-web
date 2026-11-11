@@ -74,7 +74,7 @@ def precio(p: dict, currency: str) -> str:
 def _producto(p: dict, currency: str) -> str:
     label = ((p.get("availability") or {}).get("label") or "").strip()
     return (
-        f'<li data-sh-id="{int(p["id"])}"><a href="{esc(p["path"])}">{esc(p["name"])}</a>'
+        f'<li data-sh-id="{int(p["id"])}"><a href="{esc(p["path"])}">{esc(p.get("display_name") or p["name"])}</a>'
         f' · <span class="sh-ssr__precio">{esc(precio(p, currency))}</span>' + (f' · <span class="sh-ssr__disp">{esc(label)}</span>' if label else "") + "</li>"
     )
 
@@ -217,13 +217,13 @@ def categoria(cfg: dict, business: dict, snap: dict, slug: str | None, pagina: i
 # ---------- ficha ----------
 def ficha(cfg: dict, business: dict, it: dict) -> str:
     cur = it.get("display_currency") or cfg.get("currency") or "CRC"
-    migas = [(c["name"], c["path"]) for c in it.get("breadcrumbs") or []] + [(it["name"], None)]
+    migas = [(c["name"], c["path"]) for c in it.get("breadcrumbs") or []] + [(it.get("display_name") or it["name"], None)]
     label = ((it.get("availability") or {}).get("label") or "").strip()
     desc = re.sub(r"\s+", " ", str(it.get("description") or "")).strip()
     v = precio(it, cur)
     contenido = (
         _migas(migas)
-        + f'<article data-sh-id="{int(it["id"])}"><h1>{esc(it["name"])}</h1>'
+        + f'<article data-sh-id="{int(it["id"])}"><h1>{esc(it.get("display_name") or it["name"])}</h1>'
         + f'<p><strong class="sh-ssr__precio">{esc(v)}</strong>{" IVA incluido" if v != "Precio a consultar" else ""}</p>'
         + (f'<p>Disponibilidad: <span class="sh-ssr__disp">{esc(label)}</span></p>' if label else "")
         + (f"<p>{esc(desc[:1200])}</p>" if desc else "")

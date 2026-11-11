@@ -1297,6 +1297,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
         "whatsapp": ctx.cfg.get("whatsapp") or "",
         # O3-04: la ficha se adapta: «¿Lo instalamos nosotros?» y «¿Qué necesito además?» solo en seguridad y redes
         "family": fam,
+        "warranty_months": p.warranty_months,  # O3-01: la ficha solo lo publica con el candado legal (O1-00)
         "seo": _seo(db, t, out["path"], ctx=ctx, card=out),
     }
 
