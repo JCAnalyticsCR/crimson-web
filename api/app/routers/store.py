@@ -166,6 +166,9 @@ def put_store(data: StoreIn, p: Principal = Depends(require("settings", "configu
         vals["shipping_rates"] = _rates_with_ids(data.shipping_rates, store_cfg(t).get("shipping_rates") or [])
     st["store"] = {**STORE_DEFAULTS, **(st.get("store") or {}), **vals}
     t.settings = st
+    from ..services.store_snapshot import mark_dirty_after_commit
+
+    mark_dirty_after_commit(db, t.id)  # O1-13: nombre, moneda o envio cambian lo que muestra la tienda
     db.commit()
     return {**store_cfg(t), "slug": t.slug}
 

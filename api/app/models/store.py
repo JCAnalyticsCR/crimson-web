@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -219,6 +219,10 @@ class StoreSnapshot(Base):
     built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gz: Mapped[bytes | None] = mapped_column(deferred=True)
     n_products: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # O1-13: algo que la tienda muestra cambio fuera de los guardados del panel (inventario, reservas, margen). Lo
+    # escribe mark_dirty_after_commit tras el commit; stock_v sube con cada marca y va en los ETag de la vitrina.
+    dirty_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stock_v: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
 
 
 TEST_ORDER_STATES = ("nuevo", "en_onvo", "en_proceso", "pagado", "fallido", "cancelado", "vencido", "revisar")

@@ -658,6 +658,28 @@ def _rank_default(p: Product) -> tuple:
     )
 
 
+def etag_matches(header: str | None, version: str | None) -> bool:
+    """If-None-Match contra un ETag (sin comillas): acepta la forma debil W/"..." que agrega el borde (gzip), varias
+    separadas por coma y "*"."""
+    if not header or not version:
+        return False
+    for tag in header.split(","):
+        tag = tag.strip()
+        if tag == "*" or tag.removeprefix("W/").strip('"') == version:
+            return True
+    return False
+
+
+def _vitrina_version(db: Session, t: Tenant) -> str:
+    """Version de lo que muestran /showcase y /catalog (O1-13): la del panel (catalog_v) y la del inventario (stock_v
+    del snapshot, sube con cada movimiento, reserva o cambio de margen). Antes solo la del panel: un 304 podia servir
+    existencias viejas sin limite."""
+    from ..models import StoreSnapshot
+
+    sv_ = db.scalar(select(StoreSnapshot.stock_v).where(StoreSnapshot.tenant_id == t.id)) or 0
+    return f"{sv.get_catalog_version(t)}.{sv_}"
+
+
 @pub.get("/snapshot")
 def store_snapshot_endpoint(slug: str, response: Response, if_none_match: str | None = Header(None), db: Session = Depends(get_db)):
     """Snapshot pre-armado de la tienda: JSON comprimido (gzip) con todos los productos visibles y su
@@ -672,10 +694,14 @@ def store_snapshot_endpoint(slug: str, response: Response, if_none_match: str | 
 
     from ..models import StoreSnapshot as _SS
 
-    row = db.scalar(select(_SS).where(_SS.tenant_id == t.id).options(_lo(_SS.version, _SS.built_at, _SS.n_products)))
-    if row is not None and if_none_match and if_none_match == f'"{row.version}"':
-        return Response(status_code=304)
+    row = db.scalar(select(_SS).where(_SS.tenant_id == t.id).options(_lo(_SS.version, _SS.built_at, _SS.n_products, _SS.dirty_at)))
+    # O1-13: el 304 solo si el guardado esta al dia (antes se respondia 304 aunque hubiera cambiado el inventario, y
+    # quien ya lo tenia en cache nunca veia la existencia nueva). El borde agrega W/ al ETag: se acepta igual.
+    if row is not None and etag_matches(if_none_match, row.version) and not snap.is_stale(row, t.settings):
+        return Response(status_code=304, headers={"ETag": f'"{row.version}"'})
     gz, version = snap.get_or_rebuild(db, t.id)
+    if etag_matches(if_none_match, version):
+        return Response(status_code=304, headers={"ETag": f'"{version}"'})
     response.headers["ETag"] = f'"{version}"'
     response.headers["Cache-Control"] = "public, max-age=120, stale-while-revalidate=86400"
     response.headers["Content-Encoding"] = "gzip"
@@ -698,11 +724,11 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
     from ..core.timeutil import cr_today
 
     t = _tenant(db, slug)
-    _ver = sv.get_catalog_version(t)
+    _ver = _vitrina_version(db, t)
     # los kits rotan sus articulos equivalentes cada dia (sv._pick): el dia va en el ETag para no servir el de ayer
     _etag = f'"{_ver}-{cr_today().toordinal()}"'
-    if if_none_match and if_none_match == _etag:
-        return Response(status_code=304)
+    if etag_matches(if_none_match, _etag.strip('"')):
+        return Response(status_code=304, headers={"ETag": _etag})
     ctx = Ctx(db, t)
     sc = sv.showcase_cfg(ctx.cfg)
     # Carga liviana: sin description_invoice ni specs. description_store incluida para build_kit (PoE).
@@ -802,10 +828,9 @@ def catalog(
     """Catalogo con filtros (categoria con sus subcategorias, marca, tipo, precio con IVA, disponibilidad), orden y
     paginacion. Devuelve tambien las facetas calculadas sobre el resultado (sin el filtro de la propia faceta)."""
     t = _tenant(db, slug)
-    _ver = sv.get_catalog_version(t)
-    _etag = f'"{_ver}"'
-    if if_none_match and if_none_match == _etag:
-        return Response(status_code=304)
+    _etag = f'"{_vitrina_version(db, t)}"'
+    if etag_matches(if_none_match, _etag.strip('"')):
+        return Response(status_code=304, headers={"ETag": _etag})
     ctx = Ctx(db, t)
     # Carga liviana para todo el catalogo; description_invoice y specs se cargan solo para la pagina.
     prods = _published_light(db, t.id)

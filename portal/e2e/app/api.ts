@@ -53,7 +53,7 @@ function snapshot() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
   };
   return {
-    v: 1, version: "1762800000000", built_at: "2026-11-10T18:00:00+00:00", currency: "CRC", n: products.length,
+    v: 2, version: "1762800000000", built_at: "2026-11-10T18:00:00+00:00", currency: "CRC", n: products.length,
     products,
     categories: c.tree(c.counts()), // arbol con hijas en `children`, como lo manda el API (useSnapshot lo aplana)
     brands: cuenta((p) => p.brand), types: cuenta((p) => productType(p) || null),

@@ -19,6 +19,8 @@ export type SnapProduct = {
   web_featured: boolean; image: string | null;
   type: string | null; created_ts: number;
   availability: SnapAvail; sf: string;
+  /** precio anterior tachado (O1-13): solo viaja con historial propio que lo respalde; casi siempre falta */
+  compare_display_price?: number | null;
 };
 
 export type SnapCategory = {
@@ -53,7 +55,13 @@ export type CatalogParams = {
   min?: number; max?: number;
   avail?: string; sort?: string;
   limit?: number; offset?: number;
+  /** O1-13: estado en vivo (/availability) de los productos que la pagina ya consulto; manda sobre el del snapshot
+      para «Entrega inmediata» y el orden. Estados del API (en_bodega, bajo_pedido...) o de la vitrina (disponible, ultimas). */
+  live?: Record<number, string>;
 };
+
+/** estado en vivo de la vitrina (normAvail: disponible/ultimas) -> estado del API */
+const LIVE: Record<string, string> = { disponible: "en_bodega", ultimas: "en_bodega" };
 
 export type CatalogFacets = {
   brands: { name: string; count: number }[];
@@ -142,8 +150,13 @@ function cmpDefault(a: SnapProduct, b: SnapProduct): number {
 export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogResult {
   const {
     q = "", category, brands: brandsParam = [], tipo,
-    min, max, avail, sort = "relevance", limit = 24, offset = 0,
+    min, max, avail, sort = "relevance", limit = 24, offset = 0, live,
   } = params;
+  /** el estado que manda: el vivo si la pagina ya lo pidio, si no el del snapshot */
+  const stateOf = (p: SnapProduct): string => {
+    const v = live?.[p.id];
+    return v ? LIVE[v] || v : p.availability?.state || "consultar";
+  };
 
   const catById = new Map(snap.categories.map((c) => [c.id, c]));
   const catBySlug = new Map(snap.categories.map((c) => [c.slug, c]));
@@ -217,7 +230,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
       if (max != null && (p.display_price > max || p.display_price <= 0)) return false;
     }
     if (skip !== "avail" && avail) {
-      const st = p.availability.state;
+      const st = stateOf(p);
       if ((avail === "disponible" || avail === "inmediata") && st !== "en_bodega") return false;
       if (avail === "bajo_pedido" && st !== "en_bodega" && st !== "bajo_pedido") return false;
     }
@@ -238,7 +251,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
   const fa = { disponible: 0, bajo_pedido: 0 };
   for (const p of pool) {
     if (keep(p, "avail")) {
-      const st = p.availability.state;
+      const st = stateOf(p);
       if (st === "en_bodega") fa.disponible++;
       if (st === "en_bodega" || st === "bajo_pedido") fa.bajo_pedido++;
     }
@@ -270,7 +283,7 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
     sorted.sort((a, b) => {
       const sd = (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0);
       if (sd !== 0) return sd;
-      const od = availOrd(a.availability.state) - availOrd(b.availability.state);
+      const od = availOrd(stateOf(a)) - availOrd(stateOf(b));
       if (od !== 0) return od;
       return cmpDefault(a, b);
     });
@@ -352,7 +365,7 @@ export function snapToVProd(p: SnapProduct, currency: string, cats: SnapCategory
     item_type: "product",
     display_price: p.display_price,
     display_currency: currency,
-    compare_display_price: null,
+    compare_display_price: p.compare_display_price ?? null,
     price_on_request: p.display_price <= 0,
     availability: avail,
     variants: [],

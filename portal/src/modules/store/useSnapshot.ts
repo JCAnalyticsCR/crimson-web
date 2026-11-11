@@ -50,22 +50,20 @@ async function idbSet(slug: string, entry: CacheEntry): Promise<void> {
   });
 }
 
+/** Version de formato del snapshot que entiende este navegador (O1-13). Uno guardado con una version menor se
+    descarta: traia el precio calculado de otra forma y podia decir otra cosa que la ficha. */
+export const SNAP_FORMAT = 2;
+export const snapUsable = (s: { v?: number } | null | undefined): boolean => !!s && Number(s.v || 0) >= SNAP_FORMAT;
+
 async function cacheGet(slug: string): Promise<CacheEntry | null> {
-  // Intentar IDB primero
+  // O1-13: solo IndexedDB. La copia en localStorage (~100 KB repetidos en cada guardado) se quita; la vieja se borra.
+  try { localStorage.removeItem(`crimson-snap:${slug}`); } catch { /* bloqueado (Brave Shields, Safari privado, Firefox strict) */ }
   const idb = await idbGet(slug);
-  if (idb) return idb;
-  // Fallback a localStorage
-  try {
-    const raw = localStorage.getItem(`crimson-snap:${slug}`);
-    if (raw) return JSON.parse(raw) as CacheEntry;
-  } catch { /* bloqueado (Brave Shields, Safari privado, Firefox strict) */ }
-  return null;
+  return idb && snapUsable(idb.snap) ? idb : null;
 }
 
 async function cachePut(slug: string, entry: CacheEntry): Promise<void> {
   await idbSet(slug, entry);
-  // También persiste en localStorage como respaldo secundario (tamaño permisivo)
-  try { localStorage.setItem(`crimson-snap:${slug}`, JSON.stringify(entry)); } catch { /* sin espacio */ }
 }
 
 // ── Singleton por slug (compartido en la sesión) ──────────────────────────────

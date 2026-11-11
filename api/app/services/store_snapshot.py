@@ -5,9 +5,9 @@ el cliente, lo comprime con gzip y lo guarda en store_snapshot(tenant_id). El en
 GET /public/store/{slug}/snapshot devuelve el blob gz directamente sin deserializar: cero RAM de
 productos por peticion (solo lectura de un LargeBinary de ~60-200 KB).
 
-Contrato JSON del snapshot (lo consume el frontend; version v1):
+Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
 {
-  "v": 1,                           -- version del esquema (rompe compatibilidad si sube a 2)
+  "v": 2,                           -- version del formato: el navegador descarta uno guardado con v menor
   "version": "1729600000000",       -- catalog_v: unix-ms que coincide con ETag
   "built_at": "2026-10-22T...",     -- ISO 8601 UTC
   "currency": "CRC"|"USD",
@@ -22,7 +22,10 @@ Contrato JSON del snapshot (lo consume el frontend; version v1):
       "model": "DS-2CD2143G2-I" | null,
       "code": "HK-CAM-001",
       "category_id": 7 | null,
-      "display_price": 89900,       -- precio con IVA en la moneda del tenant; 0 = a consultar
+      "display_price": 89900,       -- precio con IVA en la moneda del tenant; 0 = a consultar. El MISMO de la
+                                    -- ficha (/item): precio web vigente, retencion por margen y tipo de cambio (O1-13)
+      "compare_display_price": 99900, -- (opcional) precio anterior tachado: solo si hay historial propio que lo
+                                    -- respalde (30 dias vendido a ese precio o mas); hoy ningun producto lo trae
       "web_featured": true | false,
       "image": "https://..." | null, -- primera imagen (para la tarjeta de lista)
       "type": "Camara IP" | null,   -- product_type()
@@ -84,13 +87,17 @@ import hashlib
 import json
 import logging
 import unicodedata
+import weakref
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
 log = logging.getLogger("crimson.snapshot")
+
+FORMAT_V = 2  # O1-13: precio de la ficha, comparacion con respaldo; el navegador descarta un snapshot guardado con v menor
+COMPARE_MIN_DAYS = 30  # un tachado necesita 30 dias de historial propio a ese precio (plan: nada de tachados sin respaldo)
 
 
 def _nfc(s: str) -> str:
@@ -129,10 +136,14 @@ def build(db: Session, t, ctx) -> bytes:
     pool = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
 
     # campos de tarjeta liviana (sin descripciones ni specs)
+    backed = compare_backed(db, t.id, [p for p in pool if p.compare_price])
     items = []
     for p in pool:
         own = stock_all.get(p.id)
-        price_with_tax = _gross(ctx.pricer.of(p, p.price), float(p.taxes[0].tax.rate) if p.taxes else 13) if p.price else Decimal(0)
+        # O1-13: el mismo precio que la ficha (Ctx.card -> _prod_pub): precio web vigente, retencion por margen y tipo de
+        # cambio. Antes se calculaba con p.price y la lista decia un precio y la ficha «Precio a consultar».
+        rate = float(p.taxes[0].tax.rate) if p.taxes else 13
+        price_with_tax = _gross(ctx.pricer.of(p), rate)
         img = None
         if p.images:
             img = (p.images[0] or {}).get("url") or None
@@ -154,6 +165,10 @@ def build(db: Session, t, ctx) -> bytes:
                 "sf": _sf(p.name, p.brand, p.model),
             }
         )
+        if p.id in backed and price_with_tax > 0:
+            cmp_ = _gross(ctx.pricer.of(p, p.compare_price), rate)
+            if cmp_ > price_with_tax:
+                items[-1]["compare_display_price"] = float(cmp_)
 
     # conteos por categoria
     counts: dict[int, int] = {}
@@ -192,7 +207,7 @@ def build(db: Session, t, ctx) -> bytes:
 
     version = sv.get_catalog_version(t)
     payload = {
-        "v": 1,
+        "v": FORMAT_V,
         "version": version,
         "built_at": datetime.now(UTC).isoformat(),
         "currency": ctx.pricer.currency,
@@ -215,6 +230,8 @@ def rebuild(db: Session, tid: int) -> None:
     if t is None or not t.active:
         return
     cv = (t.settings or {}).get("catalog_v") or 0  # version del catalogo con la que se arma (antes de leer nada)
+    # O1-13: la hora de INICIO del armado; una marca (dirty_at) posterior, aunque llegue mientras se arma, lo deja viejo
+    started = datetime.now(UTC)
     ctx = Ctx(db, t)
     gz = build(db, t, ctx)
 
@@ -228,7 +245,7 @@ def rebuild(db: Session, tid: int) -> None:
         db.add(row)
     row.gz = gz
     row.version = version
-    row.built_at = now
+    row.built_at = started
     row.n_products = len(gz)  # sobreescribimos abajo
     # calcular n_products real sin deserializar el gz (leemos el campo n del JSON)
     shown: set[int] | None = None
@@ -278,25 +295,173 @@ def get_or_rebuild(db: Session, tid: int) -> tuple[bytes, str]:
     from ..models import StoreSnapshot, Tenant
     from .supplier_sync import trim_memory
 
-    row = db.scalar(
-        select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid)
-    )
+    row = db.scalar(select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid))
     t = db.get(Tenant, tid)
     st = (t.settings or {}) if t is not None else {}
     # la API no tiene la cola del worker: si algo visible cambio despues de armarlo (catalog_v > snapshot_cv), la
     # siguiente visita lo rearma una vez; 20 s de margen juntan varios guardados seguidos en un solo armado
-    stale = row is not None and (st.get("catalog_v") or 0) > (st.get("snapshot_cv") or 0) and (
-        row.built_at is None or (datetime.now(UTC) - (row.built_at if row.built_at.tzinfo else row.built_at.replace(tzinfo=UTC))).total_seconds() > 20
-    )
+    stale = row is not None and is_stale(row, st)
     if row is None or row.gz is None or stale:
         rebuild(db, tid)
         trim_memory()  # armar el snapshot toca todo el catalogo: la memoria vuelve al sistema
-        row = db.scalar(
-            select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid)
-        )
+        row = db.scalar(select(StoreSnapshot).where(StoreSnapshot.tenant_id == tid))
     if row is None or row.gz is None:
         raise RuntimeError(f"no se pudo armar el snapshot para empresa {tid}")
     return row.gz, row.version
+
+
+def _utc(d: datetime | None) -> datetime | None:
+    return None if d is None else (d if d.tzinfo else d.replace(tzinfo=UTC))
+
+
+def is_stale(row, settings: dict | None, margin_s: int = 20) -> bool:
+    """El snapshot guardado quedo viejo: cambio algo del panel (catalog_v > snapshot_cv) o algo marcado despues de
+    armarlo (dirty_at > built_at: inventario, reservas, margen; O1-13). 20 s de margen juntan varios cambios seguidos
+    en un solo armado."""
+    st = settings or {}
+    built = _utc(row.built_at)
+    changed = (st.get("catalog_v") or 0) > (st.get("snapshot_cv") or 0)
+    dirty = _utc(getattr(row, "dirty_at", None))
+    changed = changed or (dirty is not None and (built is None or dirty > built))
+    return changed and (built is None or (datetime.now(UTC) - built).total_seconds() > margin_s)
+
+
+def compare_backed(db: Session, tid: int, prods: list) -> set[int]:
+    """Productos cuyo precio de comparacion (tachado) tiene respaldo en el historial propio (O0-07): hubo un tramo de
+    COMPARE_MIN_DAYS dias o mas vendido a ese precio o a uno mayor (precio web, o el de siempre si no habia web, en la
+    misma moneda). Sin historial suficiente no se tacha nada (hoy, ninguno)."""
+    if not prods:
+        return set()
+    from datetime import timedelta
+
+    from ..models.catalog import ProductPriceHistory as H
+
+    want = {p.id: Decimal(str(p.compare_price)) for p in prods if p.compare_price}
+    rows = db.execute(
+        select(H.product_id, H.valid_from, H.price_net, H.web_price_net)
+        .where(H.tenant_id == tid, H.product_id.in_(list(want)))
+        .order_by(H.product_id, H.valid_from)
+    ).all()
+    now = datetime.now(UTC)
+    out: set[int] = set()
+    for i, (pid, since, net, web) in enumerate(rows):
+        until = rows[i + 1][1] if i + 1 < len(rows) and rows[i + 1][0] == pid else now
+        sold = Decimal(str(web if web is not None else net or 0))
+        if sold >= want[pid] and (_utc(until) - _utc(since)) >= timedelta(days=COMPARE_MIN_DAYS):
+            out.add(pid)
+    return out
+
+
+# ---------------------------------------------------------------- O1-13: marcar el snapshot viejo despues del commit
+def mark_dirty_after_commit(db: Session, tid: int | None) -> None:
+    """Deja anotado que el snapshot de la empresa quedo viejo; la marca se escribe DESPUES del commit de esta sesion,
+    en su propia transaccion y sobre la fila del snapshot (nunca la de la empresa: el checkout no actualiza tenant).
+    Si la transaccion se revierte, no se marca nada."""
+    if tid:
+        db.info.setdefault("snapshot_dirty", set()).add(int(tid))
+
+
+def mark_dirty_now(bind, tids) -> None:
+    """La marca en si: stock_v + 1 y dirty_at = ahora en la fila del snapshot (si aun no hay fila, la primera visita lo
+    arma de cero y no hace falta marcar)."""
+    from sqlalchemy.pool import SingletonThreadPool, StaticPool
+
+    from ..models import StoreSnapshot
+
+    tids = sorted({int(x) for x in tids if x})
+    if not tids:
+        return
+    if isinstance(getattr(bind, "pool", None), StaticPool | SingletonThreadPool):
+        # una sola conexion compartida (SQLite en memoria de las pruebas): una transaccion aparte la cerraria debajo
+        # de otra sesion. La marca se aplica al empezar la siguiente transaccion, dentro de ella.
+        _PENDING.setdefault(bind, set()).update(tids)
+        return
+    try:
+        with bind.connect() as conn:
+            conn.execute(_mark_stmt(StoreSnapshot, tids))
+            conn.commit()
+    except Exception:  # noqa: BLE001 - la marca nunca tumba lo que ya se confirmo; a lo sumo el snapshot espera al siguiente cambio
+        log.exception("No se pudo marcar el snapshot de %s", tids)
+    # Sin encolar el rearmado aqui: la marca va despues de CADA commit que toca inventario y un broker lento o caido no
+    # puede retener a quien confirmo (en las pruebas, el cliente de Redis reintentaba minutos). La siguiente visita lo
+    # rearma (get_or_rebuild); encolarlo con candado es O0-04.
+
+
+_PENDING: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()  # por motor: una marca de una base nunca va a otra
+
+
+def _mark_stmt(model, tids):
+    return update(model).where(model.tenant_id.in_(sorted(tids))).values(dirty_at=datetime.now(UTC), stock_v=model.stock_v + 1)
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_pending(session: Session, _transaction, connection) -> None:
+    """Solo con la conexion compartida de las pruebas (ver mark_dirty_now)."""
+    tids = _PENDING.pop(connection.engine, None) if len(_PENDING) else None
+    if tids:
+        from ..models import StoreSnapshot
+
+        connection.execute(_mark_stmt(StoreSnapshot, tids))
+
+
+# lo que cambia la disponibilidad o el precio que ve la tienda sin pasar por un guardado del panel que ya sube catalog_v
+_PRODUCT_ATTRS = (
+    "margin_hold",
+    "show_on_web",
+    "web_featured",
+    "web_price",
+    "price",
+    "compare_price",
+    "active",
+    "name",
+    "images",
+    "category_id",
+    "brand",
+    "model",
+    "currency",
+    "supplier_stock",
+    "supplier_updated_at",
+)
+
+
+def _tenant_of(obj) -> int | None:
+    from ..models import Product, PurchaseRequest, PurchaseRequestLine, StockMovement, StockReservation, StockUnit
+
+    if isinstance(obj, (StockMovement, StockReservation, StockUnit, PurchaseRequest)):
+        return getattr(obj, "tenant_id", None)
+    if isinstance(obj, PurchaseRequestLine):
+        req = obj.__dict__.get("request")  # sin consultar: solo si ya esta cargada
+        return getattr(req, "tenant_id", None)
+    if isinstance(obj, Product):
+        from sqlalchemy import inspect
+
+        st = inspect(obj)
+        if st.pending or any(st.attrs[a].history.has_changes() for a in _PRODUCT_ATTRS if a in st.attrs):
+            return obj.tenant_id
+    return None
+
+
+@event.listens_for(Session, "before_flush")
+def _track(session: Session, _ctx, _instances) -> None:
+    """Inventario, reservas, compras para pedidos web y productos (margen, precio web, publicacion): toda escritura que
+    cambie lo que la tienda muestra deja la empresa anotada; se marca al confirmar (after_commit)."""
+    for obj in (*session.new, *session.dirty, *session.deleted):
+        tid = _tenant_of(obj)
+        if tid:
+            session.info.setdefault("snapshot_dirty", set()).add(int(tid))
+
+
+@event.listens_for(Session, "after_commit")
+def _after_commit(session: Session) -> None:
+    tids = session.info.pop("snapshot_dirty", None)
+    if tids:
+        bind = session.get_bind()
+        mark_dirty_now(getattr(bind, "engine", bind), tids)
+
+
+@event.listens_for(Session, "after_rollback")
+def _after_rollback(session: Session) -> None:
+    session.info.pop("snapshot_dirty", None)
 
 
 def enqueue_rebuild(tid: int, countdown: int = 30) -> None:

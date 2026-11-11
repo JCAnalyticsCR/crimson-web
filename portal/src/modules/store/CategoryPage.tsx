@@ -46,6 +46,9 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
 
   // ── Snapshot: filtrado instantáneo en el navegador ─────────────────────────
   const { snap } = useSnapshot(ctx.slug);
+  /* O1-13: lo que la pagina ya consulto en vivo (/availability) manda sobre el snapshot para «Entrega inmediata» y el
+     orden. Se acumula: cada pagina de resultados suma lo suyo y nada se vuelve a pedir. */
+  const [live, setLive] = useState<Record<number, string>>({});
 
   /** Resultado completo del filtrado desde el snapshot (sin límite de página). */
   const snapResult = useMemo((): CatalogResult | null => {
@@ -60,9 +63,10 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
       avail: disp || undefined,
       sort,
       limit: 99999, // todos los resultados; paginamos localmente con displayLimit
+      live,
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort]);
+  }, [snap, q, mode, cat, brands.join("|"), tipo, min, max, disp, sort, live]);
 
   /** Cuántos productos mostrar en el modo snapshot (crece con "Cargar más"). */
   const [displayLimit, setDisplayLimit] = useState(PAGE);
@@ -126,6 +130,12 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
     ctx.api<Res>(`/catalog?${qs}&offset=${items.length}`).then((r) => setItems((x) => [...x, ...r.items])).finally(() => setMore(false));
   };
   const avail = useAvailability(useMemo(() => items.map((p) => p.id), [items]));
+  useEffect(() => {
+    setLive((cur) => {
+      const add = Object.entries(avail).filter(([id, a]) => cur[Number(id)] !== a.state);
+      return add.length ? { ...cur, ...Object.fromEntries(add.map(([id, a]) => [id, a.state])) } : cur;
+    });
+  }, [avail]);
 
   const set = useCallback((patch: Record<string, string | string[] | null>) => {
     const n = new URLSearchParams(sp);
@@ -246,7 +256,9 @@ function Filters({ f, cur, brands, tipo, min, max, disp, set }: { f: Facets; cur
     <div className="vt-fgroups">
       <fieldset className="vt-fgroup">
         <legend>Disponibilidad</legend>
-        {([["", "Todo"], ["inmediata", `Entrega inmediata (${f.availability.disponible})`], ["bajo_pedido", `Disponible o bajo pedido (${f.availability.bajo_pedido})`]] as [string, string][]).map(([v, l]) => (
+        {/* O1-13: con menos de 3 productos «Entrega inmediata» no se ofrece (salvo que ya este puesto: hay que poder quitarlo) */}
+        {([["", "Todo"], ["inmediata", `Entrega inmediata (${f.availability.disponible})`], ["bajo_pedido", `Disponible o bajo pedido (${f.availability.bajo_pedido})`]] as [string, string][])
+          .filter(([v]) => v !== "inmediata" || f.availability.disponible >= 3 || disp === "inmediata").map(([v, l]) => (
           <label key={v || "all"} className="vt-check"><input type="radio" name="disp" checked={disp === v} onChange={() => set({ disp: v || null })} /><span>{l}</span></label>
         ))}
       </fieldset>

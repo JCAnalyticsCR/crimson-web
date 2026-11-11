@@ -216,3 +216,6 @@ __all__ = [
 
 # ganchos del historial de precios y de web_updated_at (O0-07): se registran al cargar los modelos
 from ..services import price_history as _price_history  # noqa: E402,F401
+
+# O1-13: inventario, reservas y margen dejan el snapshot de la tienda marcado viejo despues del commit
+from ..services import store_snapshot as _store_snapshot  # noqa: E402,F401
