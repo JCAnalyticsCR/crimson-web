@@ -324,8 +324,9 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
       <ol className="ck-steps" aria-label="Pasos del pedido">
         {STEPS.map((s, i) => (
           <li key={s} aria-current={i === step ? "step" : undefined} data-done={i < step}>
-            <button type="button" onClick={() => (i < step ? goStep(i) : undefined)} disabled={i >= step} aria-label={`Paso ${i + 1}: ${s}${i < step ? " (completo, volver)" : ""}`}>
-              <span className="ck-steps__n">{i < step ? <Ico d={IC.check} size={14} /> : i + 1}</span><span className="ck-steps__t">{s}</span>
+            <button type="button" onClick={() => (i < step ? goStep(i) : undefined)} disabled={i >= step}>
+              {/* O2-11: el nombre accesible es el texto visible («Paso 1: Tus datos»); lo que no se ve va en sh-sr */}
+              <span className="ck-steps__n" aria-hidden="true">{i < step ? <Ico d={IC.check} size={14} /> : i + 1}</span><span className="sh-sr">{`Paso ${i + 1}:`}</span><span className="ck-steps__t">{s}</span>{i < step && <span className="sh-sr"> (completo, volver)</span>}
             </button>
           </li>
         ))}

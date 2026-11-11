@@ -3,29 +3,29 @@
 
 .ck { padding-bottom: 24px; }
 .ck-hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
-.ck-hint { font-weight: 400; color: var(--text-3); font-size: 12px; line-height: 1.4; }
+.ck-hint { font-weight: 400; color: var(--text-3); font-size: var(--fs-0); line-height: 1.4; }
 .ck .sh-2 { align-items: start; }
-.ck-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
-.ck-mono { font-family: var(--mono); }
+.ck-label { font-size: var(--fs-1); font-weight: 700; color: var(--text-2); }
+.ck-mono { font-family: var(--font); }
 
 /* pasos */
 .ck-steps { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; counter-reset: s; }
 .ck-steps li button { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 0; background: none; padding: 0; color: var(--text-3); font: inherit; cursor: default; text-align: left; min-height: 44px; }
 .ck-steps li[data-done="true"] button { cursor: pointer; color: var(--text-2); }
-.ck-steps li::before { content: ""; display: block; height: 3px; border-radius: 3px; background: var(--hair-2); margin-bottom: 8px; }
-.ck-steps li[data-done="true"]::before, .ck-steps li[aria-current="step"]::before { background: var(--crimson); }
+.ck-steps li::before { content: ""; display: block; height: 3px; border-radius: var(--r-1); background: var(--hair-2); margin-bottom: 8px; }
+.ck-steps li[data-done="true"]::before, .ck-steps li[aria-current="step"]::before { background: var(--ink); }
 .ck-steps li[aria-current="step"] button { color: var(--text); }
-.ck-steps__n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid currentColor; font: 600 11px var(--mono); }
+.ck-steps__n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid currentColor; font: 700 var(--fs-0) var(--font); }
 .ck-steps li[data-done="true"] .ck-steps__n { background: var(--ink); border-color: var(--ink); color: #fff; }
-.ck-steps__t { font-size: 12.5px; font-weight: 600; line-height: 1.2; }
+.ck-steps__t { font-size: var(--fs-0); font-weight: 700; line-height: 1.2; }
 @media (max-width: 520px) { .ck-steps li:not([aria-current="step"]) .ck-steps__t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } }
-.ck-stepno { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--crimson); font-weight: 500; margin-bottom: 4px; }
+.ck-stepno { display: block; font-family: var(--font); font-size: var(--fs-0); color: var(--text-2); font-weight: 400; margin-bottom: 4px; }
 
 /* resumen compacto (movil) y lateral (escritorio) */
-.ck-mini { display: none; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r); margin-bottom: 14px; }
-.ck-mini > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; min-height: 48px; cursor: pointer; font-size: 14px; font-weight: 600; }
+.ck-mini { display: none; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-1); margin-bottom: 14px; }
+.ck-mini > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; min-height: 48px; cursor: pointer; font-size: var(--fs-1); font-weight: 700; }
 .ck-mini > summary::-webkit-details-marker { display: none; }
-.ck-mini > summary b { font-family: var(--serif); font-size: 18px; }
+.ck-mini > summary b { font-family: var(--font); font-size: var(--fs-3); }
 .ck-mini > summary::after { content: "▾"; color: var(--text-3); }
 .ck-mini[open] > summary::after { content: "▴"; }
 .ck-mini .ck-sum { padding: 0 14px 14px; }
@@ -36,9 +36,9 @@
 .ck-lines li { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--hair); align-items: center; }
 .ck-lines .sh-line__img { width: 52px; height: 52px; }
 .ck-qty { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
-.ck-qty button:not(.sh-rm) { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--hair-2); background: var(--surface); cursor: pointer; font-size: 16px; color: var(--text); }
+.ck-qty button:not(.sh-rm) { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--hair-2); background: var(--surface); cursor: pointer; font-size: var(--fs-2); color: var(--text); }
 .ck-qty button:disabled { opacity: .35; cursor: not-allowed; }
-.ck-qty span { min-width: 24px; text-align: center; font: 600 13px var(--mono); }
+.ck-qty span { min-width: 24px; text-align: center; font: 700 var(--fs-1) var(--font); }
 .ck-qty .sh-rm { margin-left: 6px; }
 .ck-totals { display: grid; gap: 6px; }
 
@@ -47,48 +47,48 @@
 @media (max-width: 420px) { .ck-seg { grid-template-columns: minmax(0, 1fr); } }
 .ck-seg__opt { position: relative; display: flex; }
 .ck-seg__opt input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.ck-seg__opt span { flex: 1; display: grid; place-items: center; text-align: center; min-height: 44px; padding: 6px 10px; border: 1.5px solid var(--hair-2); border-radius: var(--r); font-size: 13.5px; font-weight: 600; color: var(--text-2); background: var(--surface); }
+.ck-seg__opt span { flex: 1; display: grid; place-items: center; text-align: center; min-height: 44px; padding: 6px 10px; border: 1.5px solid var(--hair-2); border-radius: var(--r-1); font-size: var(--fs-1); font-weight: 700; color: var(--text-2); background: var(--surface); }
 .ck-seg__opt input:checked + span { border-color: var(--ink); background: var(--ink); color: #fff; }
-.ck-seg__opt input:focus-visible + span { outline: 2px solid var(--crimson); outline-offset: 2px; }
-.ck-check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; font-size: 14px; color: var(--text-2); cursor: pointer; padding: 4px 0; }
-.ck-check input { width: 20px; height: 20px; margin-top: 1px; accent-color: var(--crimson); }
+.ck-seg__opt input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; box-shadow: 0 0 0 2px #fff; }
+.ck-check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; font-size: var(--fs-1); color: var(--text-2); cursor: pointer; padding: 4px 0; }
+.ck-check input { width: 20px; height: 20px; margin-top: 1px; accent-color: var(--ink); }
 .ck-check small { color: var(--text-3); }
-.ck-link { border: 0; background: none; padding: 0; color: var(--crimson-dark); text-decoration: underline; font: inherit; cursor: pointer; }
+.ck-link { border: 0; background: none; padding: 0; color: var(--ink); text-decoration: underline; font: inherit; cursor: pointer; }
 .sh-opt[data-off="true"] { opacity: .5; cursor: not-allowed; }
 .sh-opt .sh-icon { vertical-align: -3px; }
-.ck-tag { font-style: normal; margin-left: 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; background: #fff4e0; color: var(--warn); padding: 2px 6px; border-radius: 4px; }
-.ck-sim { display: grid; gap: 8px; margin: 0; padding: 12px 14px; border-radius: var(--r); background: #fff4e0; border: 1px dashed #d9a441; color: #6b4a07; font-size: 13.5px; line-height: 1.45; }
+.ck-tag { font-style: normal; margin-left: 8px; font-family: var(--font); font-size: var(--fs-0); background: var(--warn-wash); color: var(--warn); padding: 2px 6px; border-radius: 4px; }
+.ck-sim { display: grid; gap: 8px; margin: 0; padding: 12px 14px; border-radius: var(--r-1); background: var(--warn-wash); border: 1px dashed var(--warn); color: var(--warn); font-size: var(--fs-1); line-height: 1.45; }
 .ck-coupon { display: flex; gap: 8px; }
-.ck-coupon input { flex: 1; min-width: 0; min-height: 44px; border-radius: var(--r); border: 1px solid var(--hair-2); padding: 0 12px; font: 600 15px var(--mono); letter-spacing: .08em; background: var(--surface); color: var(--text); }
-.ck-ok { color: var(--ok); font-size: 13.5px; font-weight: 600; display: flex; gap: 6px; align-items: center; margin: 0; }
+.ck-coupon input { flex: 1; min-width: 0; min-height: 44px; border-radius: var(--r-1); border: 1px solid var(--hair-2); padding: 0 12px; font: 600 var(--fs-2) var(--font); background: var(--surface); color: var(--text); }
+.ck-ok { color: var(--ok); font-size: var(--fs-1); font-weight: 700; display: flex; gap: 6px; align-items: center; margin: 0; }
 .ck-errs { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
 .shop .ck-review { gap: 0; padding: 0; }
-.shop .ck-review > div { position: relative; display: grid; gap: 2px; padding: 14px 16px; border-bottom: 1px solid var(--hair); font-size: 14px; color: var(--text-2); overflow-wrap: anywhere; }
+.shop .ck-review > div { position: relative; display: grid; gap: 2px; padding: 14px 16px; border-bottom: 1px solid var(--hair); font-size: var(--fs-1); color: var(--text-2); overflow-wrap: anywhere; }
 .shop .ck-review > div:last-child { border-bottom: 0; }
 .shop .ck-review b { color: var(--text); }
-.ck-edit { position: absolute; top: 10px; right: 10px; border: 0; background: none; color: var(--crimson-dark); font: 600 13px var(--sans, inherit); cursor: pointer; min-height: 32px; text-decoration: underline; }
+.ck-edit { position: absolute; top: 10px; right: 10px; border: 0; background: none; color: var(--ink); font: 700 var(--fs-1) var(--font); cursor: pointer; min-height: 44px; min-width: 44px; text-decoration: underline; }
 .ck-actions { display: flex; gap: 10px; align-items: center; }
 .ck-actions .ck-go { flex: 1; }
 @media (max-width: 860px) {
-  .ck-actions { position: sticky; bottom: 0; z-index: 5; margin: 0 calc(-1 * var(--pad)); padding: 12px var(--pad) calc(12px + env(safe-area-inset-bottom)); background: rgba(246, 242, 238, .97); border-top: 1px solid var(--hair); }
+  .ck-actions { position: sticky; bottom: 0; z-index: 5; margin: 0 calc(-1 * var(--pad)); padding: 12px var(--pad) calc(12px + env(safe-area-inset-bottom)); background: rgba(247, 245, 242, .97); border-top: 1px solid var(--hair); }
 }
 
 /* Mi pedido */
-.ck-thanks { display: grid; gap: 6px; justify-items: start; background: var(--surface); border: 1px solid var(--hair); border-left: 3px solid var(--ok); border-radius: var(--r); padding: 14px 16px; margin-bottom: 16px; font-size: 14px; color: var(--text-2); }
-.ck-thanks b { color: var(--text); font-size: 16px; }
+.ck-thanks { display: grid; gap: 6px; justify-items: start; background: var(--surface); border: 1px solid var(--hair); border-left: 3px solid var(--ok); border-radius: var(--r-1); padding: 14px 16px; margin-bottom: 16px; font-size: var(--fs-1); color: var(--text-2); }
+.ck-thanks b { color: var(--text); font-size: var(--fs-2); }
 .ck-ohead { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.ck-ohead h1 { font-family: var(--serif); font-size: clamp(28px, 4vw, 42px); letter-spacing: -.02em; margin: 2px 0 0; }
-.ck-badge { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--bg-2); color: var(--text); }
-.ck-badge[data-s="pagado"], .ck-badge[data-s="entregado"], .ck-badge[data-s="listo"] { background: #e3f4ea; color: var(--ok); }
-.ck-badge[data-s="nuevo"], .ck-badge[data-s="en_revision"] { background: #fff4e0; color: var(--warn); }
+.ck-ohead h1 { font-family: var(--font); font-size: var(--fs-6); letter-spacing: -.02em; margin: 2px 0 0; }
+.ck-badge { display: inline-flex; align-items: center; min-height: 30px; padding: 0 12px; border-radius: var(--r-pill); font-weight: 700; font-size: var(--fs-1); background: var(--bg-2); color: var(--text); }
+.ck-badge[data-s="pagado"], .ck-badge[data-s="entregado"], .ck-badge[data-s="listo"] { background: var(--ok-wash); color: var(--ok); }
+.ck-badge[data-s="nuevo"], .ck-badge[data-s="en_revision"] { background: var(--warn-wash); color: var(--warn); }
 .ck-badge[data-s="cancelado"], .ck-badge[data-s="reembolsado"] { background: var(--bg-2); color: var(--text-3); }
-.ck-track { list-style: none; margin: 0 0 18px; padding: 14px 16px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r); }
-.ck-track li { display: grid; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-3); position: relative; }
+.ck-track { list-style: none; margin: 0 0 18px; padding: 14px 16px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; background: var(--surface); border: 1px solid var(--hair); border-radius: var(--r-1); }
+.ck-track li { display: grid; gap: 8px; font-size: var(--fs-0); font-weight: 700; color: var(--text-3); position: relative; }
 .ck-track li i { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--hair-2); display: grid; place-items: center; background: var(--surface); color: #fff; }
 .ck-track li[data-done="true"] { color: var(--text); }
 .ck-track li[data-done="true"] i { background: var(--ok); border-color: var(--ok); }
 .ck-track li[aria-current="step"] i { box-shadow: 0 0 0 4px rgba(26, 138, 75, .18); }
-.ck-track small { display: block; font-weight: 400; color: var(--text-3); font-size: 11.5px; margin-top: 2px; }
+.ck-track small { display: block; font-weight: 400; color: var(--text-3); font-size: var(--fs-0); margin-top: 2px; }
 /* linea que une un paso con el siguiente (reunion 21/10, item 41): verde si los dos se cumplieron, gris si falta.
    Arranca en el borde del circulo (22px) y cruza el gap entre columnas (8px) hasta tocar el circulo siguiente;
    en movil baja desde el circulo y cruza el gap entre filas (12px). */
@@ -100,49 +100,49 @@
   .ck-track li { grid-template-columns: 22px minmax(0, 1fr); align-items: start; }
   .ck-track li[data-line]::before { top: 22px; bottom: -12px; left: 10px; right: auto; width: 2px; height: auto; }
 }
-.ck-closed { display: grid; gap: 4px; padding: 14px 16px; border-radius: var(--r); background: var(--bg-2); margin-bottom: 18px; font-size: 14px; color: var(--text-2); }
+.ck-closed { display: grid; gap: 4px; padding: 14px 16px; border-radius: var(--r-1); background: var(--bg-2); margin-bottom: 18px; font-size: var(--fs-1); color: var(--text-2); }
 .ck-ogrid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 860px) { .ck-ogrid { grid-template-columns: minmax(0, 1fr); } }
 .ck-ocol { display: grid; gap: 14px; min-width: 0; }
-.ck-pay h2 { font-family: var(--serif); font-size: 20px; margin: 0; letter-spacing: -.01em; }
-.ck-instr { margin: 0; white-space: pre-wrap; background: var(--bg); border-radius: var(--r); padding: 12px 14px; font-size: 15px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.ck-pay h2 { font-family: var(--font); font-size: var(--fs-4); margin: 0; letter-spacing: -.01em; }
+.ck-instr { margin: 0; white-space: pre-wrap; background: var(--bg); border-radius: var(--r-1); padding: 12px 14px; font-size: var(--fs-2); line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
 .ck-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .ck-proof { display: grid; gap: 6px; justify-items: start; border-top: 1px solid var(--hair); padding-top: 12px; }
-.ck-proof small { color: var(--text-3); font-size: 12px; }
+.ck-proof small { color: var(--text-3); font-size: var(--fs-0); }
 .ck-proof label { cursor: pointer; }
 .ck-proof label[aria-disabled="true"] { opacity: .6; pointer-events: none; }
-.ck-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; color: var(--ok); }
+.ck-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-1); color: var(--ok); }
 .ck-files li { display: flex; gap: 6px; align-items: center; overflow-wrap: anywhere; }
-.ck-files a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.ck-files a { color: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .ck-thanks .ck-row { margin-top: 4px; }
-.ck-thanks small { font-size: 12.5px; color: var(--text-3); }
+.ck-thanks small { font-size: var(--fs-0); color: var(--text-3); }
 /* comprobante del cliente fuera de "Como pagar" (ya pagado) e historial con las notas de la empresa */
 .ck-proofs, .ck-hist { display: grid; gap: 10px; }
-.ck-proofs h2, .ck-hist h2 { font-family: var(--serif); font-size: 18px; margin: 0; letter-spacing: -.01em; }
-.ck-proofs small { font-size: 12.5px; color: var(--text-3); }
+.ck-proofs h2, .ck-hist h2 { font-family: var(--font); font-size: var(--fs-3); margin: 0; letter-spacing: -.01em; }
+.ck-proofs small { font-size: var(--fs-0); color: var(--text-3); }
 .ck-hist ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
-.ck-hist li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--hair); font-size: 13.5px; color: var(--text-2); }
+.ck-hist li { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--hair); font-size: var(--fs-1); color: var(--text-2); }
 .ck-hist li:first-child { border-top: 0; padding-top: 0; }
-.ck-hist time { font-size: 12px; color: var(--text-3); padding-top: 1px; }
+.ck-hist time { font-size: var(--fs-0); color: var(--text-3); padding-top: 1px; }
 .ck-hist b { color: var(--text); }
-.ck-hist p { margin: 4px 0 0; padding: 8px 10px; border-radius: var(--r); background: var(--bg-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
-.ck-hist li[data-kind="nota"] b { color: var(--crimson-dark); }
+.ck-hist p { margin: 4px 0 0; padding: 8px 10px; border-radius: var(--r-1); background: var(--bg-2); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ck-hist li[data-kind="nota"] b { color: var(--ink); }
 @media (max-width: 520px) { .ck-hist li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .ck-recent { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--hair); }
-.ck-recent .ck-link { justify-self: start; font-size: 13px; }
+.ck-recent .ck-link { justify-self: start; font-size: var(--fs-1); }
 .shop .ck-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 520px) { .shop .ck-info { grid-template-columns: minmax(0, 1fr); } }
-.shop .ck-info > div { display: grid; gap: 3px; font-size: 14px; color: var(--text-2); align-content: start; overflow-wrap: anywhere; }
+.shop .ck-info > div { display: grid; gap: 3px; font-size: var(--fs-1); color: var(--text-2); align-content: start; overflow-wrap: anywhere; }
 .shop .ck-info b { color: var(--text); }
-.ck-olines li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hair); font-size: 14px; }
+.ck-olines li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hair); font-size: var(--fs-1); }
 .ck-olines li span { min-width: 0; overflow-wrap: anywhere; }
-.ck-olines li b { font-family: var(--mono); font-weight: 600; font-size: 13px; white-space: nowrap; }
+.ck-olines li b { font-family: var(--font); font-weight: 700; font-size: var(--fs-1); white-space: nowrap; }
 .shop .ck-lookup { max-width: 460px; margin: 24px auto; display: grid; gap: 14px; }
-.shop .ck-lookup h1 { font-family: var(--serif); font-size: clamp(28px, 3vw, 38px); margin: 0; letter-spacing: -.02em; }
+.shop .ck-lookup h1 { font-family: var(--font); font-size: var(--fs-6); margin: 0; letter-spacing: -.02em; }
 
 /* correo del comprador (pedido 21/10): error de dedo o dominio que no recibe correo, con la correccion a un toque */
-.ck-mail { margin: 6px 0 0; font-size: 13px; line-height: 1.4; color: var(--text-2); }
-.ck-mail--bad { color: var(--crimson-dark, #9b1c2c); font-weight: 600; }
+.ck-mail { margin: 6px 0 0; font-size: var(--fs-1); line-height: 1.4; color: var(--text-2); }
+.ck-mail--bad { color: var(--crimson-dark, #9b1c2c); font-weight: 700; }
 .ck-mail .ck-link { font-weight: 700; }
 
 /* terminos y condiciones encima del checkout: no se sale de la pagina ni se pierde lo llenado */
@@ -151,7 +151,7 @@
 .ck-terms__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 12px 0 clamp(18px, 3vw, 30px); }
 .ck-terms__body { overflow: auto; overscroll-behavior: contain; padding: 0 clamp(18px, 3vw, 30px); }
 .ck-terms__foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px clamp(18px, 3vw, 30px) 18px; border-top: 1px solid var(--hair); }
-.ck-terms__foot .ck-link { margin-right: auto; font-size: 13.5px; }
+.ck-terms__foot .ck-link { margin-right: auto; font-size: var(--fs-1); }
 @media (max-width: 520px) {
   .ck-terms { padding: 0; place-items: end stretch; }
   .ck-terms .sh-modal__box { max-height: 92dvh; border-radius: var(--r) var(--r) 0 0; }
@@ -160,36 +160,47 @@
 }
 
 /* ---------- O1-10a: errores bajo cada campo, ayuda por WhatsApp, cupon plegado y botones que caben ---------- */
-.ck-ferr { color: var(--crimson-dark); font-size: 13px; font-weight: 600; line-height: 1.4; }
+.ck-ferr { color: var(--crimson-dark); font-size: var(--fs-1); font-weight: 700; line-height: 1.4; }
 .sh-field[data-error] input, .sh-field[data-error] select, .sh-field[data-error] textarea, .ck input[aria-invalid="true"]:not([type=radio]):not([type=checkbox]) { border-color: var(--crimson-dark); }
 /* todo campo a 16 px: iOS no hace zoom al enfocar */
-.ck input, .ck select, .ck textarea, .ck-coupon input { font-size: 16px; }
+.ck input, .ck select, .ck textarea, .ck-coupon input { font-size: var(--fs-field); }
 .ck-cpn { display: grid; gap: 10px; justify-items: start; }
-.ck-cpn__toggle { min-height: 44px; font-weight: 600; }
+.ck-cpn__toggle { min-height: 44px; font-weight: 700; }
 .ck-cpn__box { display: grid; gap: 8px; width: 100%; }
 .ck-coupon .sh-btn { flex: none; }
-.ck-help { margin: 0; display: grid; gap: 2px; justify-items: center; text-align: center; font-size: 14px; }
-.ck-help .ck-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; }
-.ck-help small { color: var(--text-3); font-size: 12.5px; }
-.ck-trust { margin: 0; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.ck-help { margin: 0; display: grid; gap: 2px; justify-items: center; text-align: center; font-size: var(--fs-1); }
+.ck-help .ck-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 700; }
+.ck-help small { color: var(--text-3); font-size: var(--fs-0); }
+.ck-trust { margin: 0; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: var(--fs-1); color: var(--text-2); }
 /* «Atras» + «Confirmar pedido · total» caben a 320 px: el texto parte renglon en vez de salirse */
 .ck-actions .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
 .ck-actions .ck-go { min-width: 0; }
 
 /* ---------- O1-17: privacidad, titular del pago y plazo de la reserva ---------- */
-.ck-privacy { margin: 0; font-size: 13.5px; color: var(--text-2); line-height: 1.5; }
-.ck-holder { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
-.ck-hold { margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--text); }
+.ck-privacy { margin: 0; font-size: var(--fs-1); color: var(--text-2); line-height: 1.5; }
+.ck-holder { margin: 0; font-size: var(--fs-1); font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.ck-hold { margin: 0; text-align: center; font-size: var(--fs-1); font-weight: 700; color: var(--text); }
 
 /* O1-10b: «Incluye ₡... de IVA» bajo el total: dato secundario */
-.ck-totals .ck-iva span { font-size: .8125rem; color: var(--text-3, #6f6a74); }
+.ck-totals .ck-iva span { font-size: var(--fs-1); color: var(--text-3, #6f6a74); }
 
 /* O1-10c: producto que ya no se compra en linea, visible sin abrir el resumen */
 .ck-blocked { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--crimson, #e2233a); border-left-width: 4px; border-radius: var(--r, 6px); background: var(--crimson-soft, rgba(226, 35, 58, .10)); }
-.ck-blocked p { margin: 0 0 10px; font-size: .9375rem; line-height: 1.45; overflow-wrap: anywhere; }
+.ck-blocked p { margin: 0 0 10px; font-size: var(--fs-2); line-height: 1.45; overflow-wrap: anywhere; }
 .ck-blocked__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ck-blocked__actions .sh-btn { min-height: 44px; }
 /* O1-10c: cabecera corta del checkout */
 .ck-head .sh-head__row { justify-content: space-between; gap: 12px; }
-.ck-head__safe { display: inline-flex; align-items: center; gap: 6px; font-size: .875rem; font-weight: 600; color: var(--ok, #1a8a4b); white-space: nowrap; }
+.ck-head__safe { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-1); font-weight: 700; color: var(--ok, #1a8a4b); white-space: nowrap; }
 @media (max-width: 359px) { .ck-head .sh-btn--sm { padding-inline: 10px; } }
+
+/* ---------- O2-11: errores con icono y texto (nunca solo color) ---------- */
+.ck-ferr, .ck-mail--bad { display: flex; gap: 6px; align-items: flex-start; }
+.ck-ferr::before, .ck-errs::before, .ck-mail--bad::before { content: ""; flex: none; width: 16px; height: 16px; margin-top: 1px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v6M12 16.5v.5'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7v6M12 16.5v.5'/%3E%3C/svg%3E") center / contain no-repeat; }
+.shop .ck-errs { position: relative; padding: 10px 12px 10px 36px; border-radius: var(--r-1); background: var(--crimson-wash); display: grid; list-style: none; }
+.shop .ck-errs::before { position: absolute; left: 12px; top: 11px; margin: 0; }
+/* un solo boton rojo por paso: «Quitar y continuar» va en tinta (el rojo queda para «Continuar» / «Confirmar pedido») */
+.ck-blocked__actions .sh-btn--crimson { background: var(--ink); }
+.ck-steps li button { min-height: 44px; }

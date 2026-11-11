@@ -181,7 +181,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
           <b>Recibimos tu pedido.</b>
           {mailNote && <span>{mailNote}</span>}
           <div className="ck-row">
-            <a className="sh-btn sh-btn--crimson sh-btn--sm" href={trackHref} onClick={goTrack}><Ico d={IC.truck} size={16} />Rastrear mi pedido</a>
+            <a className="sh-btn sh-btn--sm" href={trackHref} onClick={goTrack}><Ico d={IC.truck} size={16} />Rastrear mi pedido</a>
             <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => copy(new URL(trackHref, window.location.href).href, "link")}><Ico d={IC.copy} size={16} />{copied === "link" ? "Enlace copiado" : "Copiar enlace de seguimiento"}</button>
           </div>
           <small>Guardá el enlace: ahí ves el estado de tu pedido sin buscar el correo. Desde este navegador también lo encontrás en «Mi pedido» durante {RECENT_DAYS} días.</small>
@@ -221,7 +221,7 @@ export default function OrderStatus({ api, token, store, slug, trackHref, onBack
               {(o.needs_proof || o.status === "en_revision") && o.payment_kind !== "tarjeta" && o.payment_kind !== "efectivo" && (
                 <div className="ck-proof">
                   <input ref={fileRef} id="ck-proof" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(e) => upload(e.target.files?.[0])} hidden />
-                  <label htmlFor="ck-proof" className="sh-btn sh-btn--crimson" aria-disabled={busy === "proof"}><Ico d={IC.upload} size={16} />{busy === "proof" ? "Subiendo…" : o.proofs.length ? "Subir otro comprobante" : "Subir comprobante"}</label>
+                  <label htmlFor="ck-proof" className={`sh-btn${o.card?.pending && !o.card.simulated ? "" : " sh-btn--crimson"}`} aria-disabled={busy === "proof"}><Ico d={IC.upload} size={16} />{busy === "proof" ? "Subiendo…" : o.proofs.length ? "Subir otro comprobante" : "Subir comprobante"}</label>
                   <small>Foto o PDF, máximo 5 MB. Lo ven solo vos (con este enlace) y el equipo de {o.store_name || store.name}.</small>
                   {proofList}
                 </div>
