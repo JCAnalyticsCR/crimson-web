@@ -4,7 +4,7 @@
    al instante (sin esperar /showcase). Los kits y la info de páginas legales siguen viniendo de /showcase. */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, type KitPhoto, type SeoBlock, type VProd } from "./storeKit";
+import { Grid, IC, Ico, KitPhotos, Skeleton, Viewfinder, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, quitarRetiro, sinRetiro, type KitPhoto, type SeoBlock, type VProd } from "./storeKit";
 import { snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
 
@@ -186,7 +186,7 @@ export default function StoreHome() {
       {/* ---------- sellos de confianza ---------- */}
       <section className="vt-trust" aria-label="Por qué comprar aquí">
         <ul className="sh-wrap">
-          {d ? d.trust.map((t) => (
+          {d ? d.trust.map((t) => (S.kind === "tienda" && sinRetiro(ctx.shipping) ? { ...t, title: quitarRetiro(t.title), text: quitarRetiro(t.text) } : t)).map((t) => (
             <li key={t.title}><span className="vt-trust__ico"><Ico d={TRUST_IC[t.icon] || IC.shield} size={20} /></span><div><b>{t.title}</b><span>{t.text}</span></div></li>
           )) : Array.from({ length: 4 }, (_, i) => <li key={i} aria-hidden="true"><span className="vt-trust__ico sh-skel" /><div style={{ flex: 1 }}><b className="sh-skel" style={{ height: 14, width: "60%" }} /><span className="sh-skel" style={{ height: 30, marginTop: 6 }} /></div></li>)}
         </ul>

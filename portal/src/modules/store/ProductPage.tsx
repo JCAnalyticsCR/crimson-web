@@ -5,7 +5,7 @@
    Si el snapshot está cargado, muestra nombre/foto/precio/disponibilidad al instante sin esperar /item. */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, type SeoBlock, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, ShipInfo, sinRetiro, type SeoBlock, type Variant, type VProd } from "./storeKit";
 import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
@@ -152,6 +152,7 @@ ${url}`) : "";
               {save > 0 && <b> · Ahorrás {money(save, d.display_currency)}</b>}
             </p>
           )}
+          {!ask && !soldOut && ctx.isShop && <ShipInfo price={Number(price)} cur={d.display_currency} />}
           {(d.variants?.length ?? 0) > 0 && (
             <fieldset className="vt-variants"><legend className="sh-meta">Opciones</legend>
               {d.variants.map((v) => <button key={v.id} type="button" className="sh-chip" aria-pressed={variant?.id === v.id} onClick={() => setVariant(v)}>{v.name}</button>)}
@@ -208,7 +209,7 @@ ${url}`) : "";
             <li><Ico d={IC.shield} /><span>Garantía de fábrica gestionada por Crimson</span></li>
             <li><Ico d={IC.tool} /><span>Soporte técnico local en Costa Rica</span></li>
             <li><Ico d={IC.doc} /><span>Factura electrónica en cada compra</span></li>
-            <li><Ico d={IC.truck} /><span>Envío a todo el país o retiro coordinado</span></li>
+            <li><Ico d={IC.truck} /><span>{sinRetiro(ctx.shipping) ? "Envío a todo el país" : "Envío a todo el país o retiro coordinado"}</span></li>
           </ul>
         </div>
       </div>

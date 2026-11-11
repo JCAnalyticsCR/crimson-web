@@ -659,6 +659,38 @@ def store_home(slug: str, db: Session = Depends(get_db)):
         # sin tipo de cambio (tienda en otra moneda) la tarifa queda null: "a consultar", nunca un 500 ni un 422
         "shipping_rates": [{**r, "display_amount": ship_display(pricer, r)} for r in cfg["shipping_rates"] if r.get("active")],
         "payment_methods": manual_methods(t),
+        "shipping_public": shipping_public(db, t, cfg, pricer),
+    }
+
+
+# O1-09: zona de cada tarifa en palabras del cliente
+ZONE_TEXT = {"gam": "en la GAM", "fuera_gam": "fuera de la GAM", None: "a todo el país"}
+
+
+def shipping_public(db: Session, t: Tenant, cfg: dict, pricer: Pricer) -> dict:
+    """Envio visible ANTES del checkout (O1-09), todo derivado de la configuracion real (nunca escrito a mano): envio
+    gratis desde (con IVA, en la moneda de la tienda), tarifas activas con su monto final con IVA, zona y plazo (si la
+    tarifa lo trae), el retiro solo si tiene direccion, y si la tienda emite factura electronica de verdad."""
+    from ..services import hacienda_config as hc
+    from ..services.store_orders import checkout_cfg
+
+    rates = []
+    for r in cfg["shipping_rates"]:
+        z = rate_zone(r)
+        if not r.get("active") or z == "retiro":
+            continue
+        amount = ship_display(pricer, r)
+        if amount is None:
+            continue  # sin tipo de cambio no se promete un monto
+        rates.append({"id": r.get("id"), "name": r["name"], "zone": z, "area": ZONE_TEXT.get(z, ZONE_TEXT[None]), "amount": amount, "lead": (r.get("lead") or "").strip() or None})
+    rates.sort(key=lambda x: x["amount"])
+    pk = checkout_cfg(t).get("pickup") or {}
+    retiro_activo = any(r.get("active") and rate_zone(r) == "retiro" for r in cfg["shipping_rates"])
+    return {
+        "free_from": free_shipping_threshold(t, pricer),
+        "rates": rates,
+        "pickup": {"address": pk["address"].strip(), "hours": (pk.get("hours") or "").strip()} if retiro_activo and (pk.get("address") or "").strip() else None,
+        "invoice": hc.provider_setting(t) not in ("none", "sandbox"),
     }
 
 

@@ -261,3 +261,16 @@
 
 /* ---------- O1-17: datos del comercio en el pie ---------- */
 .shop .sh-foot__biz { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- envio visible antes del checkout (O1-09) ---------- */
+/* franja de una linea encima de la cabecera: no es fija ni se mueve; el texto se corta antes que desbordar */
+.vt-strip { margin: 0; padding: 6px var(--pad); background: var(--ink); color: #fff; font-size: .8125rem; line-height: 1.4; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vt-strip__m { display: none; }
+@media (min-width: 768px) { .vt-strip__m { display: inline; } }
+/* ficha: tarifas completas bajo el precio */
+.vt-ship { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 0; font-size: .875rem; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.vt-ship .sh-icon { flex: none; margin-top: 2px; color: var(--text-3); }
+.vt-ship small { display: block; font-size: .8125rem; color: var(--text-3); }
+/* carrito: cuanto falta para el envio gratis (texto, sin barras ni sugerencias de productos) */
+.vt-freeship { margin: 0; font-size: .875rem; font-weight: 600; color: var(--text); }
+.vt-freeship[data-ok="true"] { color: var(--ok); }

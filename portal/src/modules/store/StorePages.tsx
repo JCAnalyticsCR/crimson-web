@@ -5,7 +5,7 @@ import { cloneElement, isValidElement, useEffect, useId, useMemo, useState, type
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Blocks, type Block, type PubProduct } from "./Blocks";
 import { KIT_STORAGE } from "./KitBuilder";
-import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, type SeoBlock, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, sinParrafosDeRetiro, sinRetiro, type SeoBlock, type VProd } from "./storeKit";
 
 const SOLUTIONS: [string, string][] = [
   ["cctv", "Videovigilancia"], ["acceso", "Control de acceso"], ["redes", "Redes y WiFi"], ["ups", "Respaldo eléctrico (UPS)"],
@@ -191,7 +191,7 @@ export function InfoPage() {
             : !d ? <div className="sh-skel" style={{ height: 240 }} />
               : d.faq.length ? (
                 <div className="vt-faq">{d.faq.map((x) => <details key={x.q}><summary>{x.q}</summary><p>{x.a}</p></details>)}</div>
-              ) : <Prose text={d.body} />}
+              ) : <Prose text={kind === "envios" && ctx.isShop && sinRetiro(ctx.shipping) ? sinParrafosDeRetiro(d.body) : d.body} />}
         </article>
       </div>
     </div>

@@ -22,7 +22,9 @@ import { CATALOGO, COMERCIO_E2E, DISPONIBILIDAD } from "./datos";
 
 const SLUG = "crimson";
 
-export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean };
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e };
+/** O1-09: lo que manda el API real en shipping_public (perilla `envio`; sin ella la tienda no muestra la franja) */
+export type ShipE2e = { free_from: number | null; rates: { name: string; zone: string | null; area: string; amount: number; lead?: string | null }[]; pickup: { address: string; hours?: string } | null; invoice?: boolean };
 
 const ajustes = (): AjustesE2e => (window as Window & { __e2eAjustes?: AjustesE2e }).__e2eAjustes || {};
 /** la disponibilidad de datos.ts, con la accion de las perillas para lo que no se vende en linea */
@@ -126,6 +128,9 @@ export function instalarApiE2e() {
       const b = body as Record<string, unknown>;
       if (sub === "" && b.store && typeof b.store === "object") (b.store as Record<string, unknown>).business = COMERCIO_E2E;
       if (sub === "/checkout-config") Object.assign(b, { business: COMERCIO_E2E, holders: { sinpe: "Comercio de Prueba SRL", transferencia: "Comercio de Prueba SRL" }, hold: { enabled: true, manual_hours: 48, card_minutes: 30 } });
+    }
+    if (method === "GET" && sub === "" && ajustes().envio && body && typeof body === "object") {
+      (body as Record<string, unknown>).shipping_public = ajustes().envio;
     }
     // O1-06: la ficha trae su bloque seo (el mismo del SSI en el API real); el resto no, para probar los dos caminos
     if (method === "GET" && sub.startsWith("/item/") && body && typeof body === "object" && !("seo" in body)) {

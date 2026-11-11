@@ -18,7 +18,7 @@ import Consent from "./Consent";
 import { track } from "./analytics";
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
-import { businessLines, catSlugs, normAvail, safeStore, StoreProvider, type Business, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, catSlugs, freeShipGap, normAvail, rateText, safeStore, StoreProvider, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -37,6 +37,7 @@ type Home = {
   product_count?: number;
   shipping_rates: { name: string; amount: number; per_kg?: number; display_amount?: number }[];
   payment_methods: { name: string; instructions: string }[];
+  shipping_public?: ShipPub | null; // O1-09 (aditivo)
 };
 type Avail = { state: string; label: string };
 type Variant = { id: number; name: string; price: string | number; display_price?: string | number };
@@ -185,7 +186,8 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     openCart: () => setDrawer(true),
     compare,
     toggleCompare: (id: number) => setCompare((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 3 ? c : [...c, id])),
-  } : null), [S, slug, base, hostMode, isShop, api, compare]); // eslint-disable-line react-hooks/exhaustive-deps
+    shipping: home?.shipping_public ?? null,
+  } : null), [S, slug, base, hostMode, isShop, api, compare, home]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hostMode) {
@@ -204,11 +206,24 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const slugs = catSlugs(home.categories);
   const L = (p: string) => `${base}${p}` || "/";
   const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k];
+  // O1-09: envio visible antes del checkout (solo en la tienda que vende; nada si el API no lo manda)
+  const ship = isShop ? home.shipping_public ?? null : null;
+  const cur = S.currency || "CRC";
+  const gap = ship ? freeShipGap(ship, estimate) : null;
+  const hours = (S.business?.hours || "").trim();
 
   return (
     <StoreProvider value={ctx}>
     <div className="shop" style={{ fontFamily: undefined /* toda la tienda en Arial (var(--sans)) */ }}>
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
+      {/* O1-09: franja de una linea, no fija y sin movimiento; desde 768 px suma factura y horario si existen */}
+      {ship?.free_from ? (
+        <p className="vt-strip">
+          <span>Envío gratis desde {money(ship.free_from, cur)}</span>
+          {ship.invoice && <span className="vt-strip__m"> · Factura electrónica</span>}
+          {hours && hasWa && <span className="vt-strip__m"> · WhatsApp {hours}</span>}
+        </p>
+      ) : null}
       <header className="sh-head vt-head">
         <div className="sh-wrap">
           <div className="sh-head__row">
@@ -324,7 +339,14 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
         {cart.length > 0 && (
           <div className="sh-drawer__foot">
             <div className="sh-totrow sh-totrow--big"><span>Total estimado</span><b>{money(estimate, cart[0].currency)}</b></div>
-            <p className="sh-note" style={{ margin: 0 }}>IVA incluido. {isShop ? "El envío se calcula al finalizar." : "Te confirmamos precio final y disponibilidad."}</p>
+            {gap !== null && (
+              <p className="vt-freeship" role="status" data-ok={gap === 0}>{gap === 0 ? "Ya tenés envío gratis" : `Te faltan ${money(gap, cur)} para el envío gratis`}</p>
+            )}
+            <p className="sh-note" style={{ margin: 0 }}>
+              IVA incluido. {!isShop ? "Te confirmamos precio final y disponibilidad."
+                : ship?.rates.length && gap !== 0 ? `Envío: ${ship.rates.map((r) => rateText(r, cur)).join(" · ")}.`
+                  : gap === 0 ? "" : "El envío se calcula al finalizar."}
+            </p>
             {isShop ? <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={() => { setDrawer(false); go({ v: "pagar" }); }}>Finalizar pedido</button>
               : <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={() => { setDrawer(false); go({ v: "cotizar" }); }}>Solicitar cotización</button>}
             {hasWa && <a className="sh-btn sh-btn--wa sh-btn--block" href={wa(S.whatsapp, quoteText(cart))} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />{isShop ? "Consultar por WhatsApp" : "Cotizar por WhatsApp"}</a>}

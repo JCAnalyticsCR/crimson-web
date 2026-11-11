@@ -50,6 +50,54 @@ export function businessLines(b?: Business | null): string[] {
 }
 export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
 
+/** Envio visible antes del checkout (O1-09, GET /public/store/{slug} -> shipping_public). Todo derivado de Mi Tienda;
+    montos con IVA en la moneda de la tienda. Aditivo: un API viejo no lo manda y no se muestra nada. */
+export type ShipRate = { id?: string | null; name: string; zone?: string | null; area: string; amount: number | string; lead?: string | null };
+export type ShipPub = { free_from: number | string | null; rates: ShipRate[]; pickup: { address: string; hours?: string } | null; invoice?: boolean };
+/** texto de una tarifa: «₡3.955 a todo el país (Correos de Costa Rica)» y, si la tarifa lo trae, su plazo */
+export const rateText = (r: ShipRate, cur: string) => `${money(r.amount, cur)} ${r.area}${r.lead ? ` en ${r.lead}` : ""} (${r.name})`;
+/** lo que falta para el envio gratis (0 = ya lo tiene); null = la tienda no ofrece envio gratis */
+export function freeShipGap(s: ShipPub | null | undefined, total: number): number | null {
+  const from = Number(s?.free_from || 0);
+  if (!from) return null;
+  return Math.max(0, Math.round((from - total) * 100) / 100);
+}
+/** O1-09: mientras la tienda no tenga direccion de retiro no se promete «retiro» en ningun texto de la vitrina */
+export const sinRetiro = (s: ShipPub | null | undefined) => !s?.pickup;
+export function quitarRetiro(texto: string): string {
+  if (/^\s*envío o retiro\s*$/i.test(texto)) return "Envío a todo el país";
+  return texto.replace(/\s*(o|y)\s+retiro( coordinado| en (tienda|sitio))?/gi, "");
+}
+
+/** O1-09: sin direccion de retiro, la pagina de envios no promete retiro (lo quita de cada linea que lo menciona). El
+    texto vive en el API (DEFAULT_PAGES, archivo de la vitrina): el filtro va aqui, en el navegador. */
+export function sinParrafosDeRetiro(body: string): string {
+  return body.split("\n").map((l) => {
+    if (!/retir/i.test(l)) return l;
+    const frases = (l.match(/[^.!?]+[.!?]*\s*/g) || [l]).filter((f) => !/retir/i.test(f));
+    return quitarRetiro(frases.join("").trim());
+  }).filter((l, i, all) => l !== "" || all[i - 1] !== "").join("\n");
+}
+
+/** Envio en la ficha (O1-09), solo en lo comprable y bajo el precio: gratis si el precio alcanza el umbral; si no, las
+    tarifas completas con su zona (nunca «desde») y el envio gratis desde cuanto. */
+export function ShipInfo({ price, cur }: { price: number; cur: string }) {
+  const { shipping: s } = useStore();
+  if (!s || (!s.rates.length && !s.free_from)) return null;
+  const gap = freeShipGap(s, price);
+  if (gap === 0) return <p className="vt-ship"><Ico d={IC.truck} size={16} /><span><b>Envío gratis</b> a todo el país</span></p>;
+  const lead = s.rates.some((r) => !r.lead);
+  return (
+    <p className="vt-ship">
+      <Ico d={IC.truck} size={16} />
+      <span>
+        Envío: {s.rates.map((r) => rateText(r, cur)).join(" · ")}{s.free_from ? `${s.rates.length ? " · " : ""}gratis desde ${money(s.free_from, cur)}` : ""}.
+        {lead && <small> El plazo de entrega te lo confirmamos al despachar.</small>}
+      </span>
+    </p>
+  );
+}
+
 export type StoreCtx = {
   slug: string;
   base: string; // "" en el dominio de la tienda, "/tienda/<slug>" dentro del portal
@@ -61,6 +109,8 @@ export type StoreCtx = {
   openCart: () => void;
   compare: number[];
   toggleCompare: (id: number) => void;
+  /** O1-09: envio publico (puede faltar con un API viejo) */
+  shipping?: ShipPub | null;
 };
 const Ctx = createContext<StoreCtx | null>(null);
 export const StoreProvider = ({ value, children }: { value: StoreCtx; children: ReactNode }) => <Ctx.Provider value={value}>{children}</Ctx.Provider>;
