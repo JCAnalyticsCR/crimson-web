@@ -511,6 +511,8 @@ export function useHead(m: HeadMeta | null) {
     set("property", "og:image", seo ? seo.og_image || null : m.image || null);
     set("property", "og:image:alt", seo?.og_image ? seo.og_image_alt || seo.title : null);
     set("property", "og:url", canonical);
+    // O2-01c: las vecinas de un listado paginado (rel prev/next) son del servidor y solo valen en la ruta con que se abrio
+    document.head.querySelectorAll('link[rel="prev"][data-sh], link[rel="next"][data-sh]').forEach((el) => el.remove());
     let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (canonical) { if (!link) { link = document.createElement("link"); link.rel = "canonical"; link.setAttribute("data-sh", ""); document.head.appendChild(link); } link.href = canonical; } else link?.remove();
     // un solo JSON-LD, el del servidor: sin bloque seo no se arma uno propio

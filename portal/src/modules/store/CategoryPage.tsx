@@ -3,7 +3,7 @@
    En movil los filtros van en una hoja inferior (solo se mueve lo que el usuario abre).
    Cuando el snapshot está disponible, el filtrado y las facetas son instantáneos (sin llamada al API).
    Si no hay snapshot (primera visita o falla), cae al endpoint /catalog como antes. */
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Crumbs, EmptyHelp, Grid, IC, Ico, Skeleton, money, useAvailability, useFocusTrap, useHead, usePath, useStore, type SeoBlock, type VProd } from "./storeKit";
 import { filterCatalog, snapToVProd, type CatalogResult } from "./catalogFilter";
@@ -121,14 +121,13 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
       nav({ pathname: to(`/c/${res.category.slug}`), search: loc.search }, { replace: true });
   }, [res, cat, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadMore = () => {
-    if (snapResult) {
-      // snapshot: mostrar más sin llamada al API; el avance queda en la direccion (atras desde una ficha vuelve aqui)
-      const n = new URLSearchParams(sp);
-      n.set("pagina", String(pagina + 1));
-      setSp(n, { replace: true });
-      return;
-    }
+  /* O2-01c: «Ver 24 más» es un enlace real a ?pagina=N+1 (el mismo parametro de O1-14): sin JavaScript se sigue y la
+     pagina 2 tiene su propia canonica (seo_meta). Con snapshot, el enlace solo cambia la direccion (reemplazo, sin
+     subir) y el listado crece; sin snapshot (respaldo por /catalog), ademas se piden los 24 que siguen. */
+  const siguiente = useMemo(() => { const n = new URLSearchParams(sp); n.set("pagina", String(pagina + 1)); return `?${n}`; }, [sp, pagina]);
+  const loadMore = (e: MouseEvent) => {
+    if (snapResult) return; // snapshot: lo hace el enlace (la direccion manda cuantos se ven)
+    if (more) { e.preventDefault(); return; }
     setMore(true);
     ctx.api<Res>(`/catalog?${qs}&offset=${items.length}`).then((r) => setItems((x) => [...x, ...r.items])).finally(() => setMore(false));
   };
@@ -156,9 +155,10 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
   const catMissing = mode === "category" && !!snapResult && !snapResult.category;
   const title = mode === "search" ? (q ? `Resultados para “${q}”` : "Buscar") : res?.category?.name || (mode === "category" ? "Categoría" : "Catálogo completo");
   useHead({
-    title: `${mode === "search" ? `Buscar “${q}”` : title} · ${ctx.store.name}`,
+    title: `${mode === "search" ? `Buscar “${q}”` : title} · ${ctx.store.name}${mode !== "search" && pagina > 1 ? ` · Página ${pagina}` : ""}`,
     description: mode === "category" && res?.category ? res.category.description || `${res.category.name} en ${ctx.store.name}: precios con IVA, envío a todo Costa Rica y asesoría técnica.` : "Catálogo completo con precios e IVA incluido.",
-    path: mode === "category" && res?.category ? `/c/${res.category.slug}` : mode === "all" ? "/catalogo" : "/buscar",
+    // O2-01c: la pagina N (>1) tiene su propia canonica, como la del servidor (seo_meta)
+    path: (mode === "category" && res?.category ? `/c/${res.category.slug}` : mode === "all" ? "/catalogo" : "/buscar") + (mode !== "search" && pagina > 1 ? `?pagina=${pagina}` : ""),
     noindex: mode === "search" || activeCount > 0 || catMissing,
     seo: res?.seo, // solo sin snapshot (respaldo por /catalog); con snapshot, la canonica y el titulo de aqui
   });
@@ -230,7 +230,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
               <div className="vt-pager">
                 <span className="sh-meta">{items.length} de {res.total}</span>
                 <div className="vt-pager__bar" aria-hidden="true"><i style={{ width: `${Math.min(100, (items.length / Math.max(1, res.total)) * 100)}%` }} /></div>
-                {items.length < res.total && <button className="sh-btn sh-btn--ghost" onClick={loadMore} disabled={more}>{more ? "Cargando…" : `Ver ${Math.min(PAGE, res.total - items.length)} más`}</button>}
+                {items.length < res.total && <Link className="sh-btn sh-btn--ghost" to={{ search: siguiente }} replace onClick={loadMore} aria-disabled={more || undefined}>{more ? "Cargando…" : `Ver ${Math.min(PAGE, res.total - items.length)} más`}</Link>}
               </div>
             </>
           )}

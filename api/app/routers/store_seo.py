@@ -87,9 +87,44 @@ def _category_image(db: Session, t: Tenant, cats: list, cid: int) -> str | None:
     return None
 
 
-def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = None, card: dict | None = None) -> dict:
+# O2-01c: productos por pagina del catalogo y de cada categoria (CategoryPage.tsx, PAGE) y tope de ?pagina=
+POR_PAGINA = 24
+PAGINA_MAX = 200
+
+
+def pagina_de(valor: object) -> int:
+    """?pagina=N de la direccion: entero de 1 a PAGINA_MAX; cualquier otra cosa es la primera pagina."""
+    s = str(valor or "").strip()
+    return min(PAGINA_MAX, int(s)) if s.isdigit() and int(s) >= 1 else 1
+
+
+def _paginado(url: str, pagina: int, total: int | None) -> dict:
+    """Canonica propia de la pagina N de un listado (O2-01c) y sus vecinas. total = productos del listado (None si no
+    se sabe: entonces siempre hay siguiente). Una pagina que no existe (mas alla de la ultima) no se indexa y apunta a
+    la primera."""
+    ultima = max(1, -(-total // POR_PAGINA)) if total is not None else None
+    if ultima is not None and pagina > ultima:
+        return {"pagina": pagina, "canonical": url, "robots": "noindex,follow", "fuera": True}
+    canonical = url if pagina == 1 else f"{url}?pagina={pagina}"
+    prev = None if pagina == 1 else (url if pagina == 2 else f"{url}?pagina={pagina - 1}")
+    nxt = f"{url}?pagina={pagina + 1}" if ultima is None or pagina < ultima else None
+    return {"pagina": pagina, "canonical": canonical, "prev": prev, "next": nxt, "ultima": ultima}
+
+
+def _total_listado(db: Session, t: Tenant, cat_id: int | None) -> int | None:
+    """Productos que lista la tienda en la categoria (con sus hijas) o en todo el catalogo: el snapshot ya armado."""
+    from ..services.store_snapshot import counts as snapshot_counts
+
+    c = snapshot_counts(db, t.id)
+    if c is None:
+        return None
+    return int(c["n"]) if cat_id is None else int(c["categories"].get(cat_id) or 0)
+
+
+def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = None, card: dict | None = None, pagina: int = 1) -> dict:
     """Titulo, descripcion, canonica, Open Graph y JSON-LD de una ruta de la vitrina. La ficha (/item) pasa su ctx y su
-    tarjeta ya armadas para no repetir las consultas (mismo resultado que sin ellas)."""
+    tarjeta ya armadas para no repetir las consultas (mismo resultado que sin ellas). pagina (O2-01c, ?pagina=N): solo
+    en /catalogo y /c/<categoria>, que tienen una canonica por pagina."""
     cfg = store_cfg(t)
     sc = sv.showcase_cfg(cfg)
     name = cfg["name"]
@@ -193,16 +228,22 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             return meta | {"title": f"Categoría no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
         url = f"{base}/c/{slugs[cat.id]}"
         cat_img = _category_image(db, t, cats, cat.id)
+        pg = _paginado(url, pagina, _total_listado(db, t, cat.id))
+        n_pag = pagina if pagina > 1 and not pg.get("fuera") else 1
+        desc = cat.description or f"{cat.name} en {name}: precios con IVA, disponibilidad, envío a todo Costa Rica y asesoría técnica."
         return meta | {
-            "title": f"{cat.name} · {name}",
+            "title": f"{cat.name} · {name}" + (f" · Página {n_pag}" if n_pag > 1 else ""),
             "image": _abs(base, cat_img) if cat_img else brand_img,
             "image_alt": cat.name if cat_img else name,
-            "description": cat.description or f"{cat.name} en {name}: precios con IVA, disponibilidad, envío a todo Costa Rica y asesoría técnica.",
-            "canonical": url,
+            "description": desc + (f" Página {n_pag}." if n_pag > 1 else ""),
+            "canonical": pg["canonical"],
+            "prev": pg.get("prev"),
+            "next": pg.get("next"),
+            **({"robots": pg["robots"]} if pg.get("robots") else {}),
             "ld": {
                 "@context": "https://schema.org",
                 "@graph": [
-                    {"@type": "CollectionPage", "name": cat.name, "url": url, "isPartOf": {"@type": "WebSite", "url": base + "/"}},
+                    {"@type": "CollectionPage", "name": cat.name, "url": pg["canonical"], "isPartOf": {"@type": "WebSite", "url": base + "/"}},
                     sv.breadcrumb_ld(base, [("Tienda", "/"), (cat.name, f"/c/{slugs[cat.id]}")]),
                     org,
                 ],
@@ -222,7 +263,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
     if head in simple and len(parts) == 1:
         title, desc = simple[head]
         url = f"{base}/{head}"
-        return meta | {
+        out = {
             "title": f"{title} · {name}",
             "description": desc,
             "canonical": url,
@@ -230,6 +271,15 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             "image_alt": name,
             "ld": {"@context": "https://schema.org", "@graph": [sv.breadcrumb_ld(base, [("Tienda", "/"), (title, f"/{head}")]), org]},
         }
+        if head == "catalogo":  # O2-01c: el catalogo completo tambien pagina
+            pg = _paginado(url, pagina, _total_listado(db, t, None))
+            out |= {"canonical": pg["canonical"], "prev": pg.get("prev"), "next": pg.get("next")}
+            if pg.get("robots"):
+                out["robots"] = pg["robots"]
+            elif pagina > 1:
+                out["title"] = f"{title} · {name} · Página {pagina}"
+                out["description"] = f"{desc} Página {pagina}."
+        return meta | out
     if head == "info" and len(parts) == 2 and parts[1] in sv.INFO_KINDS:
         title = sv.INFO_KINDS[parts[1]]
         url = f"{base}/info/{parts[1]}"
@@ -252,16 +302,23 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
 
 @seo.get("/head", response_class=PlainTextResponse)
 @seo.get("/head/{path:path}", response_class=PlainTextResponse)
-def seo_head(path: str = "", host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
+def seo_head(
+    path: str = "",
+    host: str | None = Query(None, max_length=200),
+    pagina: str | None = Query(None, max_length=12),
+    x_store_host: str | None = Header(None),
+    db: Session = Depends(get_db),
+):
     """Fragmento <head> por ruta. nginx lo incrusta con SSI en index.html para el dominio de la tienda: asi
     WhatsApp, Facebook y Google ven titulo, foto y precio sin ejecutar JavaScript. Cuerpo vacio = nginx usa el
-    titulo por defecto (dominio que no es tienda, tienda despublicada)."""
+    titulo por defecto (dominio que no es tienda, tienda despublicada). pagina: el unico parametro de la direccion que
+    nginx deja pasar (O2-01c); cualquier otro no cambia la canonica."""
     h = _host(x_store_host, host)
     t = _tenant_by_host(db, h)
     if not t:
         return PlainTextResponse("", headers={"Cache-Control": "no-store"})
     try:
-        meta = seo_meta(db, t, _base(h), path)
+        meta = seo_meta(db, t, _base(h), path, pagina=pagina_de(pagina))
     except HTTPException:
         return PlainTextResponse("")
     return PlainTextResponse(sv.head_html(meta), media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})

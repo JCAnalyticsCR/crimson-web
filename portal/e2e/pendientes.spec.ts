@@ -56,7 +56,7 @@ test("[O1-14] «Ver más» queda en la dirección y volver de una ficha conserva
   await tiendaLista(page);
   const tarjetas = page.locator(".vt-grid .vt-card:not(.vt-card--skel)");
   await expect(tarjetas).toHaveCount(24);
-  await page.locator(".vt-pager button").click();
+  await page.locator(".vt-pager a").click(); // O2-01c: enlace real a ?pagina=2
   await expect(page).toHaveURL(/[?&]pagina=2/);
   const n = await tarjetas.count();
   expect(n).toBeGreaterThan(24);
@@ -73,4 +73,25 @@ test("la ficha por confirmar del catálogo de pruebas está en «consultar»", a
   await page.goto(rutaFicha(REF.porConfirmar));
   await tiendaLista(page);
   await expect(page.locator(".vt-info__price .vt-avail")).toHaveAttribute("data-s", "consultar");
+});
+
+test("[O2-01c] «Ver 24 más» es un enlace real a ?pagina=2 y la página 2 tiene su canónica y su título (catálogo)", async ({ page }) => {
+  await page.goto("/catalogo?orden=price_asc");
+  await tiendaLista(page);
+  const tarjetas = page.locator(".vt-grid .vt-card:not(.vt-card--skel)");
+  const total = Number((await page.locator(".vt-bar .sh-meta").first().textContent())?.match(/\d+/)?.[0] || 0);
+  expect(total, "el catálogo de pruebas tiene más de una página").toBeGreaterThan(24);
+  const mas = page.locator(".vt-pager a");
+  await expect(mas).toHaveAttribute("href", /\/catalogo\?(.*&)?pagina=2/);
+  await mas.click();
+  await expect(page).toHaveURL(/[?&]pagina=2/);
+  await expect(page).toHaveURL(/orden=price_asc/); // los filtros siguen
+  await expect(tarjetas).toHaveCount(Math.min(48, total));
+  // entrar directo a la página 2: canónica propia (sin los demás parámetros) y título con la página
+  await page.goto("/catalogo?pagina=2&utm_source=x");
+  await tiendaLista(page);
+  await expect(tarjetas).toHaveCount(Math.min(48, total));
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/catalogo\?pagina=2$/);
+  await expect(page).toHaveTitle(/· Página 2$/);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });

@@ -27,6 +27,10 @@ def head_html(meta: dict) -> str:
     parts.append(f'<meta data-sh name="robots" content="{esc(meta.get("robots", "index,follow"))}">')
     if meta.get("canonical"):
         parts.append(f'<link data-sh rel="canonical" href="{esc(meta["canonical"])}">')
+    # O2-01c: paginas vecinas de un listado paginado (?pagina=N)
+    for rel in ("prev", "next"):
+        if meta.get(rel):
+            parts.append(f'<link data-sh rel="{rel}" href="{esc(meta[rel])}">')
     og = {
         "og:type": meta.get("og_type", "website"),
         "og:title": meta["title"],
