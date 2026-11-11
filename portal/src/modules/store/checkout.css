@@ -183,3 +183,13 @@
 
 /* O1-10b: «Incluye ₡... de IVA» bajo el total: dato secundario */
 .ck-totals .ck-iva span { font-size: .8125rem; color: var(--text-3, #6f6a74); }
+
+/* O1-10c: producto que ya no se compra en linea, visible sin abrir el resumen */
+.ck-blocked { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--crimson, #e2233a); border-left-width: 4px; border-radius: var(--r, 6px); background: var(--crimson-soft, rgba(226, 35, 58, .10)); }
+.ck-blocked p { margin: 0 0 10px; font-size: .9375rem; line-height: 1.45; overflow-wrap: anywhere; }
+.ck-blocked__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ck-blocked__actions .sh-btn { min-height: 44px; }
+/* O1-10c: cabecera corta del checkout */
+.ck-head .sh-head__row { justify-content: space-between; gap: 12px; }
+.ck-head__safe { display: inline-flex; align-items: center; gap: 6px; font-size: .875rem; font-weight: 600; color: var(--ok, #1a8a4b); white-space: nowrap; }
+@media (max-width: 359px) { .ck-head .sh-btn--sm { padding-inline: 10px; } }

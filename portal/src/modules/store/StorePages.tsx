@@ -5,7 +5,7 @@ import { cloneElement, isValidElement, useEffect, useId, useMemo, useState, type
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Blocks, type Block, type PubProduct } from "./Blocks";
 import { KIT_STORAGE } from "./KitBuilder";
-import { AvailBadge, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, sinParrafosDeRetiro, sinRetiro, type SeoBlock, type VProd } from "./storeKit";
+import { AvailBadge, cannotBuy, Crumbs, EmptyHelp, IC, Ico, PriceTag, Prose, Viewfinder, useAvailability, useHead, usePath, useStore, waLink, sinParrafosDeRetiro, sinRetiro, type SeoBlock, type VProd } from "./storeKit";
 
 const SOLUTIONS: [string, string][] = [
   ["cctv", "Videovigilancia"], ["acceso", "Control de acceso"], ["redes", "Redes y WiFi"], ["ups", "Respaldo eléctrico (UPS)"],
@@ -247,7 +247,8 @@ export function ComparePage() {
               })}
               <tr><th scope="row"><span className="sh-sr">Acciones</span></th>{d.map((p) => (
                 <td key={p.id}>
-                  {p.price_on_request || !Number(p.display_price) ? <Link className="sh-btn sh-btn--sm sh-btn--ghost" to={to(p.path)}>Consultar</Link>
+                  {/* O1-10c: lo que no se compra en linea no se ofrece para agregar (terminaba en un checkout bloqueado) */}
+                  {p.price_on_request || !Number(p.display_price) || (ctx.isShop && cannotBuy(avail[p.id] || p.availability)) ? <Link className="sh-btn sh-btn--sm sh-btn--ghost" to={to(p.path)} aria-label={`Consultar ${p.name}`}>Consultar</Link>
                     : <button className="sh-btn sh-btn--sm sh-btn--crimson" onClick={() => ctx.addToCart(p, 1)}><Ico d={IC.bag} />Agregar</button>}
                 </td>
               ))}</tr>

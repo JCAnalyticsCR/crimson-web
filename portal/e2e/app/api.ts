@@ -129,6 +129,14 @@ export function instalarApiE2e() {
       if (sub === "" && b.store && typeof b.store === "object") (b.store as Record<string, unknown>).business = COMERCIO_E2E;
       if (sub === "/checkout-config") Object.assign(b, { business: COMERCIO_E2E, holders: { sinpe: "Comercio de Prueba SRL", transferencia: "Comercio de Prueba SRL" }, hold: { enabled: true, manual_hours: 48, card_minutes: 30 } });
     }
+    // O1-10c: /quote dice, como el API real, que linea no se puede comprar en linea (la misma regla del checkout)
+    if (method === "POST" && sub === "/quote" && body && typeof body === "object" && typeof init?.body === "string") {
+      const pedido = JSON.parse(init.body) as { lines?: { product_id: number }[] };
+      (body as Record<string, unknown>).availability = Object.fromEntries((pedido.lines || []).filter((l) => DISPONIBILIDAD[l.product_id]).map((l) => {
+        const d = dispo(l.product_id);
+        return [String(l.product_id), { state: d.state, label: d.label, disponible: d.disponible, max_qty: d.max_qty, accion: d.accion }];
+      }));
+    }
     if (method === "GET" && sub === "" && ajustes().envio && body && typeof body === "object") {
       (body as Record<string, unknown>).shipping_public = ajustes().envio;
     }

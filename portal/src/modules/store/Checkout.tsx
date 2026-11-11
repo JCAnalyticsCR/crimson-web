@@ -325,6 +325,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   // ayuda por WhatsApp (O1-10a): con las lineas del carrito y el total, para no tener que explicar nada de nuevo
   const helpText = `Hola ${S.name}, tengo una duda con mi compra:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}${quote ? `\nTotal: ${money(quote.total, cur)}` : ""}`;
   const summary = <Summary quote={quote} qErr={qErr} cart={cart} cur={cur} setQty={setQty} remove={remove} />;
+  const blocked = quote ? cart.filter((l) => quote.availability?.[String(l.id)]?.disponible === false) : [];
 
   return (
     <div className="sh-wrap ck">
@@ -338,6 +339,17 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
           </li>
         ))}
       </ol>
+      {/* O1-10c: un producto que ya no se puede comprar en linea se avisa desde el paso 1 y fuera del resumen plegado,
+          con salida: quitarlo (clave nueva y otra cotizacion) o consultarlo por WhatsApp */}
+      {blocked.map((l) => (
+        <div key={l.key} className="ck-blocked" role="alert">
+          <p>Uno de tus productos ya no se puede comprar en línea: “{l.name}”. Quitalo para continuar o consultanos por WhatsApp.</p>
+          <div className="ck-blocked__actions">
+            <button type="button" className="sh-btn sh-btn--sm sh-btn--crimson" onClick={() => { keyRef.current = null; remove(l.key); }}>Quitar y continuar</button>
+            {cfg.whatsapp && <a className="sh-btn sh-btn--sm sh-btn--wa" href={wa(cfg.whatsapp, `Hola ${S.name}, quiero consultar: ${l.qty} × ${l.name}`)} target="_blank" rel="noopener noreferrer" aria-label={`Consultar ${l.name} por WhatsApp (se abre WhatsApp)`}><Ico d={IC.wa} />Consultar por WhatsApp</a>}
+          </div>
+        </div>
+      ))}
       <details className="ck-mini">
         <summary><span>Resumen · {cart.reduce((a, l) => a + l.qty, 0)} artículo(s)</span><b>{totalTxt}</b></summary>
         {summary}

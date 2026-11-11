@@ -67,6 +67,7 @@ const IC = {
   wa: "M3 21l1.6-4.7A8.5 8.5 0 1 1 7.7 19.4L3 21zM9 8.5c0 3.5 3 6.5 6.5 6.5l1-1.6-2-1-1 1c-1.2-.5-2.4-1.7-2.9-2.9l1-1-1-2L9 8.5z",
   compare: "M4 6h7v14H4zM13 4h7v14h-7z",
   cam: "M3 7h4l2-2h6l2 2h4v12H3zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  lock: "M6 11h12v10H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3M12 15v2",
 };
 
 const Spin = () => <div className="vt-spin"><span className="spinner" /></div>;
@@ -211,11 +212,27 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const cur = S.currency || "CRC";
   const gap = ship ? freeShipGap(ship, estimate) : null;
   const hours = (S.business?.hours || "").trim();
+  const enCheckout = !pedido && v === "pagar" && isShop;
 
   return (
     <StoreProvider value={ctx}>
     <div className="shop" style={{ fontFamily: undefined /* toda la tienda en Arial (var(--sans)) */ }}>
       <a className="sh-skip" href="#contenido">Saltar al contenido</a>
+      {/* O1-10c: en el checkout la cabecera se reduce a logo, «Pago seguro» y «Volver a la tienda» (sin buscador ni
+          menu: nada que saque a la persona a mitad de la compra) */}
+      {enCheckout ? (
+        <header className="sh-head vt-head ck-head">
+          <div className="sh-wrap">
+            <div className="sh-head__row">
+              <Link className="sh-logo" to={L("/")} aria-label={`${S.name}, volver a la tienda`}>
+                {S.logo_url ? <img src={S.logo_url} alt="" height={30} /> : <b>{S.name}</b>}
+              </Link>
+              <span className="ck-head__safe"><Ico d={IC.lock} size={16} />Pago seguro</span>
+              <button type="button" className="sh-btn sh-btn--ghost sh-btn--sm" onClick={() => go({})}>Volver a la tienda</button>
+            </div>
+          </div>
+        </header>
+      ) : <>
       {/* O1-09: franja de una linea, no fija y sin movimiento; desde 768 px suma factura y horario si existen */}
       {ship?.free_from ? (
         <p className="vt-strip">
@@ -255,6 +272,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
           </nav>
         </div>
       </header>
+      </>}
 
       <main id="contenido" tabIndex={-1} style={{ outline: "none" }}>
         {pedido ? (
