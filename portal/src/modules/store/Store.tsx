@@ -9,11 +9,12 @@ import { GalleryField, ImageField } from "../../ui/MediaPicker";
 import CheckoutSettings from "./CheckoutSettings";
 import StoreShowcaseAdmin from "./StoreShowcaseAdmin";
 import { formatCRCInput } from "../../lib/parseCRC";
+import { businessLines, type Business } from "./storeKit";
 import { FREE_CONFIRM, checkRate, freeEverywhere, suspiciousAmount, type Rate, type RateText } from "./rates";
 
 export type Block = { type: string; [k: string]: unknown };
 type Page = { id: number; slug: string; title: string; blocks: Block[]; published: boolean; in_nav: boolean; position: number };
-type Cfg = { slug: string; name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; domain: string | null; published: boolean; kind: string; shipping_rates: Rate[]; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
+type Cfg = { slug: string; name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; domain: string | null; published: boolean; kind: string; shipping_rates: Rate[]; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business };
 
 const NEW_BLOCK: Record<string, Block> = {
   hero: { type: "hero", title: "Tecnología que protege", text: "Videovigilancia, redes y control de acceso", cta: { label: "Ver catálogo", to: "productos" } },
@@ -79,6 +80,8 @@ export default function Store() {
           <ShippingRates rates={cfg.shipping_rates} onSave={(r) => saveCfg({ shipping_rates: r })} />
         </div>
       )}
+
+      {cfg && <BusinessCard value={cfg.business || {}} onSave={(b) => saveCfg({ business: b })} />}
 
       {cfg && cfg.kind === "tienda" && <CheckoutSettings rates={cfg.shipping_rates} onRates={(r) => saveCfg({ shipping_rates: r })} />}
       {cfg && <StoreShowcaseAdmin />}
@@ -262,5 +265,46 @@ function RateRow({ rate, others, onChange, onRemove }: { rate: Rate; others: Rat
       <RateFields value={t} errors={errors} onChange={setT} onCommit={commit} tail={<button className="x" onClick={onRemove} aria-label={`Quitar la tarifa ${rate.name}`}><Icon d={I.x} size={14} /></button>} />
       {suspiciousAmount(rate) && <p className="muted" style={{ margin: 0, fontSize: 12, color: "var(--warn, #9a6200)" }}>Revise este monto: ₡{formatCRCInput(rate.amount)} es muy poco para un envío. Si quiso decir ₡{formatCRCInput(Math.round(rate.amount * 1000))}, corríjalo aquí.</p>}
     </div>
+  );
+}
+
+const BIZ_FIELDS: [keyof Business, string, string][] = [
+  ["legal_name", "Razón social", "Grupo Empresarial Ejemplo SRL"],
+  ["legal_id", "Cédula jurídica", "3-102-000000"],
+  ["phone", "Teléfono", "+506 0000-0000"],
+  ["email", "Correo", "ventas@ejemplo.com"],
+  ["hours", "Horario", "lunes a viernes de 9:00 a. m. a 6:00 p. m."],
+  ["address", "Dirección (opcional)", "Provincia, cantón y señas"],
+];
+/* normaliza una razon social para compararla con el titular del SINPE (mayusculas, tildes, puntos de S.R.L.) */
+const normName = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** Datos del comercio (O1-17): quien vende. Salen en el pie de la tienda, en el checkout y en los correos. */
+function BusinessCard({ value, onSave }: { value: Business; onSave: (b: Business) => Promise<boolean> }) {
+  const [holder, setHolder] = useState<string>("");
+  useEffect(() => {
+    api<{ methods?: { sinpe?: { holder?: string; active?: boolean } } }>("/store/checkout")
+      .then((c) => setHolder(c.methods?.sinpe?.active ? (c.methods.sinpe.holder || "").trim() : ""))
+      .catch(() => setHolder(""));
+  }, []);
+  const legal = (value.legal_name || "").trim();
+  const mismatch = !!holder && !!legal && normName(holder) !== normName(legal);
+  const preview = businessLines(value);
+  return (
+    <Card title="Datos del comercio">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>Estos datos aparecen en el pie de la tienda, en el checkout y en los correos. Sus clientes los buscan antes de pagarle a un comercio que no conocen.</p>
+        <div className="grid-2">
+          {BIZ_FIELDS.map(([k, label, ph]) => (
+            <Field key={k} label={label}>
+              <input className="input" defaultValue={value[k] || ""} placeholder={ph} maxLength={k === "address" ? 200 : 120}
+                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (value[k] || "")) void onSave({ ...value, [k]: v }); }} />
+            </Field>
+          ))}
+        </div>
+        {mismatch && <p role="status" style={{ margin: 0, fontSize: 13, color: "var(--warn, #9a6200)", fontWeight: 600 }}>El titular del SINPE no coincide con la razón social; sus clientes lo van a notar. (Titular: {holder})</p>}
+        <div className="meta" style={{ textTransform: "none" }}>Así se ve en el pie: {preview.length ? preview.join(" / ") : "nada todavía (los campos vacíos no se muestran)"}</div>
+      </div>
+    </Card>
   );
 }

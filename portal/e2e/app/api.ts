@@ -13,15 +13,17 @@
    PERILLAS DE PRUEBA (window.__e2eAjustes, se fijan con page.addInitScript antes de cargar; ver AjustesE2e):
    accion = la accion de Ajustes para lo que no se vende en linea (O1-02: «ninguna» quita el boton de WhatsApp);
    retrasoItem = ms de espera de /item (O1-03: el desglose no se pinta con datos a medias);
-   fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda). */
+   fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda);
+   comercio = datos del comercio, titulares del pago y plazo de la reserva en la portada y el checkout (O1-17). */
 import { Catalog, productPath, productType, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
 import { installMockApi } from "../../src/demo/mockApi";
 import type { SnapProduct } from "../../src/modules/store/catalogFilter";
-import { CATALOGO, DISPONIBILIDAD } from "./datos";
+import { CATALOGO, COMERCIO_E2E, DISPONIBILIDAD } from "./datos";
 
 const SLUG = "crimson";
 
-export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number };
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean };
+
 const ajustes = (): AjustesE2e => (window as Window & { __e2eAjustes?: AjustesE2e }).__e2eAjustes || {};
 /** la disponibilidad de datos.ts, con la accion de las perillas para lo que no se vende en linea */
 function dispo(id: number) {
@@ -120,6 +122,11 @@ export function instalarApiE2e() {
     const res = await mock(input, init);
     if (!res.ok || !(res.headers.get("Content-Type") || "").includes("json")) return res;
     const body: unknown = await res.json();
+    if (method === "GET" && ajustes().comercio && body && typeof body === "object") {
+      const b = body as Record<string, unknown>;
+      if (sub === "" && b.store && typeof b.store === "object") (b.store as Record<string, unknown>).business = COMERCIO_E2E;
+      if (sub === "/checkout-config") Object.assign(b, { business: COMERCIO_E2E, holders: { sinpe: "Comercio de Prueba SRL", transferencia: "Comercio de Prueba SRL" }, hold: { enabled: true, manual_hours: 48, card_minutes: 30 } });
+    }
     // /availability?ids= devuelve la disponibilidad plana por id: { items: [{ id, state, label, ... }] }
     const fixed = method === "GET" && sub === "/availability" && body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)
       ? { items: (body as { items: { id: number }[] }).items.map((it) => (DISPONIBILIDAD[it.id] ? { id: it.id, ...dispo(it.id) } : it)) }

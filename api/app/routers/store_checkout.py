@@ -41,7 +41,7 @@ from ..services import store_orders as so
 from ..services.documents import audit
 from ..services.sequences import next_number
 from .auth import client_ip
-from .store import CheckoutIn, Pricer, _order_out, _quote_cart, _tenant, free_shipping_threshold, rate_zone, store_cfg
+from .store import CheckoutIn, Pricer, _order_out, _quote_cart, _tenant, business_of, free_shipping_threshold, rate_zone, store_cfg
 
 router = APIRouter(tags=["tienda"])
 
@@ -96,7 +96,21 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
         "verify_email": bool(ck.get("verify_email", True)),
         # reunion 2, item 12: lista opcional "¿Lo atendió alguno de nuestros vendedores?" (solo nombres)
         "sellers": so.public_sellers(db, t) if ck.get("seller_choice") else [],
+        # O1-17: quien vende y a nombre de quien se paga. Del titular solo el NOMBRE (nunca el numero ni la cuenta: esos
+        # salen en las instrucciones, despues de confirmar). Y cuanto se guardan los productos para pagar.
+        "business": business_of(cfg),
+        "holders": {k: str((ck["methods"].get(k) or {}).get("holder") or "").strip() for k in ("sinpe", "transferencia")},
+        "hold": _hold_public(t),
     }
+
+
+def _hold_public(t: Tenant) -> dict:
+    """Plazos reales de la reserva (services/availability: hold_hours_manual y hold_minutes_card). Sin control de
+    inventario no se aparta nada: enabled = False y el checkout no promete plazo."""
+    from ..services.availability import settings_of
+
+    inv = settings_of(t)
+    return {"enabled": bool(inv.get("enabled")), "manual_hours": int(inv.get("hold_hours_manual") or 0), "card_minutes": int(inv.get("hold_minutes_card") or 0)}
 
 
 class EmailCheckIn(BaseModel):

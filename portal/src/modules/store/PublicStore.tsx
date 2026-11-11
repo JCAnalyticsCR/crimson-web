@@ -18,7 +18,7 @@ import Consent from "./Consent";
 import { track } from "./analytics";
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
-import { catSlugs, normAvail, safeStore, StoreProvider, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, catSlugs, normAvail, safeStore, StoreProvider, type Business, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -31,7 +31,7 @@ const NotFound = lazy(() => import("./StorePages").then((m) => ({ default: m.Not
 
 type Cat = { id: number; name: string; count: number };
 type Home = {
-  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
+  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business };
   nav: { slug: string; title: string }[];
   categories: Cat[];
   product_count?: number;
@@ -254,7 +254,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
             // la confirmacion se abre en la direccion de seguimiento (la raiz de la tienda), no en la del producto donde
             // se estaba: "Copiar enlace" y "Rastrear mi pedido" llevan al mismo lugar que el boton del correo
             navigate(`${L("/")}?pedido=${encodeURIComponent(o.track_token)}`);
-          }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} />
+          }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} privacyHref={S.legal?.privacy ? L("/info/privacidad") : undefined} />
         ) : (
           <Suspense fallback={<Spin />}>
             <Routes>
@@ -306,7 +306,11 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
               </div>
             </div>
           </div>
-          <div className="sh-foot__base"><span>© {new Date().getFullYear()} {S.name}</span><span>Precios en {S.currency === "USD" ? "dólares" : "colones"}, IVA incluido.</span></div>
+          {/* O1-17: quien vende. Solo lo que Mi Tienda tenga lleno */}
+          <div className="sh-foot__base">
+            <div className="sh-foot__biz">{businessLines(S.business).map((l) => <span key={l}>{l}</span>)}<span>Precios en {S.currency === "USD" ? "dólares" : "colones"} con IVA incluido</span></div>
+            <span>© {new Date().getFullYear()} {S.name}</span>
+          </div>
         </div>
       </footer>
 

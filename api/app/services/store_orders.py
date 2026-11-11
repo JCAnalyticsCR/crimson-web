@@ -643,9 +643,36 @@ def _email_html(t: Tenant, o: Order, kind: str, extra: str = "") -> str:
         preheader=f"Pedido {o.number} · {STATUS_LABEL.get(o.status, o.status)}. {CUSTOMER_INTRO[kind]}",
         action=(main_url, boton),
         after_action=track_link + email_layout.fallback(url),
-        foot=f"{e(pie)} Cualquier consulta, responda a este correo.",
+        foot=f"{e(pie)} Cualquier consulta, responda a este correo." + business_foot(t),
         show_link=False,
     )
+
+
+def business_foot(t: Tenant) -> str:
+    """Pie de los correos de pedido con los datos del comercio (O1-17): razon social, cedula juridica, horario y el
+    telefono o correo del comercio si no son los que el pie general ya muestra. Solo lo que este lleno; HTML escapado.
+    El trato sigue siendo de usted, como todo correo (email_layout.render)."""
+    from ..routers.store import business_of, store_cfg
+
+    b = business_of(store_cfg(t))
+    marca = email_layout.brand(t)
+    quien = " · ".join(x for x in (b["legal_name"], f"Cédula jurídica {b['legal_id']}" if b["legal_id"] else "") if x)
+    contacto = " · ".join(
+        x
+        for x in (
+            f"Tel. {b['phone']}" if b["phone"] and so_digits(b["phone"]) not in {so_digits(marca.phone or ""), so_digits(marca.whatsapp or "")} else "",
+            b["email"] if b["email"] and b["email"].lower() != (marca.email or "").lower() else "",
+            f"Horario: {b['hours']}" if b["hours"] else "",
+        )
+        if x
+    )
+    lineas = [x for x in (quien, contacto) if x]
+    return "".join(f"<br>{html.escape(x)}" for x in lineas)
+
+
+def so_digits(s: str) -> str:
+    """Solo los ultimos 8 digitos (el mismo numero con o sin +506 cuenta como el mismo)."""
+    return "".join(ch for ch in s if ch.isdigit())[-8:]
 
 
 def notify_customer(

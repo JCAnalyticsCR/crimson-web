@@ -258,3 +258,6 @@
    ficha. Mas especifica aqui, sin tocar vitrina.css (se pliega alla en O2-07). «IVA incluido» a 14 px y sin mayusculas. */
 .shop .vt-price.vt-price--big b { font-size: clamp(1.875rem, 8vw, 2.75rem); }
 .shop .vt-price.vt-price--big small { font-family: inherit; font-size: .875rem; letter-spacing: normal; text-transform: none; font-weight: 500; color: var(--text-2); }
+
+/* ---------- O1-17: datos del comercio en el pie ---------- */
+.shop .sh-foot__biz { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }

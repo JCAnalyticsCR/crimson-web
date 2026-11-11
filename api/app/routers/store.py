@@ -38,11 +38,24 @@ STORE_DEFAULTS = {
     # envio GAM: tarifa fija de 4 000 colones sin IVA (pedido 21/10). Es solo el valor por defecto: la tarifa que la
     # tienda ya guardo en Mi Tienda manda y se edita ahi.
     # id estable (O1-11a): el checkout casa por id; las guardadas sin id lo reciben al volver a guardarlas
-    "shipping_rates": [{"id": "retiro", "name": "Retiro en tienda", "amount": 0, "active": True}, {"id": "gam", "name": "Envío GAM", "amount": 4000, "active": True}],
+    "shipping_rates": [
+        {"id": "retiro", "name": "Retiro en tienda", "amount": 0, "active": True},
+        {"id": "gam", "name": "Envío GAM", "amount": 4000, "active": True},
+    ],
     "legal": {"privacy": "", "terms": ""},
     "whatsapp": "",
     "currency": "CRC",
+    # O1-17: quien vende. Todo opcional; vacio = no se muestra (nunca una etiqueta vacia). Los datos de cada comercio
+    # los llena Mi Tienda -> Datos del comercio (los de Crimson los siembra la migracion tienda_comercio, solo si faltan)
+    "business": {},
 }
+BUSINESS_FIELDS = ("legal_name", "legal_id", "address", "phone", "email", "hours")
+
+
+def business_of(cfg: dict) -> dict:
+    """Datos del comercio limpios: solo las llaves conocidas, como texto y sin espacios de sobra."""
+    raw = cfg.get("business") or {}
+    return {k: str(raw.get(k) or "").strip() for k in BUSINESS_FIELDS}
 
 
 def manual_methods(t: Tenant) -> list[dict]:
@@ -80,6 +93,19 @@ class RateIn(BaseModel):
         return v or None
 
 
+class BusinessIn(BaseModel):
+    """Datos del comercio (O1-17): salen en el pie de la tienda, el checkout y los correos. Todos opcionales."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    legal_name: str = Field("", max_length=120)
+    legal_id: str = Field("", max_length=30)
+    address: str = Field("", max_length=200)
+    phone: str = Field("", max_length=30)
+    email: str = Field("", max_length=120)
+    hours: str = Field("", max_length=120)
+
+
 class StoreIn(BaseModel):
     name: str | None = None
     tagline: str | None = None
@@ -95,6 +121,7 @@ class StoreIn(BaseModel):
     legal: dict | None = None
     whatsapp: str | None = None
     currency: str | None = None
+    business: BusinessIn | None = None
 
     @field_validator("shipping_rates")
     @classmethod
@@ -599,7 +626,10 @@ def store_home(slug: str, db: Session = Depends(get_db)):
 
     shown = {c.id for c in cats}
     return {
-        "store": {k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
+        "store": {
+            **{k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
+            "business": business_of(cfg),  # O1-17: el pie de la tienda
+        },
         "nav": [{"slug": pg.slug, "title": pg.title} for pg in pages if pg.in_nav],
         # solo categorias con productos publicados (una categoria vacia en el menu es un callejon sin salida)
         "categories": [

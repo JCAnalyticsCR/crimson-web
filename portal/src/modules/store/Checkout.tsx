@@ -22,6 +22,10 @@ type Cfg = {
   /* reunion 2 (item 12): vendedores activos para "Vendedor que te atendió" (vacia = Mi Tienda no lo habilita) */
   /* id: referencia opaca (el id interno del usuario nunca sale a la página pública) */
   sellers?: { id: string; name: string }[];
+  /* O1-17: quien vende, a nombre de quien se paga (solo el nombre) y cuanto se guardan los productos (faltan en un API viejo) */
+  business?: { legal_name?: string };
+  holders?: { sinpe?: string; transferencia?: string };
+  hold?: { enabled: boolean; manual_hours: number; card_minutes: number };
 };
 /* respuesta de /email-check: formato, error de dedo (gmial.com) o dominio sin correo; ok=true si el DNS no respondio */
 type MailCheck = { email: string; ok: boolean; message: string | null; suggestion: string | null };
@@ -66,20 +70,26 @@ type Form = {
    (availability.card_keywords decide por palabra la reserva de 30 minutos). */
 const methodLabel = (m: Method) => (m.code === "tarjeta" ? "Tarjeta de crédito o débito" : m.label);
 const methodHint = (m: Method) => (m.code === "tarjeta" && !m.simulated ? "Pagás en la página segura de ONVO; nunca vemos los datos de tu tarjeta." : m.hint);
+/** «Te guardamos los productos 48 horas para pagar» / «30 minutos» (O1-17); sin plazo, nada */
+function holdText(h: { hours?: number; minutes?: number }): string {
+  if (h.minutes && h.minutes > 0) return `Te guardamos los productos ${h.minutes} ${h.minutes === 1 ? "minuto" : "minutos"} para pagar`;
+  if (h.hours && h.hours > 0) return `Te guardamos los productos ${h.hours} ${h.hours === 1 ? "hora" : "horas"} para pagar`;
+  return "";
+}
 const digits = (s: string) => s.replace(/\D/g, "");
 const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim());
 
-export default function Checkout({ api, slug, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, termsHref }: {
+export default function Checkout({ api, slug, store, cart, mode, onPlaced, onBack, setQty, remove, quoteText, termsHref, privacyHref }: {
   api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; mode: "pedido" | "cotizacion"; onPlaced: (p: Placed) => void; onBack: () => void;
-  setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: CartItem[]) => string; termsHref: string;
+  setQty: (k: string, n: number) => void; remove: (k: string) => void; quoteText: (l: CartItem[]) => string; termsHref: string; privacyHref?: string;
 }) {
   if (mode === "cotizacion") return <QuoteRequest api={api} store={store} cart={cart} onBack={onBack} quoteText={quoteText} />;
-  return <OrderCheckout api={api} slug={slug} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} termsHref={termsHref} />;
+  return <OrderCheckout api={api} slug={slug} store={store} cart={cart} onPlaced={onPlaced} onBack={onBack} setQty={setQty} remove={remove} termsHref={termsHref} privacyHref={privacyHref} />;
 }
 
-function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, remove, termsHref }: {
+function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, remove, termsHref, privacyHref }: {
   api: ApiFn; slug: string; store: StoreInfo; cart: CartItem[]; onPlaced: (p: Placed) => void; onBack: () => void;
-  setQty: (k: string, n: number) => void; remove: (k: string) => void; termsHref: string;
+  setQty: (k: string, n: number) => void; remove: (k: string) => void; termsHref: string; privacyHref?: string;
 }) {
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [cfgErr, setCfgErr] = useState<string | null>(null);
@@ -308,6 +318,10 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   const method = methods.find((m) => m.code === f.method);
   const cantons = f.province ? cfg.provinces[f.province] || [] : [];
   const totalTxt = quote ? money(quote.total, cur) : "…";
+  // O1-17: a nombre de quien se paga (solo el nombre) y el plazo real de la reserva, antes de confirmar
+  const holder = method?.code === "sinpe" ? cfg.holders?.sinpe : method?.code === "transferencia" ? cfg.holders?.transferencia : "";
+  const holderTxt = holder ? (method?.code === "sinpe" ? `Vas a pagar por SINPE Móvil a nombre de ${holder}` : `La cuenta está a nombre de ${holder}`) : "";
+  const holdTxt = cfg.hold?.enabled && method ? holdText(method.code === "tarjeta" ? { minutes: cfg.hold.card_minutes } : { hours: cfg.hold.manual_hours }) : "";
   // ayuda por WhatsApp (O1-10a): con las lineas del carrito y el total, para no tener que explicar nada de nuevo
   const helpText = `Hola ${S.name}, tengo una duda con mi compra:\n${cart.map((l) => `• ${l.qty} × ${l.name}`).join("\n")}${quote ? `\nTotal: ${money(quote.total, cur)}` : ""}`;
   const summary = <Summary quote={quote} qErr={qErr} cart={cart} cur={cur} setQty={setQty} remove={remove} />;
@@ -368,6 +382,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                   </select>
                 </Field>
               )}
+              <p className="ck-privacy">Usamos tus datos para este pedido y su factura.{privacyHref && <> <a className="ck-link" href={privacyHref} target="_blank" rel="noopener">Política de privacidad</a></>}</p>
               <label className="ck-check"><input type="checkbox" checked={f.save} onChange={(e) => set("save", e.target.checked)} /><span>Guardar mis datos en este dispositivo para la próxima compra <small>(no necesitás cuenta)</small></span></label>
             </fieldset>
           )}
@@ -417,7 +432,8 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                 ))}</div>
                 {fe("method") && <small id="ck-err-method" className="ck-ferr">{fe("method")}</small>}
                 {hiddenCash && <p className="sh-note" style={{ margin: 0 }}>El pago en efectivo es solo para retiro en sitio.</p>}
-                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tu pedido se confirma cuando subís el comprobante: hacelo cuanto antes.</p>}
+                {holderTxt && <p className="ck-holder">{holderTxt}</p>}
+                {method?.needs_proof && <p className="sh-note" style={{ margin: 0 }}>Al confirmar te mostramos los datos para pagar. Tu pedido se confirma cuando subís el comprobante.{holdTxt ? ` ${holdTxt}.` : ""}</p>}
                 {method?.code === "tarjeta" && method.simulated && <p className="ck-sim" role="note"><b>Pago simulado.</b> Esta tienda todavía no tiene ONVO conectado: el pago con tarjeta es solo de prueba y no se cobra nada.</p>}
               </fieldset>
               <div className="ck-cpn">
@@ -441,7 +457,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               <div className="sh-fieldset ck-review">
                 <div><span className="sh-meta">Contacto</span><b>{f.name}</b><span>{f.email} · {f.phone}</span>{f.inv !== "consumidor" && <span>Factura a {f.inv === "juridica" ? f.company : f.name} · céd. {digits(f.id_number)}</span>}<button type="button" className="ck-edit" onClick={() => goStep(0)}>Cambiar</button></div>
                 <div><span className="sh-meta">Entrega</span>{f.dtype === "retiro" ? <><b>Retiro en sitio</b><span>{cfg.pickup?.address}</span></> : <><b>{f.rate || "Envío"}</b><span>{[f.address, f.district, f.canton, f.province].filter(Boolean).join(", ")}</span></>}<button type="button" className="ck-edit" onClick={() => goStep(1)}>Cambiar</button></div>
-                <div><span className="sh-meta">Pago</span><b>{method ? methodLabel(method) : ""}</b>{coupon && <span>Cupón {coupon}</span>}<button type="button" className="ck-edit" onClick={() => goStep(2)}>Cambiar</button></div>
+                <div><span className="sh-meta">Pago</span><b>{method ? methodLabel(method) : ""}</b>{holderTxt && <span>{holderTxt}</span>}{coupon && <span>Cupón {coupon}</span>}<button type="button" className="ck-edit" onClick={() => goStep(2)}>Cambiar</button></div>
               </div>
               <fieldset className="sh-fieldset"><legend>Nota del pedido</legend>
                 <Field label="¿Algo que debamos saber? (opcional)"><textarea value={f.notes} maxLength={1000} onChange={(e) => set("notes", e.target.value)} placeholder="Horario para recibir, referencia, instalación…" /></Field>
@@ -462,6 +478,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
               {step < 3 ? <>Continuar<Ico d={IC.next} size={16} /></> : busy ? "Enviando…" : <>Confirmar pedido · {totalTxt}</>}
             </button>
           </div>
+          {step === 3 && holdTxt && <p className="ck-hold">{holdTxt}.</p>}
           {step === 3 && cfg.auto_invoice && <p className="ck-trust"><Ico d={IC.check} size={14} />Factura electrónica</p>}
           {cfg.whatsapp && (
             <p className="ck-help">

@@ -165,3 +165,6 @@ export const CATALOGO: Snapshot = {
 
 /** Productos que las pruebas abren por nombre (un estado cada uno). */
 export const REF = { comprable: 68, ultimaUnidad: 69, bajoPedido: 71, porConfirmar: 500, agotado: 302, sinPrecio: 401, sinFoto: 503, barraDeSonido: 502 } as const;
+
+/** datos del comercio FICTICIOS para las pruebas (O1-17, perilla `comercio` de api.ts) */
+export const COMERCIO_E2E = { legal_name: "Comercio de Prueba SRL", legal_id: "3-102-000000", address: "", phone: "+506 2222-0000", email: "ventas@example.com", hours: "lunes a viernes de 8 a 5" };

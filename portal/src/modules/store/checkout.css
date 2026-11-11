@@ -175,3 +175,8 @@
 /* «Atras» + «Confirmar pedido · total» caben a 320 px: el texto parte renglon en vez de salirse */
 .ck-actions .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
 .ck-actions .ck-go { min-width: 0; }
+
+/* ---------- O1-17: privacidad, titular del pago y plazo de la reserva ---------- */
+.ck-privacy { margin: 0; font-size: 13.5px; color: var(--text-2); line-height: 1.5; }
+.ck-holder { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.ck-hold { margin: 0; text-align: center; font-size: 14px; font-weight: 600; color: var(--text); }

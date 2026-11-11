@@ -38,6 +38,16 @@ export type VProd = {
   tax_rate: number; item_type: string; display_price: string | number; display_currency: string; compare_display_price?: string | number | null;
   price_on_request?: boolean; availability: Avail; variants: Variant[]; price: string | number; currency: string;
 };
+/** Datos del comercio (O1-17, Mi Tienda -> Datos del comercio). Todo opcional: vacio = no se muestra. */
+export type Business = { legal_name?: string; legal_id?: string; address?: string; phone?: string; email?: string; hours?: string };
+/** las lineas del pie con los datos del comercio: solo lo que este lleno, nunca una etiqueta vacia */
+export function businessLines(b?: Business | null): string[] {
+  if (!b) return [];
+  const t = (v?: string) => (v || "").trim();
+  const quien = [t(b.legal_name), t(b.legal_id) && `Cédula jurídica ${t(b.legal_id)}`, t(b.address)].filter(Boolean).join(" · ");
+  const contacto = [t(b.phone) && `Tel. ${t(b.phone)}`, t(b.email), t(b.hours)].filter(Boolean).join(" · ");
+  return [quien, contacto].filter(Boolean);
+}
 export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
 
 export type StoreCtx = {
