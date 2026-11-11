@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import Principal, require_one_of
+from ..core.deps import Principal, require, require_one_of
 from ..models import Tenant
-from ..services import store_health
+from ..services import store_health, store_history
 
 router = APIRouter(tags=["tienda"])
 
@@ -26,3 +26,16 @@ def store_health_get(
     response.headers["Cache-Control"] = "private, max-age=60"
     return store_health.health(db, db.get(Tenant, p.tenant.id))
 
+
+# ---------- O4-02: historial seguro ----------
+@router.get("/store/history")
+def store_history_get(p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Ultimos 20 guardados de Mi Tienda: quien, cuando, que campos y cuales se pueden restaurar (sin valores)."""
+    return store_history.history(db, db.get(Tenant, p.tenant.id))
+
+
+@router.post("/store/history/{hid}/restore")
+def store_history_restore(hid: int, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
+    """Vuelve a poner lo de antes de ese guardado, solo en los campos de la lista blanca (nunca publicacion, dominio,
+    tipo de tienda, moneda ni cuentas). Queda en el historial y en la bitacora."""
+    return store_history.restore(db, p, hid)

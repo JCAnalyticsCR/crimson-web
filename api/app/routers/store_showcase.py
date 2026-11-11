@@ -31,6 +31,7 @@ from ..services import category_paths
 from ..services import family_filters as ff
 from ..services import product_typing as pt
 from ..services import store_ranking as ranking
+from ..services import store_history
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.brands import brand_key, canonical_brand
@@ -155,6 +156,8 @@ class ShowcaseIn(BaseModel):
     trust: list[TrustIn] | None = Field(None, max_length=6)
     faq: list[FaqIn] | None = Field(None, max_length=40)
     pages: dict[str, str] | None = None
+    # O4-02: version que leyo el panel (409 si otro guardo en el medio)
+    version: int | None = None
 
     @field_validator("pages")
     @classmethod
@@ -362,6 +365,7 @@ def _admin_out(t: Tenant, db: Session) -> dict:
         "kits_preview": kits_preview,
         "slug": t.slug,
         "domain": cfg.get("domain"),
+        "version": store_history.version_of(t, "showcase"),  # O4-02
     }
 
 
@@ -376,11 +380,14 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     # guardan enteros (JSON) y nunca desde una copia vieja. Otro guardado o el rearmado del snapshot pudieron escribir
     # despues de que esta peticion cargo la empresa.
     t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
+    store_history.check_version(t, "showcase", data.version)  # O4-02
     st = {**(t.settings or {})}
     store = {**STORE_DEFAULTS, **(st.get("store") or {})}
     sc = dict(store.get("showcase") or {})
+    sc_before = dict(sc)
     patch = data.model_dump(exclude_unset=True)
     patch.pop("ga4_id", None)  # EX-NOGA
+    patch.pop("version", None)
     if "featured" in patch:
         own = set(db.scalars(select(Product.id).where(Product.tenant_id == t.id, Product.id.in_(patch["featured"] or [])))) if patch["featured"] else set()
         patch["featured"] = [i for i in dict.fromkeys(patch["featured"] or []) if i in own]
@@ -450,6 +457,8 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     sc.update(patch)
     store["showcase"] = sc
     st["store"] = store
+    store_history.record(db, t, p.user.id, p.ip, "showcase", sc_before, sc)  # O4-02
+    store_history.bump_version(st, "showcase")
     t.settings = st
     # la portada responde 304 mientras no cambie la version: un kit editado se ve de inmediato
     sv.bump_catalog_version(db, t)

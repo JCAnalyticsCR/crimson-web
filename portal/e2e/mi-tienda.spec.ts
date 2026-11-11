@@ -42,8 +42,9 @@ async function login(page: Page) {
   await page.locator('input[type="email"]').fill(ADMIN);
   await page.locator('input[autocomplete="current-password"]').fill(CLAVE);
   await page.locator("button.lg-go").click();
-  const hola = page.locator(".welcome");  // la bienvenida del primer ingreso
-  if (await hola.isVisible().catch(() => false) || await hola.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
+  // la bienvenida sale despues de cada ingreso (sessionStorage), a veces unos segundos despues de pintar el panel
+  const hola = page.locator(".welcome");
+  if (await hola.waitFor({ timeout: 15000 }).then(() => true, () => false)) {
     await hola.getByRole("button", { name: /Empezar/ }).click();
     await expect(hola).toBeHidden();
   }
@@ -54,7 +55,7 @@ async function entrar(page: Page, base: string, ruta = "/mi-tienda") {
   await login(page);
   await page.waitForURL((u) => !u.pathname.startsWith("/login"));
   await ir(page, ruta);
-  await expect(page.locator(".sh-hub")).toBeVisible();
+  await expect(page.locator(".mt-hub")).toBeVisible({ timeout: 30_000 });
 }
 
 async function token(servidor: APIRequestContext): Promise<string> {
@@ -82,25 +83,77 @@ test("[O1-11b] despublicar pide confirmación con el efecto escrito", async ({ p
   expect(((await (await servidor.get("/api/store", { headers: h })).json()) as { published: boolean }).published).toBe(true);
 });
 
-test("[O1-11b] escribir un titular y luego guardar un banner no pierde nada", async ({ page, baseURL, servidor }, info) => {
+test("[O1-11b/O4-02] titular y banner en la misma sesión: un solo guardado, nada al perder el foco", async ({ page, baseURL, servidor }, info) => {
   solo768(info);
   await entrar(page, panel(baseURL), "/mi-tienda/portada");
+  const puts: string[] = [];
+  page.on("request", (r) => { if (r.method() === "PUT") puts.push(r.url()); });
   const titular = `Titular de prueba ${Date.now() % 100000}`;
   await campo(page, "Titular de la portada").fill(titular);
-  // sin salir del titular: el clic en «+ Banner» lo guarda (al perder el foco) y a la vez agrega el banner
-  await page.getByRole("button", { name: "Banner", exact: true }).click();
-  await expect(page.getByText("Vitrina actualizada").first()).toBeVisible();
-  const nuevo = campo(page, "Título", '[data-editor="banners"]').last();
-  await nuevo.fill("Promo de prueba");
+  await page.getByRole("button", { name: "Banner", exact: true }).click();  // antes, este clic guardaba el titular al perder el foco
+  await campo(page, "Título", '[data-editor="banners"]').last().fill("Promo de prueba");
   await expect(page.getByText("Este banner no se muestra hasta que tenga título e imagen.").last()).toBeVisible();
+  const barra = page.getByRole("region", { name: "Cambios sin guardar" });
+  await expect(barra).toContainText("2 cambios sin guardar");
+  expect(puts).toEqual([]);  // nada se guardo todavia
   const guardado = page.waitForResponse((r) => r.url().endsWith("/store/showcase") && r.request().method() === "PUT");
-  await page.getByRole("button", { name: "Guardar banners" }).click();
-  expect((await guardado).ok()).toBeTruthy();  // nace inactivo (O1-04): se guarda sin aviso y la tienda no lo pinta
-  await expect(campo(page, "Título", '[data-editor="banners"]').last()).toHaveValue("Promo de prueba");
+  await barra.getByRole("button", { name: "Guardar y publicar" }).click();
+  expect((await guardado).ok()).toBeTruthy();
+  await expect(barra).toBeHidden();
+  await expect(page.getByRole("button", { name: "Deshacer" })).toBeVisible();
   const h = { Authorization: `Bearer ${await token(servidor)}` };
   const sc = (await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { headline: string; banners: { title: string; active: boolean }[] };
   expect(sc.headline).toBe(titular);
-  expect(sc.banners.map((b) => [b.title, b.active])).toContainEqual(["Promo de prueba", false]);
+  expect(sc.banners.map((b) => [b.title, b.active])).toContainEqual(["Promo de prueba", false]);  // nace inactivo (O1-04)
+  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
+});
+
+test("[O4-02] deshacer, cambio de sección protegido, copia local y 409", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  const frase = async () => ((await (await servidor.get("/api/store", { headers: h })).json()) as { tagline: string }).tagline;
+  await entrar(page, panel(baseURL), "/mi-tienda/apariencia");
+  const antes = await frase();
+  const barra = page.getByRole("region", { name: "Cambios sin guardar" });
+  // guardar y deshacer
+  await campo(page, "Frase").fill("Frase de prueba uno");
+  await barra.getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(frase).toBe("Frase de prueba uno");
+  await page.getByRole("button", { name: "Deshacer" }).click();
+  await expect.poll(frase).toBe(antes);
+  // cambiar de seccion con cambios pide confirmacion; la copia local se ofrece al volver
+  await campo(page, "Frase").fill("Frase sin guardar");
+  await page.getByRole("navigation", { name: "Secciones de Mi Tienda" }).getByRole("link", { name: "Portada" }).click();
+  const aviso = page.locator(".modal").filter({ hasText: "Hay cambios sin guardar" });
+  await expect(aviso).toBeVisible();
+  await aviso.getByRole("button", { name: "Salir sin guardar" }).click();
+  await expect(page).toHaveURL(/\/mi-tienda\/portada$/);
+  await expect(campo(page, "Titular de la portada")).toBeVisible();  // Apariencia ya se desmonto
+  await ir(page, "/mi-tienda/apariencia");
+  await expect(barra).toContainText("en este dispositivo");
+  await barra.getByRole("button", { name: "Recuperarlos" }).click();
+  await expect(campo(page, "Frase")).toHaveValue("Frase sin guardar");
+  // otro guardo en el medio: 409 con el mensaje, nada se pisa
+  expect((await servidor.put("/api/store", { headers: h, data: { tagline: "Escrita en otra pestaña" } })).ok()).toBeTruthy();
+  await barra.getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect(barra).toContainText("Alguien más guardó cambios en esta sección. Recargue para verlos.");
+  expect(await frase()).toBe("Escrita en otra pestaña");
+  await barra.getByRole("button", { name: "Recargar" }).click();
+  await expect(campo(page, "Frase")).toHaveValue("Escrita en otra pestaña");
+  await servidor.put("/api/store", { headers: h, data: { tagline: antes } });
+});
+
+test("[O4-02] el historial restaura sin tocar la publicación", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  await servidor.put("/api/store/showcase", { headers: h, data: { subline: "Bajada original" } });
+  await servidor.put("/api/store/showcase", { headers: h, data: { subline: "Bajada cambiada" } });
+  await entrar(page, panel(baseURL), "/mi-tienda/historial");
+  const fila = page.locator("tbody tr").filter({ hasText: "Bajada" }).first();
+  await fila.getByRole("button", { name: "Restaurar" }).click();
+  await page.locator(".modal").getByRole("button", { name: "Restaurar" }).click();
+  await expect.poll(async () => ((await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { subline: string }).subline).toBe("Bajada original");
+  expect(((await (await servidor.get("/api/store", { headers: h })).json()) as { published: boolean }).published).toBe(true);
   expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
 });
 
@@ -115,7 +168,7 @@ test("[O4-01] cada sección tiene su dirección y recargar deja en la misma", as
   await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
   await page.reload();
   // el token vive en memoria: si la recarga pide entrar de nuevo, la direccion no cambia y vuelve a la misma seccion
-  await page.locator('.sh-hub, input[type="email"]').first().waitFor();
+  await page.locator('.mt-hub, input[type="email"]').first().waitFor();
   if (await page.locator('input[type="email"]').isVisible()) await login(page);
   await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
   await expect(page.getByRole("heading", { level: 1, name: "Páginas" })).toBeVisible();
@@ -131,9 +184,9 @@ test("[O4-01] con la bandera apagada el panel es el de una sola página", async 
     await page.waitForURL((u) => !u.pathname.startsWith("/login"));
     await ir(page, "/mi-tienda");
     await expect(page.getByText("Configura el sitio a tu gusto")).toBeVisible();
-    await expect(page.locator(".sh-hub")).toHaveCount(0);
+    await expect(page.locator(".mt-hub")).toHaveCount(0);
     await page.getByRole("button", { name: "Usar Mi Tienda por secciones" }).click();
-    await expect(page.locator(".sh-hub")).toBeVisible();
+    await expect(page.locator(".mt-hub")).toBeVisible();
   } finally {
     await servidor.put("/api/store", { headers: h, data: { panel_v2: true } });
   }
@@ -141,9 +194,9 @@ test("[O4-01] con la bandera apagada el panel es el de una sola página", async 
 
 test("[O4-01] ninguna sección tiene scroll de lado", async ({ page, baseURL }) => {
   await entrar(page, panel(baseURL));
-  for (const ruta of ["/mi-tienda", "/mi-tienda/apariencia", "/mi-tienda/portada", "/mi-tienda/kits", "/mi-tienda/paginas", "/mi-tienda/catalogo", "/mi-tienda/categorias", "/mi-tienda/pagos-envios", "/mi-tienda/seo", "/mi-tienda/publicacion"]) {
+  for (const ruta of ["/mi-tienda", "/mi-tienda/apariencia", "/mi-tienda/portada", "/mi-tienda/kits", "/mi-tienda/paginas", "/mi-tienda/catalogo", "/mi-tienda/categorias", "/mi-tienda/pagos-envios", "/mi-tienda/seo", "/mi-tienda/publicacion", "/mi-tienda/historial"]) {
     await ir(page, ruta);
-    await expect(page.locator(".sh-hub__body")).toBeVisible();
+    await expect(page.locator(".mt-hub__body")).toBeVisible();
     await page.waitForLoadState("networkidle");
     expect(await sinScrollDeLado(page), ruta).toBeLessThanOrEqual(0);
   }

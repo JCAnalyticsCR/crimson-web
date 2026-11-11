@@ -143,6 +143,8 @@ class StoreIn(BaseModel):
     business: BusinessIn | None = None
     ssr_body: SsrBodyIn | None = None
     panel_v2: bool | None = None
+    # O4-02: version que leyo el panel (409 si otro guardo en el medio); sin ella, como siempre
+    version: int | None = None
 
     @field_validator("shipping_rates")
     @classmethod
@@ -175,7 +177,9 @@ def _rates_with_ids(nuevas: list[RateIn], antes: list[dict]) -> list[dict]:
 
 @router.get("/store")
 def get_store(p: Principal = Depends(require("settings", "ver"))):
-    return {**store_cfg(p.tenant), "slug": p.tenant.slug}
+    from ..services.store_history import version_of
+
+    return {**store_cfg(p.tenant), "slug": p.tenant.slug, "version": version_of(p.tenant, "store")}
 
 
 # cuentas en la bitacora (O1-11b): IBAN de Costa Rica y numeros de 8 cifras o mas (SINPE, telefonos) enmascarados
@@ -226,9 +230,12 @@ def put_store(data: StoreIn, p: Principal = Depends(require("settings", "configu
     # O1-11b: se relee la fila de la empresa con candado (SELECT ... FOR UPDATE; populate_existing: la sesion ya la tenia
     # de los permisos) y se cambian solo las llaves de la tienda que vinieron. Antes se reescribia el JSON de ajustes con
     # la copia cargada al empezar: un guardado de la vitrina o del checkout hecho en el medio se perdia.
+    from ..services import store_history
+
     t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
+    store_history.check_version(t, "store", data.version)  # O4-02: con la fila ya bloqueada
     st = {**(t.settings or {})}
-    vals = data.model_dump(exclude_unset=True)
+    vals = data.model_dump(exclude_unset=True, exclude={"version"})
     if data.shipping_rates is not None:
         vals["shipping_rates"] = _rates_with_ids(data.shipping_rates, store_cfg(t).get("shipping_rates") or [])
     before = {**STORE_DEFAULTS, **(st.get("store") or {})}
@@ -243,9 +250,14 @@ def put_store(data: StoreIn, p: Principal = Depends(require("settings", "configu
         # vitrina (304 por version) y el snapshot muestren lo nuevo
         audit(db, t.id, p.user.id, "update", "store", t.id, {"campos": sorted(despues)}, ip=p.ip, before=antes, after=despues)
         bump_catalog_version(db, t)
+        # O4-02: historial seguro (solo campos restaurables; nada de cuentas ni textos legales) y version nueva
+        store_history.record(db, t, p.user.id, p.ip, "store", before, st["store"])
+        st = {**(t.settings or {})}  # releer: bump_catalog_version ya escribio catalog_v en los ajustes
+        store_history.bump_version(st, "store")
+        t.settings = st
     mark_dirty_after_commit(db, t.id)  # O1-13: nombre, moneda o envio cambian lo que muestra la tienda
     db.commit()
-    return {**store_cfg(t), "slug": t.slug}
+    return {**store_cfg(t), "slug": t.slug, "version": store_history.version_of(t, "store")}
 
 
 # ---------- Admin: paginas y bloques ----------

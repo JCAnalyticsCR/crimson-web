@@ -26,7 +26,7 @@ export default function StoreResumen() {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => { api<Health>("/store/health").then(setH).catch((e) => setErr(e.message)); }, []);
   const secs = visibleSections(allows, me?.role === "admin").filter((s) => s.key !== "resumen");
-  if (err) return <Card title="Resumen"><p className="sh-lead">No se pudo leer el resumen: {err}</p></Card>;
+  if (err) return <Card title="Resumen"><p className="mt-lead">No se pudo leer el resumen: {err}</p></Card>;
   if (!h) return <Loading />;
   const i = h.indicadores;
   const pct = h.avance.total ? Math.round((h.avance.listos / h.avance.total) * 100) : 0;
@@ -46,7 +46,7 @@ export default function StoreResumen() {
       </div>
 
       <Card title="Lista para vender" extra={<span className="meta" style={{ textTransform: "none" }}>{h.avance.listos} de {h.avance.total} listos</span>}>
-        <div className="sh-stack">
+        <div className="mt-stack">
           <div className="rs-bar" role="progressbar" aria-valuemin={0} aria-valuemax={h.avance.total} aria-valuenow={h.avance.listos} aria-label={`Lista para vender: ${h.avance.listos} de ${h.avance.total}`}><i style={{ width: `${pct}%` }} /></div>
           {GRUPOS.map((g) => {
             const xs = h.items.filter((x) => x.grupo === g);
@@ -72,14 +72,14 @@ export default function StoreResumen() {
       </Card>
 
       <Card title="Promesas cumplidas">
-        <div className="sh-stack">
-          <p className="sh-lead">Pedidos cancelados en los últimos 30 días: <b>{fmt(h.promesas.cancelados_30)}</b>.</p>
+        <div className="mt-stack">
+          <p className="mt-lead">Pedidos cancelados en los últimos 30 días: <b>{fmt(h.promesas.cancelados_30)}</b>.</p>
           {/* O2-12 (Ola 2): fichas más vistas, clics de WhatsApp y búsquedas sin resultado, con contadores propios y anónimos */}
-          {!h.contadores && <p className="sh-lead">Las fichas más vistas, los productos con más consultas por WhatsApp y las búsquedas sin resultado aparecerán aquí cuando la tienda empiece a contarlos (sin herramientas de terceros).</p>}
+          {!h.contadores && <p className="mt-lead">Las fichas más vistas, los productos con más consultas por WhatsApp y las búsquedas sin resultado aparecerán aquí cuando la tienda empiece a contarlos (sin herramientas de terceros).</p>}
         </div>
       </Card>
 
-      <div className="sh-index" aria-label="Secciones">
+      <div className="mt-index" aria-label="Secciones">
         {secs.map((s) => <Link key={s.key} to={sectionUrl(s)}><b>{s.label}</b><span>{s.hint}</span></Link>)}
       </div>
     </>

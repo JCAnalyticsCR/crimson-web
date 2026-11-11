@@ -33,6 +33,7 @@ describe("secciones de Mi Tienda", () => {
     const keys = visibleSections(allowsFor({ settings: ["ver", "configurar"] }), false).map((s) => s.key);
     expect(keys).not.toContain("pruebas");
     expect(keys).toContain("publicacion");
+    expect(keys).toContain("historial");
   });
 
   it("sin permisos de tienda no ve nada", () => {

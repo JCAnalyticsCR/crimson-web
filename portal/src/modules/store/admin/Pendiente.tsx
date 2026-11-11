@@ -15,8 +15,8 @@ export default function Pendiente({ seccion }: { seccion: string }) {
   const t = TEXTOS[seccion] || { title: "Próximamente", text: "Esta sección todavía no está lista." };
   return (
     <Card title={t.title}>
-      <div className="sh-stack">
-        <p className="sh-lead">{t.text}</p>
+      <div className="mt-stack">
+        <p className="mt-lead">{t.text}</p>
         {t.link && <div><Link className="btn btn--ghost btn--sm" to={t.link[0]}>{t.link[1]}</Link></div>}
       </div>
     </Card>

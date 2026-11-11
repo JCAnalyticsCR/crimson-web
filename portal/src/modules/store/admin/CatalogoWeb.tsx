@@ -7,7 +7,7 @@ export default function CatalogoWeb() {
   return (
     <>
       <Card title="Dónde se edita cada cosa">
-        <div className="sh-row">
+        <div className="mt-row">
           <Link className="btn btn--ghost btn--sm" to="/inventario?tab=web">Inventario web</Link>
           <Link className="btn btn--ghost btn--sm" to="/productos">Productos y servicios</Link>
         </div>

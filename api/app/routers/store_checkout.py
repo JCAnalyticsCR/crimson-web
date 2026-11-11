@@ -35,7 +35,7 @@ from ..core.ratelimit import (
 )
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
-from ..services import cr_geo, email_check, onvo, store_inventory
+from ..services import cr_geo, email_check, onvo, store_history, store_inventory
 from ..services import inventory as invsvc
 from ..services import store_orders as so
 from ..services.documents import audit
@@ -501,6 +501,8 @@ class CheckoutCfgIn(_Cfg):
     web_orders_commission: bool | None = None
     # 21/10, item 45: transportistas para "Marcar enviado" (ademas se puede escribir otro)
     carriers: list[str] = Field(default_factory=lambda: list(so.CHECKOUT_DEFAULTS["carriers"]), max_length=12)
+    # O4-02: version que leyo el panel (409 si otro guardo en el medio)
+    version: int | None = None
 
     @field_validator("carriers")
     @classmethod
@@ -522,6 +524,7 @@ def _cfg_out(db: Session, t: Tenant) -> dict:
         "role_choices": assignable_roles(db, t),
         "role_labels": {r.code: r.name for r in custom_roles(db, t)},
         "onvo": {"configured": bool(key := so.onvo_secret(db, t)), "simulation": so.simulation_allowed(), "mode": key_mode(key)},
+        "version": store_history.version_of(t, "checkout"),  # O4-02
     }
 
 
@@ -543,10 +546,15 @@ def put_checkout_cfg(data: CheckoutCfgIn, p: Principal = Depends(require("settin
     # O1-11b: se relee con candado y solo se cambia la llave del checkout (antes la copia cargada al empezar podia
     # pisar un guardado de la vitrina o de Mi Tienda hecho en el medio)
     t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
+    store_history.check_version(t, "checkout", data.version)  # O4-02
     st = {**(t.settings or {})}
     store = {**(st.get("store") or {})}
-    store["checkout"] = data.model_dump(mode="json", exclude={"web_orders_commission"})
+    antes = dict(store.get("checkout") or {})
+    store["checkout"] = data.model_dump(mode="json", exclude={"web_orders_commission", "version"})
     st["store"] = store
+    # O4-02: historial (los metodos de pago, con sus cuentas, nunca se guardan ni se restauran) y version nueva
+    store_history.record(db, t, p.user.id, p.ip, "checkout", antes, store["checkout"])
+    store_history.bump_version(st, "checkout")
     t.settings = st
     audit(db, t.id, p.user.id, "update", "store_checkout", t.id, {"methods": [k for k, v in data.methods.model_dump().items() if v.get("active")]}, ip=p.ip)
     db.commit()

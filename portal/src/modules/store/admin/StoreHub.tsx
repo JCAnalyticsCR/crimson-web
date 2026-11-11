@@ -11,7 +11,7 @@ import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useM
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../../lib/api";
 import { useSession } from "../../../app/session";
-import { I, Icon, Loading } from "../../../ui/components";
+import { I, Icon, Loading, Modal } from "../../../ui/components";
 import Guard from "../../../app/Guard";
 import type { StoreCfg } from "../Store";
 import { BASE, GROUPS, SECTIONS, sectionFor, sectionUrl, visibleSections, type SectionKey } from "./sections";
@@ -30,14 +30,17 @@ const Categorias = lazy(() => import("./CategoriasEditor"));
 const SeoSection = lazy(() => import("./StoreSeo"));
 const Portada = lazy(() => import("./PortadaEditor"));
 const Pendiente = lazy(() => import("./Pendiente"));
+const Historial = lazy(() => import("./Historial"));
 
 type Hub = {
   /** null mientras carga; undefined si la cuenta no puede leer /store (solo edita el catalogo) */
   cfg: StoreCfg | null | undefined;
   setCfg: (c: StoreCfg) => void;
   reload: () => void;
+  /** O4-02: cuantos cambios sin guardar tiene cada barra de guardado (para avisar antes de cambiar de seccion) */
+  setDirty: (id: string, n: number) => void;
 };
-const HubCtx = createContext<Hub>({ cfg: undefined, setCfg: () => {}, reload: () => {} });
+const HubCtx = createContext<Hub>({ cfg: undefined, setCfg: () => {}, reload: () => {}, setDirty: () => {} });
 /** La configuracion de la tienda que ya cargo Mi Tienda (una sola lectura para todas las secciones). */
 export const useHub = () => useContext(HubCtx);
 
@@ -51,7 +54,14 @@ export default function StoreHub() {
     api<StoreCfg>("/store").then(setCfg).catch(() => setCfg(undefined));
   }, [allows]);
   useEffect(reload, [reload]);
-  const hub = useMemo(() => ({ cfg, setCfg, reload }), [cfg, reload]);
+  /* O4-02: cambios sin guardar de la seccion abierta. Cambiar de seccion con cambios pide confirmacion (lo escrito
+     queda ademas copiado en este dispositivo: useDraft lo ofrece al volver) */
+  const [dirty, setDirtyMap] = useState<Record<string, number>>({});
+  const setDirty = useCallback((id: string, n: number) => setDirtyMap((m) => ((m[id] || 0) === n ? m : { ...m, [id]: n })), []);
+  const pendientes = Object.values(dirty).reduce((a, b) => a + b, 0);
+  const [irA, setIrA] = useState<string | null>(null);
+  const go = (to: string) => { if (pendientes && to !== loc.pathname) setIrA(to); else navigate(to); };
+  const hub = useMemo(() => ({ cfg, setCfg, reload, setDirty }), [cfg, reload, setDirty]);
 
   const isAdmin = me?.role === "admin";
   const visibles = visibleSections(allows, isAdmin);
@@ -89,17 +99,18 @@ export default function StoreHub() {
         </div>
       </div>
 
-      <div className="sh-hub">
-        <nav className="sh-hub__nav" aria-label="Secciones de Mi Tienda">
+      <div className="mt-hub">
+        <nav className="mt-hub__nav" aria-label="Secciones de Mi Tienda">
           {GROUPS.map((g) => {
             const items = visibles.filter((s) => s.group === g);
             if (!items.length) return null;
             return (
-              <div key={g} className="sh-hub__group">
-                <span className="sh-hub__glabel">{g === "Aparte" ? "Publicación" : g}</span>
+              <div key={g} className="mt-hub__group">
+                <span className="mt-hub__glabel">{g === "Aparte" ? "Publicación" : g}</span>
                 {items.map((s) => (
                   <NavLink key={s.key} to={sectionUrl(s)} end={s.key === "resumen"} title={s.hint}
-                    className={({ isActive }) => `sh-hub__link${isActive || cur?.key === s.key ? " is-active" : ""}${s.group === "Aparte" ? " sh-hub__link--aparte" : ""}`}>
+                    onClick={(e) => { if (pendientes && sectionUrl(s) !== loc.pathname) { e.preventDefault(); setIrA(sectionUrl(s)); } }}
+                    className={({ isActive }) => `mt-hub__link${isActive || cur?.key === s.key ? " is-active" : ""}${s.group === "Aparte" ? " mt-hub__link--aparte" : ""}`}>
                     {s.label}
                   </NavLink>
                 ))}
@@ -107,14 +118,14 @@ export default function StoreHub() {
             );
           })}
         </nav>
-        <label className="sh-hub__select">
+        <label className="mt-hub__select">
           <span className="meta">Sección</span>
-          <select className="select" value={cur ? sectionUrl(cur) : BASE} onChange={(e) => navigate(e.target.value)} aria-label="Sección de Mi Tienda">
+          <select className="select" value={cur ? sectionUrl(cur) : BASE} onChange={(e) => go(e.target.value)} aria-label="Sección de Mi Tienda">
             {visibles.map((s) => <option key={s.key} value={sectionUrl(s)}>{s.label}</option>)}
           </select>
         </label>
 
-        <div className="sh-hub__body">
+        <div className="mt-hub__body">
           <Suspense fallback={<Loading />}>
             <Routes>
               <Route index element={el("resumen", <StoreResumen />)} />
@@ -128,12 +139,18 @@ export default function StoreHub() {
               <Route path="pagos-envios" element={el("pagos-envios", <PagosEnvios />)} />
               <Route path="seo" element={el("seo", <SeoSection />)} />
               <Route path="publicacion" element={el("publicacion", <Publicacion />)} />
+              <Route path="historial" element={el("historial", <Historial />)} />
               <Route path="pruebas" element={el("pruebas", <TestShop />)} />
               <Route path="*" element={<Navigate to={BASE} replace />} />
             </Routes>
           </Suspense>
         </div>
       </div>
+      {irA && (
+        <Modal title="Hay cambios sin guardar" onClose={() => setIrA(null)} foot={<><button className="btn btn--ghost" onClick={() => setIrA(null)}>Seguir editando</button><button className="btn btn--danger" onClick={() => { const to = irA; setIrA(null); navigate(to); }}>Salir sin guardar</button></>}>
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>Tiene {pendientes === 1 ? "1 cambio sin guardar" : `${pendientes} cambios sin guardar`} en esta sección. Si sale ahora no se publican; queda una copia en este dispositivo y al volver se le ofrece recuperarla.</p>
+        </Modal>
+      )}
     </HubCtx.Provider>
   );
 }

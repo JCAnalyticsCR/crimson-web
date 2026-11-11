@@ -10,7 +10,7 @@
 
 export type SectionKey =
   | "resumen" | "apariencia" | "portada" | "kits" | "paginas" | "catalogo" | "categorias" | "contenido"
-  | "pagos-envios" | "seo" | "publicacion" | "pruebas";
+  | "pagos-envios" | "seo" | "publicacion" | "historial" | "pruebas";
 
 export type Section = {
   key: SectionKey;
@@ -38,6 +38,8 @@ export const SECTIONS: Section[] = [
   { key: "pagos-envios", path: "pagos-envios", label: "Pagos y envíos", hint: "Tarifas, envío gratis, retiro, formas de pago y datos del comercio", need: "settings.configurar", group: "Venta" },
   { key: "seo", path: "seo", label: "SEO", hint: "Título, descripción y vista previa en Google", need: "settings.configurar", group: "Venta" },
   { key: "publicacion", path: "publicacion", label: "Publicación y dominio", hint: "Publicar, dominio, tipo de tienda y moneda", need: "settings.configurar", group: "Aparte" },
+  /* O4-02: los ultimos 20 guardados, con «Restaurar» para lo que se puede volver atras */
+  { key: "historial", path: "historial", label: "Historial", hint: "Quién cambió qué y cuándo, y restaurar", need: "settings.configurar", group: "Aparte" },
   { key: "pruebas", path: "pruebas", label: "Tienda de pruebas", hint: "Pagos con ONVO en modo Test", need: "settings.configurar", group: "Aparte", adminOnly: true },
 ];
 
