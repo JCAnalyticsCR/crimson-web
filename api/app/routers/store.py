@@ -350,6 +350,9 @@ def _order_out(o: Order):
         "seller_id": o.seller_id,  # encargado del pedido web (21/10, items 24/42): atenderlo no comisiona
         "attended_by_id": o.attended_by_id,  # vendedor que atendio (reunion 2, item 12): el que comisiona
         "attended_source": o.attended_source,
+        # EX-OPT: el panel muestra «Acepta ofertas: Sí/No» (y desde cuando)
+        "marketing_opt_in": bool(o.marketing_opt_in),
+        "marketing_opt_in_at": aware(o.marketing_opt_in_at),
         "assigned_at": aware(o.assigned_at),
         "lines": [
             {
@@ -828,6 +831,8 @@ class CheckoutIn(BaseModel):
     coupon_code: str | None = Field(None, max_length=40)
     notes: str | None = Field(None, max_length=1000)
     accept_terms: bool = False
+    # EX-OPT: casilla opcional y desmarcada «Quiero recibir ofertas y novedades»; solo True si la persona la marco
+    marketing_opt_in: bool = False
     # misma clave = mismo pedido (doble clic, reintento por red lenta)
     idempotency_key: str | None = Field(None, min_length=8, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     # el total que el comprador vio: si el servidor calcula otro, no se crea el pedido

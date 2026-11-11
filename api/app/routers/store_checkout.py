@@ -243,6 +243,8 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
         notes=data.notes,
         idempotency_key=data.idempotency_key,
         terms_accepted_at=now if data.accept_terms else None,
+        marketing_opt_in=bool(data.marketing_opt_in),
+        marketing_opt_in_at=now if data.marketing_opt_in else None,
         history=[{"status": "nuevo", "at": now.isoformat(), "by": "cliente"}],
     )
     for i, lo in zip(items, calc.lines, strict=True):

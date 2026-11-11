@@ -64,6 +64,8 @@ type Form = {
   dtype: "envio" | "retiro"; province: string; canton: string; district: string; address: string; rate: string;
   method: string; coupon: string; notes: string; terms: boolean; save: boolean; website: string;
   seller?: string;
+  /** EX-OPT: casilla opcional y desmarcada de ofertas; nunca se guarda en «mis datos» (vale para este pedido) */
+  ofertas?: boolean;
 };
 /* Etiqueta y ayuda del pago con tarjeta (O1-10a). Solo cambia lo que se MUESTRA: el codigo del metodo y la etiqueta
    guardada en los pedidos (store_orders.METHOD_LABEL) no se tocan, y la palabra «tarjeta» se queda a proposito
@@ -295,7 +297,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     try {
       const { data } = await api<Placed>("/checkout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, shipping_rate_id: rateId, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => x.id === f.seller) ? f.seller : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
+        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, shipping_rate_id: rateId, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, marketing_opt_in: !!f.ofertas, attended_by: cfg?.sellers?.some((x) => x.id === f.seller) ? f.seller : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
       session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)
@@ -479,6 +481,11 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
                 <span>Acepto los {S.legal?.terms ? <button type="button" className="ck-link" onClick={() => setShowTerms(true)} aria-haspopup="dialog">términos y condiciones</button> : "términos y condiciones"} de compra{cfg.terms_required ? "" : " (opcional)"}</span>
               </label>
               {fe("terms") && <small id="ck-err-terms" className="ck-ferr">{fe("terms")}</small>}
+              {/* EX-OPT: aparte de los terminos, opcional y desmarcada: la publicidad solo va a quien la acepta */}
+              <label className="ck-check">
+                <input type="checkbox" data-f="ofertas" checked={!!f.ofertas} onChange={(e) => set("ofertas", e.target.checked)} />
+                <span>Quiero recibir ofertas y novedades de {S.name} por correo o WhatsApp. Podés darte de baja cuando quieras.</span>
+              </label>
             </>
           )}
 

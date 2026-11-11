@@ -38,7 +38,7 @@ test("[O1-10c] por confirmar en el carrito: aviso visible desde el paso 1 y «Qu
   await page.locator("label.sh-opt", { hasText: "SINPE Móvil" }).click();
   await seguir.click();
   await expect(titulo).toContainText("Confirmar");
-  await page.locator("label.ck-check input[type=checkbox]").check();
+  await page.locator("input[data-f=terms]").check();
   await page.getByRole("button", { name: /^Confirmar pedido/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(/^(ORD|DEMO)-[0-9]+$/); // el numero del pedido (simulado)
 });

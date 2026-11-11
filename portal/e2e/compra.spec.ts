@@ -85,7 +85,7 @@ test("compra SINPE completa: del catálogo a «Mi pedido» con las instrucciones
   await expect(titulo).toContainText("Confirmar");
   const confirmar = page.getByRole("button", { name: /^Confirmar pedido/ });
   await expect(confirmar).toContainText(monto(TOTAL));
-  await page.locator("label.ck-check input[type=checkbox]").check();
+  await page.locator("input[data-f=terms]").check();
   await confirmar.click();
 
   // pedido creado: «Mi pedido», el pedido en el servidor y la existencia
@@ -152,7 +152,7 @@ test("la misma compra solo con teclado: ni ratón ni dedo", async ({ page, servi
 
   // paso 4 · confirmar: la casilla de los terminos se marca con la barra espaciadora
   await expect(titulo).toContainText("Confirmar");
-  const terminos = page.locator("label.ck-check input[type=checkbox]");
+  const terminos = page.locator("input[data-f=terms]");
   await tabHasta(page, terminos);
   await page.keyboard.press("Space");
   await expect(terminos).toBeChecked();

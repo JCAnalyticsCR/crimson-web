@@ -54,7 +54,7 @@ test("compra simulada con SINPE: de la ficha a «Mi pedido»", async ({ page }) 
   await expect(titulo).toContainText("Confirmar");
   const confirmar = page.getByRole("button", { name: /^Confirmar pedido/ });
   await expect(confirmar).toContainText(/6\s519/);
-  await page.locator("label.ck-check input[type=checkbox]").check();
+  await page.locator("input[data-f=terms]").check();
   await confirmar.click();
 
   // «Mi pedido»: numero de prueba, como pagar y carrito vacio

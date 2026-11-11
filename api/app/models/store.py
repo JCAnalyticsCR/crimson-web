@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -80,6 +80,10 @@ class Order(TenantMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # plazo para pagar
     inventory_state: Mapped[str | None] = mapped_column(String(12))  # held | released | fulfilled
     terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # EX-OPT: aceptó recibir ofertas y novedades (casilla opcional del checkout, desmarcada) y cuando. Sin esto, nada
+    # de publicidad (la Politica de privacidad lo promete).
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    marketing_opt_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # vendedor del pedido web (21/10, items 24/42): lo asigna el admin o lo "toma" el vendedor. La factura que nace del
     # pedido queda a su nombre (seller_id) y comisiona como una venta propia salvo que Mi Tienda lo apague.
     seller_id: Mapped[int | None] = mapped_column(ForeignKey("user.id"), index=True)

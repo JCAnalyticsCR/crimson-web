@@ -31,6 +31,8 @@ type Order = {
   /* reunion 2 (item 12): "Vendedor que atendió", el vendedor del cliente y el único que comisiona; lo pone el admin
      o lo eligió el cliente en el checkout (attended_source) */
   attended_by_id?: number | null; attended_by_name?: string | null; attended_source?: "admin" | "cliente" | null;
+  /* EX-OPT: aceptó recibir ofertas en el checkout (casilla aparte, opcional) y cuando; sin el dato = no */
+  marketing_opt_in?: boolean; marketing_opt_in_at?: string | null;
   /* "Tomar" solo en pedidos por atender y sin factura (lo decide el servidor: store_orders.TAKEABLE) */
   takeable?: boolean;
   /* transportistas de Mi Tienda, tal cual (vacia = se escribe a mano); vienen en el detalle del pedido */
@@ -364,7 +366,8 @@ function Detail({ o, labels, meta, onClose, onChange }: { o: Order; labels: Reco
       <div className="wo-detail">
         <div className="wo-grid">
           {editContact ? <ContactForm o={o} onCancel={() => setEditContact(false)} onSaved={(r) => { setEditContact(false); onChange(r); }} /> : (
-          <div className="wo-box"><span className="meta">Cliente</span><b>{c.name}</b>{c.company && <span>{c.company}</span>}<span>{c.email}</span>{o.notify_email && o.notify_email.toLowerCase() !== (c.email || "").toLowerCase() && <span className="muted" style={{ fontSize: 12 }} title="Correo actual de la ficha del cliente">Avisos a: <b>{o.notify_email}</b></span>}<span>{c.phone}</span>{c.id_number && <span className="mono">Céd. {c.id_number}</span>}{o.customer_id && <Link to={`/clientes/${o.customer_id}`} className="row-link">Ficha del cliente →</Link>}
+          <div className="wo-box"><span className="meta">Cliente</span><b>{c.name}</b>{c.company && <span>{c.company}</span>}<span>{c.email}</span>{o.notify_email && o.notify_email.toLowerCase() !== (c.email || "").toLowerCase() && <span className="muted" style={{ fontSize: 12 }} title="Correo actual de la ficha del cliente">Avisos a: <b>{o.notify_email}</b></span>}<span>{c.phone}</span>{c.id_number && <span className="mono">Céd. {c.id_number}</span>}
+            <span title="Casilla aparte del checkout: solo a quien dijo que sí se le pueden mandar ofertas">Acepta ofertas: <b>{o.marketing_opt_in ? "Sí" : "No"}</b>{o.marketing_opt_in && o.marketing_opt_in_at ? <span className="muted"> · desde {when(o.marketing_opt_in_at)}</span> : null}</span>{o.customer_id && <Link to={`/clientes/${o.customer_id}`} className="row-link">Ficha del cliente →</Link>}
             {o.can_edit_contact
               ? <button className="btn btn--ghost btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }} onClick={() => setEditContact(true)}>Editar datos</button>
               : <span className="muted" style={{ fontSize: 12 }}>Solo el administrador edita estos datos.</span>}
