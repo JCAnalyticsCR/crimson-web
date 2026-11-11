@@ -49,3 +49,21 @@
 .sh-index a:hover { border-color: var(--hair-2); }
 .sh-index a span { font-size: 12.5px; color: var(--text-2); }
 
+/* ---------- resumen (O4-03) ---------- */
+.rs-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.rs-tile { display: grid; gap: 2px; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 12px; background: var(--surface); min-width: 0; }
+.rs-tile__k { font-size: 12.5px; color: var(--text-2); }
+.rs-tile__v { font-size: 26px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.rs-tile__d { font-size: 12px; color: var(--text-3); }
+.rs-bar { height: 8px; border-radius: 99px; background: var(--bg-2); overflow: hidden; }
+.rs-bar i { display: block; height: 100%; background: var(--ok); }
+.rs-group { display: grid; gap: 6px; }
+.rs-group__t { margin: 6px 0 0; font-size: 14px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.rs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rs-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--hair); border-radius: 10px; font-size: 13.5px; }
+.rs-item.is-ok { color: var(--text-2); }
+.rs-item__t { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .rs-item { grid-template-columns: auto minmax(0, 1fr); }
+  .rs-item .btn { grid-column: 1 / -1; justify-self: start; }
+}

@@ -115,7 +115,8 @@ test("[O4-01] cada sección tiene su dirección y recargar deja en la misma", as
   await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
   await page.reload();
   // el token vive en memoria: si la recarga pide entrar de nuevo, la direccion no cambia y vuelve a la misma seccion
-  if (await page.locator('input[type="email"]').isVisible({ timeout: 5000 }).catch(() => false)) await login(page);
+  await page.locator('.sh-hub, input[type="email"]').first().waitFor();
+  if (await page.locator('input[type="email"]').isVisible()) await login(page);
   await expect(page).toHaveURL(/\/mi-tienda\/paginas$/);
   await expect(page.getByRole("heading", { level: 1, name: "Páginas" })).toBeVisible();
 });
@@ -150,6 +151,24 @@ test("[O4-01] ninguna sección tiene scroll de lado", async ({ page, baseURL }) 
   const w = page.viewportSize()?.width || 0;
   if (w <= 480) await expect(page.getByLabel("Sección de Mi Tienda")).toBeVisible();
   else await expect(page.getByRole("navigation", { name: "Secciones de Mi Tienda" })).toBeVisible();
+});
+
+test("[O4-03] el resumen dice qué falta y lleva a corregirlo", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  const salud = (await (await servidor.get("/api/store/health", { headers: h })).json()) as { indicadores: { publicados: number; visibles: number }; avance: { listos: number; total: number }; items: { ok: boolean; to: string; texto: string }[] };
+  const inv = (await (await servidor.get("/api/store/inventory", { headers: h })).json()) as { summary: { publicados: number } };
+  expect(salud.indicadores.publicados).toBe(inv.summary.publicados);
+  await entrar(page, panel(baseURL));
+  await expect(page.getByRole("list", { name: "Indicadores de la tienda" })).toContainText("Visibles en la tienda");
+  await expect(page.getByText(`${salud.avance.listos} de ${salud.avance.total} listos`)).toBeVisible();
+  const falta = salud.items.find((x) => !x.ok);
+  if (falta) {
+    const fila = page.locator(".rs-item").filter({ hasText: falta.texto });
+    await fila.getByRole("link", { name: "Corregir" }).click();
+    await expect(page).toHaveURL((u) => u.pathname + u.search === falta.to);
+  }
+  expect(await sinScrollDeLado(page)).toBeLessThanOrEqual(0);
 });
 
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
