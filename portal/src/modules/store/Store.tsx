@@ -1,5 +1,5 @@
 /* Mi Tienda: personalizacion + constructor de bloques con vista previa en vivo (mismo render que el sitio publico). */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -8,10 +8,11 @@ import { Blocks } from "./Blocks";
 import { GalleryField, ImageField } from "../../ui/MediaPicker";
 import CheckoutSettings from "./CheckoutSettings";
 import StoreShowcaseAdmin from "./StoreShowcaseAdmin";
+import { formatCRCInput } from "../../lib/parseCRC";
+import { FREE_CONFIRM, checkRate, freeEverywhere, suspiciousAmount, type Rate, type RateText } from "./rates";
 
 export type Block = { type: string; [k: string]: unknown };
 type Page = { id: number; slug: string; title: string; blocks: Block[]; published: boolean; in_nav: boolean; position: number };
-type Rate = { name: string; amount: number; active: boolean; per_kg?: number; overhead_pct?: number };
 type Cfg = { slug: string; name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; domain: string | null; published: boolean; kind: string; shipping_rates: Rate[]; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
 
 const NEW_BLOCK: Record<string, Block> = {
@@ -37,7 +38,7 @@ export default function Store() {
   const load = () => { api<Cfg>("/store").then(setCfg); api<Page[]>("/store/pages").then((r) => { setPages(r); setSel((s) => (s ? r.find((x) => x.id === s.id) || r[0] || null : r[0] || null)); }); };
   useEffect(load, []);
 
-  const saveCfg = (patch: Partial<Cfg>) => api<Cfg>("/store", { method: "PUT", json: patch }).then((c) => { setCfg(c); toast("Tienda actualizada"); }).catch((e) => toast(e.message, "bad"));
+  const saveCfg = (patch: Partial<Cfg>): Promise<boolean> => api<Cfg>("/store", { method: "PUT", json: patch }).then((c) => { setCfg(c); toast("Tienda actualizada"); return true; }).catch((e) => { toast(e.message, "bad"); return false; });
   const savePage = (p: Page) => api<Page>(`/store/pages/${p.id}`, { method: "PUT", json: { slug: p.slug, title: p.title, blocks: p.blocks, published: p.published, in_nav: p.in_nav, position: p.position } }).then((r) => { setSel(r); setPages(pages.map((x) => (x.id === r.id ? r : x))); toast("Página guardada"); }).catch((e) => toast(e.message, "bad"));
   const createPage = () => { if (!newPage) return; api<Page>("/store/pages", { method: "POST", json: { ...newPage, blocks: [NEW_BLOCK.hero], published: false } }).then(() => { setNewPage(null); load(); }).catch((e) => toast(e.message, "bad")); };
   const delPage = (p: Page) => { if (!confirm(`¿Eliminar la página “${p.title}”?`)) return; api(`/store/pages/${p.id}`, { method: "DELETE" }).then(() => { setSel(null); load(); }); };
@@ -75,25 +76,7 @@ export default function Store() {
               <Field label="Dominio" hint={`Gratis: ${location.host}${publicUrl} · propio: apuntar un CNAME al portal`}><input className="input" defaultValue={cfg.domain || ""} placeholder="tienda.crimsoncr.com" onBlur={(e) => saveCfg({ domain: e.target.value })} /></Field>
             </div>
           </Card>
-          <Card title="Tarifas de envío" extra={<button className="btn btn--ghost btn--sm" onClick={() => saveCfg({ shipping_rates: [...cfg.shipping_rates, { name: "Nuevo envío", amount: 0, active: true }] })}><Icon d={I.plus} />Agregar</button>}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {cfg.shipping_rates.length > 0 && <div className="meta ship-row ship-row--head"><span>Nombre</span><span>Base ₡</span><span>₡ por kg</span><span>Recargo %</span><span /><span /></div>}
-              {cfg.shipping_rates.map((r, i) => {
-                const upd = (patch: Partial<Rate>) => saveCfg({ shipping_rates: cfg.shipping_rates.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
-                return (
-                  <div key={i} className="ship-row">
-                    <input className="input" defaultValue={r.name} onBlur={(e) => upd({ name: e.target.value })} />
-                    <input className="input input--mono" defaultValue={r.amount} onBlur={(e) => upd({ amount: Number(e.target.value) })} />
-                    <input className="input input--mono" defaultValue={r.per_kg ?? 0} onBlur={(e) => upd({ per_kg: Number(e.target.value) })} title="Correos de CR: monto por kilo (mínimo 1 kg)" />
-                    <input className="input input--mono" defaultValue={r.overhead_pct ?? 0} onBlur={(e) => upd({ overhead_pct: Number(e.target.value) })} title="Recargo porcentual (manejo, seguro)" />
-                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={r.active} onChange={(e) => upd({ active: e.target.checked })} />Activo</label>
-                    <button className="x" onClick={() => saveCfg({ shipping_rates: cfg.shipping_rates.filter((_, k) => k !== i) })}><Icon d={I.x} size={14} /></button>
-                  </div>
-                );
-              })}
-              <p className="muted" style={{ fontSize: 12 }}>Tarifa fija, o por peso estilo Correos de Costa Rica: (base + ₡/kg × peso del pedido, mínimo 1 kg) + recargo. El peso sale de cada producto. Se factura como una línea con IVA 13 %, igual que en el pedido.</p>
-            </div>
-          </Card>
+          <ShippingRates rates={cfg.shipping_rates} onSave={(r) => saveCfg({ shipping_rates: r })} />
         </div>
       )}
 
@@ -198,6 +181,86 @@ function BlockEditor({ block, onChange }: { block: Block; onChange: (b: Block) =
       ))}
       {"images" in block && <Field label="Imágenes"><GalleryField value={(block.images as string[]).map((url) => ({ url }))} onChange={(v) => set("images", v.map((x) => x.url))} /></Field>}
       {"reverse" in block && <label style={{ fontSize: 13, display: "flex", gap: 8 }}><input type="checkbox" checked={!!block.reverse} onChange={(e) => set("reverse", e.target.checked)} />Imagen a la derecha</label>}
+    </div>
+  );
+}
+
+const toText = (r: Rate): RateText => ({ name: r.name, amount: formatCRCInput(r.amount), per_kg: formatCRCInput(r.per_kg ?? 0), overhead_pct: String(r.overhead_pct ?? 0), active: r.active });
+
+/** Tarifas de envio (O1-11a). «Agregar» abre una fila en borrador que no toca la tienda hasta «Guardar tarifa»;
+    los montos se leen en formato de Costa Rica (parseCRC) y una tarifa activa de ₡0 que no es de retiro se confirma. */
+function ShippingRates({ rates, onSave }: { rates: Rate[]; onSave: (r: Rate[]) => Promise<boolean> }) {
+  const [draft, setDraft] = useState<RateText | null>(null);
+  const [draftErr, setDraftErr] = useState<Partial<Record<keyof RateText, string>>>({});
+  const saveDraft = async () => {
+    if (!draft) return;
+    const c = checkRate(draft, rates);
+    if (!c.ok) { setDraftErr(c.errors); return; }
+    if (freeEverywhere(c.rate) && !confirm(FREE_CONFIRM)) return;
+    if (await onSave([...rates, c.rate])) { setDraft(null); setDraftErr({}); }
+  };
+  return (
+    <Card title="Tarifas de envío" extra={<button className="btn btn--ghost btn--sm" onClick={() => { setDraft({ name: "", amount: "", per_kg: "0", overhead_pct: "0", active: true }); setDraftErr({}); }} disabled={!!draft}><Icon d={I.plus} />Agregar</button>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {(rates.length > 0 || draft) && <div className="meta ship-row ship-row--head"><span>Nombre</span><span>Base ₡</span><span>₡ por kg</span><span>Recargo %</span><span /><span /></div>}
+        {rates.map((r) => (
+          <RateRow key={r.id || r.name} rate={r} others={rates.filter((x) => x !== r)}
+            onChange={(nr) => onSave(rates.map((x) => (x === r ? { ...r, ...nr } : x)))}
+            onRemove={() => { if (confirm(`¿Quitar la tarifa «${r.name}»? Deja de aparecer en el checkout.`)) void onSave(rates.filter((x) => x !== r)); }} />
+        ))}
+        {draft && (
+          <div style={{ display: "grid", gap: 8, padding: 10, border: "1px dashed var(--hair)", borderRadius: 10 }}>
+            <RateFields value={draft} errors={draftErr} onChange={setDraft} />
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn--crimson btn--sm" onClick={saveDraft}><Icon d={I.check} />Guardar tarifa</button>
+              <button className="btn btn--ghost btn--sm" onClick={() => { setDraft(null); setDraftErr({}); }}>Descartar</button>
+            </div>
+          </div>
+        )}
+        <p className="muted" style={{ fontSize: 12 }}>Tarifa fija, o por peso estilo Correos de Costa Rica: (base + ₡/kg × peso del pedido, mínimo 1 kg) + recargo. El peso sale de cada producto. Se factura como una línea con IVA 13 %, igual que en el pedido. Escriba los montos en colones, por ejemplo 4.700.</p>
+      </div>
+    </Card>
+  );
+}
+
+function RateFields({ value: t, errors, onChange, onCommit, tail }: { value: RateText; errors: Partial<Record<keyof RateText, string>>; onChange: (t: RateText) => void; onCommit?: (t: RateText) => void; tail?: ReactNode }) {
+  const field = (k: "name" | "amount" | "per_kg" | "overhead_pct", label: string, mono: boolean, title?: string) => (
+    <input className={`input${mono ? " input--mono" : ""}`} aria-label={label} title={title} value={t[k]} inputMode={mono ? "decimal" : undefined}
+      aria-invalid={errors[k] ? true : undefined} onChange={(e) => onChange({ ...t, [k]: e.target.value })} onBlur={() => onCommit?.(t)} />
+  );
+  const msgs = Object.values(errors).filter(Boolean);
+  return (
+    <>
+      <div className="ship-row">
+        {field("name", "Nombre de la tarifa", false)}
+        {field("amount", "Base en colones", true)}
+        {field("per_kg", "Colones por kilo", true, "Correos de CR: monto por kilo (mínimo 1 kg)")}
+        {field("overhead_pct", "Recargo en porcentaje", true, "Recargo porcentual (manejo, seguro)")}
+        <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={t.active} onChange={(e) => { const n = { ...t, active: e.target.checked }; onChange(n); onCommit?.(n); }} />Activa</label>
+        {tail ?? <span />}
+      </div>
+      {msgs.length > 0 && <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--crimson-dark, #b3172a)" }}>{msgs.join(" · ")}</p>}
+    </>
+  );
+}
+
+function RateRow({ rate, others, onChange, onRemove }: { rate: Rate; others: Rate[]; onChange: (r: Partial<Rate>) => Promise<boolean>; onRemove: () => void }) {
+  const [t, setT] = useState<RateText>(() => toText(rate));
+  const [errors, setErrors] = useState<Partial<Record<keyof RateText, string>>>({});
+  useEffect(() => { setT(toText(rate)); setErrors({}); }, [rate]);
+  const commit = (n: RateText) => {
+    const c = checkRate(n, others);
+    if (!c.ok) { setErrors(c.errors); return; }
+    setErrors({});
+    const same = c.rate.name === rate.name && c.rate.amount === rate.amount && c.rate.per_kg === (rate.per_kg ?? 0) && c.rate.overhead_pct === (rate.overhead_pct ?? 0) && c.rate.active === rate.active;
+    if (same) return;
+    if (freeEverywhere(c.rate) && !freeEverywhere(rate) && !confirm(FREE_CONFIRM)) { setT(toText(rate)); return; }
+    void onChange(c.rate);
+  };
+  return (
+    <div style={{ display: "grid", gap: 4 }}>
+      <RateFields value={t} errors={errors} onChange={setT} onCommit={commit} tail={<button className="x" onClick={onRemove} aria-label={`Quitar la tarifa ${rate.name}`}><Icon d={I.x} size={14} /></button>} />
+      {suspiciousAmount(rate) && <p className="muted" style={{ margin: 0, fontSize: 12, color: "var(--warn, #9a6200)" }}>Revise este monto: ₡{formatCRCInput(rate.amount)} es muy poco para un envío. Si quiso decir ₡{formatCRCInput(Math.round(rate.amount * 1000))}, corríjalo aquí.</p>}
     </div>
   );
 }

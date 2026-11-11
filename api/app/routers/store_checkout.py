@@ -78,7 +78,7 @@ def checkout_config(slug: str, db: Session = Depends(get_db)):
 
     rates = [
         # display_amount null = sin tipo de cambio (tienda en otra moneda): "a consultar"; el checkout no se cae
-        {"name": r["name"], "zone": rate_zone(r), "per_kg": bool(r.get("per_kg")), "display_amount": ship_display(pricer, r)}
+        {"id": r.get("id"), "name": r["name"], "zone": rate_zone(r), "per_kg": bool(r.get("per_kg")), "display_amount": ship_display(pricer, r)}
         for r in cfg["shipping_rates"]
         if r.get("active")
     ]

@@ -12,7 +12,7 @@ import "./checkout.css";
 export type CartItem = { key: string; id: number; variant_id: number | null; name: string; image: string | null; price: number; currency: string; qty: number };
 type Method = { code: string; label: string; needs_proof: boolean; simulated: boolean; hint: string; pickup_only?: boolean };
 /* display_amount null: la tienda vende en otra moneda y falta el tipo de cambio (plan 1.12): "a consultar", nunca "gratis" */
-type Rate = { name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number | null };
+type Rate = { id?: string | null; name: string; zone: "retiro" | "gam" | "fuera_gam" | null; per_kg: boolean; display_amount: string | number | null };
 type Cfg = {
   currency: string; methods: Method[]; shipping_rates: Rate[]; provinces: Record<string, string[]>;
   outside_gam: { provinces: string[]; cantons: string[] }; terms_required: boolean; pickup: { address?: string; hours?: string }; whatsapp: string;
@@ -150,6 +150,8 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     if (!cur || !rateOk(cur)) { const first = shipRates.find(rateOk); set("rate", first?.name || ""); }
   }, [cfg, f.dtype, f.province, f.canton]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // O1-11a: el id estable de la tarifa elegida (el API casa por id y, si falta, por nombre)
+  const rateId = (f.rate && cfg?.shipping_rates.find((r) => r.name === f.rate)?.id) || null;
   const lines = useMemo(() => cart.map((l) => ({ product_id: l.id, variant_id: l.variant_id, quantity: String(l.qty) })), [cart]);
   const deliveryOk = f.dtype === "retiro" ? canPickup : !!(f.province && f.canton && f.address.trim().length >= 5);
   const delivery = f.dtype === "retiro" ? { type: "retiro" } : { type: "envio", province: f.province || null, canton: f.canton || null, district: f.district || null, address: f.address || null };
@@ -158,7 +160,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
   useEffect(() => {
     if (!cfg || !lines.length) return;
     const t = window.setTimeout(() => {
-      api<Quote>("/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, shipping_method: f.rate || null, coupon_code: coupon, ...(deliveryOk ? { delivery } : {}) }) })
+      api<Quote>("/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, shipping_method: f.rate || null, shipping_rate_id: rateId, coupon_code: coupon, ...(deliveryOk ? { delivery } : {}) }) })
         .then(({ data }) => { setQuote(data); setQErr(null); })
         .catch((e) => { setQuote(null); setQErr((e as Error).message); });
     }, 220);
@@ -255,7 +257,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     const code = f.coupon.trim().toUpperCase();
     if (!code) { setCoupon(null); return; }
     try {
-      await api<Quote>("/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, shipping_method: f.rate || null, coupon_code: code }) });
+      await api<Quote>("/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines, shipping_method: f.rate || null, shipping_rate_id: rateId, coupon_code: code }) });
       setCoupon(code); setErr(null);
     } catch (e) { setErr((e as Error).message); }
   };
@@ -283,7 +285,7 @@ function OrderCheckout({ api, slug, store: S, cart, onPlaced, onBack, setQty, re
     try {
       const { data } = await api<Placed>("/checkout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => x.id === f.seller) ? f.seller : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
+        body: JSON.stringify({ lines, contact, delivery, shipping_method: f.rate || null, shipping_rate_id: rateId, payment_method: f.method, coupon_code: coupon, notes: f.notes.trim() || null, accept_terms: f.terms, attended_by: cfg?.sellers?.some((x) => x.id === f.seller) ? f.seller : null, idempotency_key: keyRef.current, expected_total: String(quote.total), website: f.website || null }),
       });
       if (!data.number) { setErr("No pudimos registrar el pedido. Escribinos por WhatsApp."); return; }
       session.del(DRAFT); // pedido hecho: el proximo checkout arranca limpio (o con "mis datos" si los guardo)

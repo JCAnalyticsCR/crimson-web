@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,8 @@ STORE_DEFAULTS = {
     "kind": "catalogo",  # catalogo | tienda (carrito y checkout)
     # envio GAM: tarifa fija de 4 000 colones sin IVA (pedido 21/10). Es solo el valor por defecto: la tarifa que la
     # tienda ya guardo en Mi Tienda manda y se edita ahi.
-    "shipping_rates": [{"name": "Retiro en tienda", "amount": 0, "active": True}, {"name": "Envío GAM", "amount": 4000, "active": True}],
+    # id estable (O1-11a): el checkout casa por id; las guardadas sin id lo reciben al volver a guardarlas
+    "shipping_rates": [{"id": "retiro", "name": "Retiro en tienda", "amount": 0, "active": True}, {"id": "gam", "name": "Envío GAM", "amount": 4000, "active": True}],
     "legal": {"privacy": "", "terms": ""},
     "whatsapp": "",
     "currency": "CRC",
@@ -56,6 +58,28 @@ def store_cfg(t: Tenant) -> dict:
 
 
 # ---------- Admin: personalizacion ----------
+class RateIn(BaseModel):
+    """Tarifa de envio (O1-11a). Antes se guardaba cualquier dict: el panel mandaba Number("4.700") = 4,7 y nadie lo
+    paraba. Los montos son numeros de verdad (strict: un texto como "4.700" no se convierte en silencio). Las llaves que
+    no se conocen se conservan (extra="allow") para no perder nada de lo ya guardado. `id` es estable: el checkout casa
+    la tarifa por id y, si no viene, por nombre; asi renombrar no rompe los carritos abiertos."""
+
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
+
+    id: str | None = Field(None, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=2, max_length=60)
+    amount: float = Field(ge=0, strict=True)
+    active: bool = True
+    per_kg: float | None = Field(None, ge=0, strict=True)
+    overhead_pct: float | None = Field(None, ge=0, le=100, strict=True)
+    zone: str | None = Field(None, pattern="^(retiro|gam|fuera_gam)$")
+
+    @field_validator("zone", mode="before")
+    @classmethod
+    def _zone_vacia(cls, v):
+        return v or None
+
+
 class StoreIn(BaseModel):
     name: str | None = None
     tagline: str | None = None
@@ -67,10 +91,38 @@ class StoreIn(BaseModel):
     domain: str | None = None
     published: bool | None = None
     kind: str | None = Field(None, pattern="^(catalogo|tienda)$")
-    shipping_rates: list[dict] | None = None
+    shipping_rates: list[RateIn] | None = Field(None, max_length=50)
     legal: dict | None = None
     whatsapp: str | None = None
     currency: str | None = None
+
+    @field_validator("shipping_rates")
+    @classmethod
+    def _nombres_unicos(cls, v: list[RateIn] | None):
+        if v is not None:
+            vistos: set[str] = set()
+            for r in v:
+                k = r.name.casefold()
+                if k in vistos:
+                    raise ValueError(f"Ya hay una tarifa llamada «{r.name}»: use otro nombre")
+                vistos.add(k)
+        return v
+
+
+def _rates_with_ids(nuevas: list[RateIn], antes: list[dict]) -> list[dict]:
+    """Cada tarifa sale con su id estable: el que trae, el de la guardada con el mismo nombre o uno nuevo."""
+    por_nombre = {(r.get("name") or "").casefold(): r.get("id") for r in antes or [] if r.get("id")}
+    usados: set[str] = set()
+    out = []
+    for r in nuevas:
+        row = r.model_dump(exclude_none=True)
+        rid = row.get("id") or por_nombre.get(r.name.casefold())
+        if not rid or rid in usados:
+            rid = uuid4().hex[:12]
+        usados.add(rid)
+        row["id"] = rid
+        out.append(row)
+    return out
 
 
 @router.get("/store")
@@ -82,7 +134,10 @@ def get_store(p: Principal = Depends(require("settings", "ver"))):
 def put_store(data: StoreIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
     t = db.get(Tenant, p.tenant.id)
     st = {**(t.settings or {})}
-    st["store"] = {**STORE_DEFAULTS, **(st.get("store") or {}), **data.model_dump(exclude_unset=True)}
+    vals = data.model_dump(exclude_unset=True)
+    if data.shipping_rates is not None:
+        vals["shipping_rates"] = _rates_with_ids(data.shipping_rates, store_cfg(t).get("shipping_rates") or [])
+    st["store"] = {**STORE_DEFAULTS, **(st.get("store") or {}), **vals}
     t.settings = st
     db.commit()
     return {**store_cfg(t), "slug": t.slug}
@@ -693,6 +748,8 @@ class CheckoutIn(BaseModel):
     contact: dict = Field(default_factory=dict)
     delivery: DeliveryIn | None = None
     shipping_method: str | None = Field(None, max_length=80)
+    # O1-11a: id estable de la tarifa; manda sobre el nombre (renombrar una tarifa no rompe un carrito abierto)
+    shipping_rate_id: str | None = Field(None, max_length=40)
     payment_method: str | None = Field(None, max_length=60)
     coupon_code: str | None = Field(None, max_length=40)
     notes: str | None = Field(None, max_length=1000)
@@ -705,6 +762,16 @@ class CheckoutIn(BaseModel):
     # "¿Lo atendió alguno de nuestros vendedores?" (reunion 2, item 12): solo cuenta si Mi Tienda lo habilita
     # referencia opaca de la lista publica (so.public_sellers): el id interno del usuario nunca sale a la pagina
     attended_by: str | None = Field(None, max_length=40, pattern="^[0-9a-f]*$")
+
+
+def find_rate(rates: list[dict], rate_id: str | None, name: str | None) -> dict | None:
+    """La tarifa activa elegida: por id estable y, si no hay id o ya no existe, por nombre (O1-11a)."""
+    activas = [r for r in rates or [] if r.get("active")]
+    if rate_id:
+        hit = next((r for r in activas if r.get("id") == rate_id), None)
+        if hit:
+            return hit
+    return next((r for r in activas if r.get("name") == name), None) if name else None
 
 
 def rate_zone(r: dict) -> str | None:
@@ -756,8 +823,8 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
     }
     if len(prods) != len({ln.product_id for ln in data.lines}):
         raise HTTPException(422, "Producto no disponible")
-    ship = next((r for r in cfg["shipping_rates"] if r.get("active") and r["name"] == data.shipping_method), None) if data.shipping_method else None
-    if data.shipping_method and not ship:
+    ship = find_rate(cfg["shipping_rates"], data.shipping_rate_id, data.shipping_method)
+    if (data.shipping_method or data.shipping_rate_id) and not ship:
         raise HTTPException(422, "Esa tarifa de envío no está disponible")
     _check_delivery(ship, data.delivery, any(r.get("active") for r in cfg["shipping_rates"]))
     vids = [ln.variant_id for ln in data.lines if ln.variant_id]
