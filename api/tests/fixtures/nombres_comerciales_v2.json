@@ -1,0 +1,683 @@
+[
+ {
+  "patron": "inventado",
+  "proveedor": "Grabadora DVR Hikvision DS-7108HGHI-M1/T 8 canales 1080P lite hasta 6 TB (1 SATA) H.265 pro+",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision DS-7108HGHI-M1/T · 8 canales",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "DVR Hikvision iDS-7216HQHI-M2/S 16 canales 1080p lite AcuSense",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision iDS-7216HQHI-M2/S · 16 canales",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Grabadora DVR Hikvision DS-7104HQHI-K1 4 canales 4MP lite PoE",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision DS-7104HQHI-K1 · 4 canales",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "NVR Hikvision DS-7608NI-K1 8 canales 4K",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador NVR Hikvision DS-7608NI-K1 · 8 canales",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Parlante argom rocksound bluetooth a prueba de agua ARG-SP-3200BK",
+  "marca": "Argom",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "descripcion": "- Diseno: portatil\n- Potencia: 5W RMS\n- Color: negro",
+  "comercial": "Parlante Argom Rocksound · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Parlante argom rocksound mini bluetooth ARG-SP-3201BK",
+  "marca": "Argom",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "ficha": {
+   "Potencia de salida": "10W RMS",
+   "Color": "negro"
+  },
+  "comercial": "Parlante Argom Rocksound Mini · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Switch Mercusys MS108GS gigabit de escritorio",
+  "marca": "Mercusys",
+  "modelo": null,
+  "tipo": "Switch",
+  "ficha": {
+   "Puertos": "8 puertos Gigabit PoE"
+  },
+  "comercial": "Switch Mercusys MS108GS · 8 puertos",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Disco duro Seagate SkyHawk ST2000VX017",
+  "marca": "Seagate",
+  "modelo": "ST2000VX017",
+  "tipo": "Disco duro",
+  "ficha": {
+   "Capacidad": "2 TB"
+  },
+  "comercial": "Disco duro Seagate SkyHawk ST2000VX017 · 2 TB",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Memoria microSD Kingston Canvas Go Plus",
+  "marca": "Kingston",
+  "modelo": null,
+  "tipo": "Memoria microSD",
+  "ficha": {
+   "Capacidad de almacenamiento": "64 GB"
+  },
+  "comercial": "Memoria microSD Kingston Canvas Go Plus",
+  "revisar": null
+ },
+ {
+  "patron": "inventado",
+  "proveedor": "Camara IP Hikvision DS-2CD1021G0-I 2MP bullet",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "descripcion": "- Alimentacion: PoE 802.3af\n- Color: blanco",
+  "comercial": "Cámara IP Hikvision DS-2CD1021G0-I · 2 MP",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router tp link archer VR600 2.4 GHz 5 GHz AC1600 vdsl adsl gigabit USB puertos LAN / LAN/WAN",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router TP-Link Archer VR600 · WiFi 5",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router tp link archer AX10 us AX1500 dual band 2.4/5 GHz 1500 Mbps WiFi 6",
+  "marca": "Tp Link",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router TP-Link Archer AX10 · WiFi 6",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router cudy LT400D-AU 2.0 5GHZ AC1200 WiFi 4G LTE CAT.4 cudy mesh con antenas",
+  "marca": "Cudy",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router Cudy LT400D · 4G · WiFi 5",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router inalámbrico cudy WR301 1.0 2.4GHZ N300 WiFi cudy mesh con 2 antenas",
+  "marca": "Cudy",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router Cudy WR301",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router cudy LT450 outdoor-au 1.0 5GHZ AC1200 WiFi 4G cat cudy mesh entrada PoE",
+  "marca": "Cudy",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router Cudy LT450 Outdoor · 4G · WiFi 5",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Grabadora NVR para cámaras de vigilancia Hikvision 8-CH IP.8-CH PoE interface. H.265+. up to 8MP recording. 1 SATA interface DS-7608NI-Q1/8P",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador NVR Hikvision DS-7608NI-Q1/8P · 8 canales · PoE",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Cámara de seguridad Ezviz 2MP.H.265 CS-C6N-B",
+  "marca": "EZVIZ",
+  "modelo": null,
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi EZVIZ CS-C6N-B · 2 MP",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Punto de acceso TP-Link omada EAP225(3-PACK) 2.4 GHz y 5 GHz AC1350 WiFi 5 mu-mimo PoE ceiling mount",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Punto de acceso WiFi",
+  "comercial": "Punto de acceso TP-Link Omada EAP225 · WiFi 5 · paquete de 3",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Cámara de seguridad WiFi tp link tapo C310WS eu outdoor",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi TP-Link Tapo C310WS",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Power bank ugreen PB503 2C1A 20000MAH usb-c / usb-a pantalla LED carga rápida 45W 25190",
+  "marca": "Ugreen",
+  "modelo": null,
+  "tipo": "Power banks",
+  "comercial": "Power bank Ugreen PB503 · 20000 mAh",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Switch tp link SG2210P(UN) omada 8 puertos RJ45 PoE+ + 2 ranuras SFP gigabit administrable",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Switch PoE",
+  "comercial": "Switch TP-Link SG2210P · 8 puertos · PoE+",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Punto de acceso Hikvision DS-3WF01C-2N 2.4 GHz 300 Mbps wireless bridge",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Punto de acceso WiFi",
+  "comercial": "Punto de acceso Hikvision DS-3WF01C-2N",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Cámara de seguridad xiaomi smart C400 Pro 54321",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara WiFi Xiaomi C400 Pro",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "UPS cdp UPO11-1RTAXI 1000VA/1000W online double convertion 8 IEC-13/USB/SERIAL",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "UPS",
+  "comercial": "UPS CDP UPO11-1RTAXI · 1000 VA",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Cable de luces govee LED rgbic WiFi + bluetooth LED con cobertor 5MTS H618A1D1-OF-LA",
+  "marca": "Govee",
+  "modelo": null,
+  "tipo": "Iluminación",
+  "comercial": "Cable de luces Govee H618A1D1-OF",
+  "revisar": null
+ },
+ {
+  "patron": "restos",
+  "proveedor": "Router TP-Link Archer C54 v1.0 AC1200 doble banda",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router TP-Link Archer C54 · WiFi 5",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Cuchara arrocera winning star ST-7570 silicona / nylon FS-1660-WST-38870",
+  "marca": "Winning Star",
+  "modelo": null,
+  "tipo": "Electrodomésticos",
+  "comercial": "Cuchara arrocera Winning Star ST-7570",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Cacerola antiadherente winning star ST-5230-24 aluminio 24CM x 10CM GUO-1780-WST-18650",
+  "marca": "Winning Star",
+  "modelo": null,
+  "tipo": "Electrodomésticos",
+  "comercial": "Cacerola antiadherente Winning Star ST-5230-24",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Cepillo de dientes eléctrico winning star ST-9811 sónica recargable",
+  "marca": "Winning Star",
+  "modelo": null,
+  "tipo": "Electrodomésticos",
+  "comercial": "Cepillo de dientes eléctrico Winning Star ST-9811",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Cepillo eléctrico xiaomi T301 50123",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Electrodomésticos",
+  "comercial": "Cepillo eléctrico Xiaomi T301",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Conversor cdp XVC-2012 2000VA / 1500W 12V/120V cargador 15A",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "Energía",
+  "comercial": "Conversor CDP XVC-2012",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Protector de voltaje cdp R-PP3 1800W 3 tomas supresión de sobrecorriente",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "Energía",
+  "comercial": "Protector de voltaje CDP R-PP3",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Protector de voltahe cdp R-PP3M 1800W 3 tomas supresión de sobrecorriente",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "Energía",
+  "comercial": "Protector de voltaje CDP R-PP3M",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Barra de luces govee smart flow Pro rgbicww H6047",
+  "marca": "Govee",
+  "modelo": null,
+  "tipo": "Iluminación",
+  "comercial": "Barra de luces Govee Flow Pro H6047",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Amplificador de señal tp link RE305 AC1200 WiFi",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Repetidores",
+  "comercial": "Amplificador de señal TP-Link RE305 AC1200",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Kit de carcasa base zebra para baterías P1080390-600 compatible con ZD421C / ZD421T",
+  "marca": "Zebra",
+  "modelo": null,
+  "tipo": "Accesorios",
+  "comercial": "Kit de carcasa Zebra P1080390-600",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Batería cdp GLB12-100FT 100AH 12V solar",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "Baterías",
+  "comercial": "Batería CDP GLB12-100FT · 100 Ah · 12 V",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Grabadora NVR Hikvision DS-7604NI-K1 4 canales",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador NVR",
+  "comercial": "Grabador NVR Hikvision DS-7604NI-K1 · 4 canales",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Detector de humo inalámbrico Hikvision ds-pdsmk-s-wb blanco",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Alarma",
+  "comercial": "Detector de humo Hikvision DS-PDSMK-S-WB · blanco",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Detector de movimiento híbrido Hikvision DS-PDD12P-EG1 blanco",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Alarma",
+  "comercial": "Detector de movimiento Hikvision DS-PDD12P-EG1 · blanco",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Detector de rotura de vidrio Hikvision DS-PDBG8-EG2",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Alarma",
+  "comercial": "Detector de rotura de vidrio Hikvision DS-PDBG8-EG2",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Fire tv stick amazon 4K max WiFi 6 B0BP9SNVH9",
+  "marca": "Amazon",
+  "modelo": null,
+  "tipo": "Dispositivos de Streaming",
+  "comercial": "Dispositivo de streaming Amazon Fire TV Stick 4K Max",
+  "revisar": "tipo por categoría"
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Fire tv stick amazon HD WiFi B0CQMRKRV5",
+  "marca": "Amazon",
+  "modelo": null,
+  "tipo": "Streaming",
+  "comercial": null,
+  "revisar": "sin tipo"
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Echo show amazon 8 pantalla inteligente",
+  "marca": "Amazon",
+  "modelo": null,
+  "tipo": "",
+  "comercial": null,
+  "revisar": "sin tipo"
+ },
+ {
+  "patron": "mayusculas",
+  "proveedor": "Parlante jbl rgb partybox club 120 bluetooth IPX4",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL PartyBox Club 120 · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "mayusculas",
+  "proveedor": "PARLANTE JBL PARTYBOX 320 BLUETOOTH",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL PartyBox 320 · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "mayusculas",
+  "proveedor": "Detector de humo Hikvision ds-pdsmk-e-wa",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Alarma",
+  "comercial": "Detector de humo Hikvision DS-PDSMK-E-WA",
+  "revisar": null
+ },
+ {
+  "patron": "mayusculas",
+  "proveedor": "Router cudy lt700 4G LTE AC1200 WiFi",
+  "marca": "Cudy",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router Cudy LT700 · 4G · WiFi 5",
+  "revisar": null
+ },
+ {
+  "patron": "mayusculas",
+  "proveedor": "Lámpara de escritorio govee rgbic H6022 WiFi",
+  "marca": "Govee",
+  "modelo": null,
+  "tipo": "Iluminación",
+  "comercial": "Lámpara de escritorio Govee H6022",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Parlante jbl charge 5 40W bluetooth a prueba de agua JBLCHARGE5REDAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Charge 5 · 40 W · Bluetooth · rojo",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Parlante jbl charge 5 40W bluetooth a prueba de agua JBLCHARGE5WHTAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Charge 5 · 40 W · Bluetooth · blanco",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Parlante jbl flip 6 bluetooth IP67 JBLFLIP6GRYAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Flip 6 · Bluetooth · gris",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Grabadora DVR Hikvision iDS-7208HQHI-M1/XT 8 canales hasta 3K / 5 MP lite AcuSense H.265 pro+ negro",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision iDS-7208HQHI-M1/XT · 8 canales · negro",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Parlante jbl partybox encore 2 bluetooth con dos microfonos incluidos",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL PartyBox Encore 2 · Bluetooth · 2 micrófonos",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Parlante jbl partybox encore 2 bluetooth con un microfono",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL PartyBox Encore 2 · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Sistema mesh TP-Link Deco M4 WiFi 5 paquete de 3",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Repetidores",
+  "comercial": "Sistema WiFi mesh TP-Link Deco M4 · paquete de 3",
+  "revisar": null
+ },
+ {
+  "patron": "variante",
+  "proveedor": "Audifonos JBL Tune 720BT bluetooth JBLT720BTBLUAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Audífonos",
+  "comercial": "Audífonos JBL Tune 720BT · azul",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Switch Hikvision DS-3E0510P-E 8 puertos gigabit PoE / 2 puertos uplink gigabit no administrable",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Switch PoE",
+  "comercial": "Switch Hikvision DS-3E0510P-E · 8 puertos · PoE",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante rgb oraimo spacebox OBS-380 6W bluetooth",
+  "marca": "Oraimo",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Oraimo Spacebox OBS-380 · 6 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Control de acceso reconocimiento facial / lector de tarjeta EM Hikvision DS-K1T342EWX",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Control de acceso",
+  "comercial": "Control de acceso Hikvision DS-K1T342EWX",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Switch mercusys MS108G 8 puertos 10/100/1000",
+  "marca": "Mercusys",
+  "modelo": null,
+  "tipo": "Switch",
+  "comercial": "Switch Mercusys MS108G · 8 puertos",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Barra de sonido moonki MX-SB120BT21 120W bluetooth HDMI arc optical aux",
+  "marca": "Moonki",
+  "modelo": null,
+  "tipo": "Barras de sonido",
+  "comercial": "Barra de sonido Moonki MX-SB120BT21 · 120 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Micrófono maono WM820 A1 inalámbrico uhf 6.35MM dinámico para karaoke",
+  "marca": "Maono",
+  "modelo": null,
+  "tipo": "Micrófonos",
+  "comercial": "Micrófono Maono WM820 A1",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Micrófono maono PD200X alámbrico USB con soporte de sobremesa",
+  "marca": "Maono",
+  "modelo": null,
+  "tipo": "Micrófonos",
+  "comercial": "Micrófono Maono PD200X",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Micrófono logitech rally mic pod alámbrico con alcance 4.5M 952-000040",
+  "marca": "Logitech",
+  "modelo": null,
+  "tipo": "Micrófonos",
+  "comercial": "Micrófono Logitech Rally Mic Pod",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante moonki MS-HF12000 1200W alambrico con subwoofer",
+  "marca": "Moonki",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Moonki MS-HF12000 · 1200 W",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante unno tekno reef tws SP9211 5W bluetooth a prueba de agua",
+  "marca": "Unno Tekno",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Unno Tekno Reef SP9211 · 5 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Bombillo govee WiFi y bluetooth light H6009 H60091C1",
+  "marca": "Govee",
+  "modelo": null,
+  "tipo": "Iluminación",
+  "comercial": "Bombillo inteligente Govee H6009",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Cámara turret Hikvision 4MP DS-2CD1343G0E-I(2.8MM) alcance IR hasta H.265+ 30 m IP67",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1343G0E-I(2.8MM) · 4 MP",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Cámara turret analógica Hikvision DS-2CE72HFT-F(2.8MM) 5MP ColorVu 40M IR audio IP67",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara analógica",
+  "comercial": "Cámara analógica Hikvision DS-2CE72HFT-F(2.8MM) · 5 MP",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante Nova 2.0CH ic 8010 4W cableado USB / 3.5MM SP3110G0001C",
+  "marca": "Nova",
+  "modelo": "SP3110G0001C",
+  "tipo": "Parlantes",
+  "comercial": "Parlante Nova SP3110G0001C · 4 W",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante Nova 2.0CH ic 8011 4W cableado USB / 3.5MM SP3111G0001C",
+  "marca": "Nova",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Nova SP3111G0001C · 4 W",
+  "revisar": "termina en código"
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Switch Mercusys MS116G 16 puertos gigabit",
+  "marca": "Mercusys",
+  "modelo": null,
+  "tipo": "Switch",
+  "comercial": "Switch Mercusys MS116G · 16 puertos",
+  "revisar": null
+ },
+ {
+  "patron": "ya_bien",
+  "proveedor": "Parlante jbl charge 6 45W bluetooth a prueba de agua",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Charge 6 · 45 W · Bluetooth",
+  "revisar": null
+ }
+]

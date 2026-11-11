@@ -2,7 +2,9 @@
 
 Todas son reglas y plantillas sobre lo que el producto ya tiene escrito: ninguna llama a una IA ni a un servicio
 externo, y ninguna publica nada (solo proponen borradores que un administrador aprueba en «Contenido por aprobar»).
-- web_name (O3-03, «nombre_v1»): product_names.commercial_name.
+- web_name (O3-03, «nombre_v2»): product_names.commercial_name, solo con el nombre original y la ficha aprobada (clave
+  exacta). nombre_v1 sacaba datos de la descripcion libre y fallo la revision de la muestra real: el lote nuevo se
+  distingue por la regla.
 - web_specs (O3-05, «ficha_v1»): las viñetas «- Clave: valor» de la descripcion (sin rellenos) y lo que el nombre dice
   con numero y unidad por familia. Solo se copia el dato, nada se interpreta.
 - web_description (O3-06, «descripcion_v1»): solo para lo que no tiene texto propio (o solo la linea del proveedor en
@@ -20,7 +22,8 @@ from .catalog_fichas import describe, family_specs, specs_from_text, store_descr
 
 
 def _name(p, ctx: cd.GenCtx):
-    return product_names.commercial_name(p.name, brand=p.brand, model=p.model, shown_type=ctx.dtype(p), description=p.description_store)
+    specs = {**(p.web_specs or {}), **(p.specs or {})}
+    return product_names.commercial_name(p.name, brand=p.brand, model=p.model, shown_type=ctx.dtype(p), specs=specs or None)
 
 
 def _specs(p, ctx: cd.GenCtx):
@@ -51,7 +54,7 @@ def _type(p, ctx: cd.GenCtx):
     return (single, "tipo por categoria") if single else (None, None)
 
 
-cd.register("web_name", "nombre_v1", _name)
+cd.register("web_name", "nombre_v2", _name)
 cd.register("web_specs", "ficha_v1", _specs)
 cd.register("web_description", "descripcion_v1", _description)
 cd.register("web_type", "tipo_v1", _type)

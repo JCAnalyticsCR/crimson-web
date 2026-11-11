@@ -1,10 +1,12 @@
-"""O3-03: nombres comerciales por regla, aprobados por lote.
+"""O3-03: nombres comerciales por regla, aprobados por lote (regla «nombre_v2»; la v1 no paso la muestra real).
 
 Prueba dorada: 100 nombres con la forma de los del proveedor (marcas y modelos de fabricante; codigos internos y de
 lote ficticios) y la salida aprobada en tests/fixtures/nombres_comerciales.json. Cambiar la regla es cambiar esa
-tabla a conciencia (y volver a aprobarla). Ademas, sobre toda la tabla:
+tabla a conciencia (y volver a aprobarla). Los patrones de la muestra rechazada tienen su propia tabla
+(test_tienda_nombres_v2.py). Ademas, sobre toda la tabla:
 - promedio de 50 caracteres o menos y menos del 20 % sobre 60;
-- ningun nombre termina en un codigo (ASIN, EAN, codigo interno, JBL...AM) ni trae un color que no este escrito;
+- ningun nombre termina en un codigo (ASIN, EAN, codigo interno, JBL...AM) ni trae un color que no este escrito en el
+  original (la palabra o el codigo de color del fabricante: JBLCHARGE6BLKAM -> negro);
 - el original queda para la factura: el generador solo propone web_name (borrador), nunca toca Product.name.
 Datos ficticios, precios en colones <= 2 000."""
 
@@ -16,7 +18,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from app.models import CatalogDraft, Category, Product, Tenant
+from app.models import CatalogBatch, CatalogDraft, Category, Product, Tenant
 from app.services import catalog_drafts as cd
 from app.services import product_names as pn
 
@@ -42,16 +44,17 @@ def test_la_tabla_cumple_la_regla():
         assert not re.search(r"\b(B0[A-Z0-9]{8}|\d{8,14}|JBL[A-Z0-9]+AM|HK\d{3}-\S+)$", n), n
         assert "(" not in n or ")" in n, n
         for w in pn._fold(n).replace("·", " ").split():
-            if w in COLORES:  # el color solo si esta escrito en el nombre del proveedor
-                assert w in pn._fold(r["proveedor"]) or any(k in pn._fold(r["proveedor"]).split() and v == w for k, v in pn.COLORS.items()), (n, w)
-        assert not re.search(r"\bnegro\b", pn._fold(n)) or re.search(r"\bnegr[oa]\b", pn._fold(r["proveedor"])), n  # BLK no es «negro»
+            if w in COLORES:  # el color solo si esta escrito en el original (palabra o codigo de color del fabricante)
+                assert pn._color(r["proveedor"]) == pn.COLORS[w], (n, w)
 
 
 def test_errata_y_codigo_final_se_corrigen_solo_en_el_comercial():
     out, _ = pn.commercial_name("Camara IP hikvusion DS-2CD1023G2-LIU 2MP bullet", brand="Hikvision", model="DS-2CD1023G2-LIU", shown_type="Cámara IP")
     assert "hikvusion" not in out.lower() and out.startswith("Cámara IP Hikvision")
     out, _ = pn.commercial_name("Parlante JBL Flip 6 bluetooth JBLFLIP6BLKAM", brand="JBL", model=None, shown_type="Parlantes")
-    assert out == "Parlante JBL Flip 6 · Bluetooth"  # «BLK» no se convierte en «negro»
+    assert out == "Parlante JBL Flip 6 · Bluetooth · negro"  # el color del codigo del fabricante se queda; el codigo no
+    out, _ = pn.commercial_name("Parlante JBL Flip 6 bluetooth", brand="JBL", model=None, shown_type="Parlantes")
+    assert out == "Parlante JBL Flip 6 · Bluetooth"  # sin color escrito, sin color
 
 
 def test_lote_de_nombres_por_regla_con_repetidos_a_revision(client, auth, db_session, monkeypatch):
@@ -64,6 +67,7 @@ def test_lote_de_nombres_por_regla_con_repetidos_a_revision(client, auth, db_ses
         ("JBL-1", "Parlante JBL Charge 6 45W bluetooth negro JBLCHARGE6BLKAM"),
         ("JBL-2", "Parlante JBL Charge 6 45W bluetooth negro JBLCHARGE6BLKAM (US)"),  # el mismo nombre comercial
         ("JBL-3", "Parlante JBL Go 4 bluetooth rojo JBLGO4REDAM"),
+        ("JBL-4", "Parlante JBL Charge 6 45W bluetooth JBLCHARGE6BLUAM"),  # otro color (solo en el codigo): no es repetido
     ]
     ids = []
     for code, name in datos:
@@ -73,11 +77,16 @@ def test_lote_de_nombres_por_regla_con_repetidos_a_revision(client, auth, db_ses
         ids.append(p.id)
     db_session.commit()
     sim = client.post("/store/content/generate", json={"field": "web_name", "category_id": cat.id, "simulate": True}).json()
-    assert [r["after"] for r in sim["preview"]] == ["Parlante JBL Charge 6 · 45 W · Bluetooth · negro"] * 2 + ["Parlante JBL Go 4 · Bluetooth · rojo"]
-    assert [r["flag"] for r in sim["preview"]] == ["nombre repetido", "nombre repetido", None]
+    assert sim["rule"] == "nombre_v2"  # el lote nuevo se distingue del rechazado (nombre_v1)
+    assert [r["after"] for r in sim["preview"]] == ["Parlante JBL Charge 6 · 45 W · Bluetooth · negro"] * 2 + [
+        "Parlante JBL Go 4 · Bluetooth · rojo",
+        "Parlante JBL Charge 6 · 45 W · Bluetooth · azul",
+    ]
+    assert [r["flag"] for r in sim["preview"]] == ["nombre repetido", "nombre repetido", None, None]
     bid = client.post("/store/content/generate", json={"field": "web_name", "category_id": cat.id, "simulate": False}).json()["batch_id"]
     flags = {d.product_id: d.flag for d in db_session.scalars(select(CatalogDraft).where(CatalogDraft.batch_id == bid))}
-    assert flags == {ids[0]: "nombre repetido", ids[1]: "nombre repetido", ids[2]: None}
+    assert flags == {ids[0]: "nombre repetido", ids[1]: "nombre repetido", ids[2]: None, ids[3]: None}
+    assert db_session.get(CatalogBatch, bid).rule == "nombre_v2"
     db_session.expire_all()
     assert [db_session.get(Product, i).name for i in ids] == [d[1] for d in datos]  # el fiscal no cambia
     assert all(db_session.get(Product, i).web_name is None for i in ids)  # hasta que se apruebe y aplique

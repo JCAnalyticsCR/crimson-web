@@ -4,7 +4,7 @@
   "marca": "JBL",
   "modelo": null,
   "tipo": "Parlantes",
-  "comercial": "Parlante JBL Charge 6 · 45 W · Bluetooth",
+  "comercial": "Parlante JBL Charge 6 · 45 W · Bluetooth · negro",
   "revisar": null
  },
  {
@@ -92,7 +92,7 @@
   "marca": "Oraimo",
   "modelo": "OEB-E04D",
   "tipo": "Audífonos",
-  "comercial": "Audífonos Oraimo FreePods 4 OEB-E04D",
+  "comercial": "Audífonos inalámbricos Oraimo FreePods 4 OEB-E04D",
   "revisar": null
  },
  {
@@ -188,7 +188,7 @@
   "marca": "TP-Link",
   "modelo": "TAPO",
   "tipo": "Cámara WiFi",
-  "comercial": "Cámara de seguridad TP-Link Tapo C200 · WiFi",
+  "comercial": "Cámara WiFi TP-Link Tapo C200",
   "revisar": null
  },
  {
@@ -260,7 +260,7 @@
   "marca": "HiLook",
   "modelo": "NVR-108MH-D",
   "tipo": "Grabador NVR",
-  "comercial": "Grabador HiLook NVR-108MH-D · 8 canales",
+  "comercial": "Grabador NVR HiLook NVR-108MH-D · 8 canales",
   "revisar": null
  },
  {
@@ -276,7 +276,7 @@
   "marca": "Hikvision",
   "modelo": "DS-7216HGHI-K1",
   "tipo": "Grabador DVR",
-  "comercial": "Grabador DVR Hikvision DS-7216HGHI-K1 · 16 canales · PoE",
+  "comercial": "Grabador DVR Hikvision DS-7216HGHI-K1 · 16 canales",
   "revisar": null
  },
  {
@@ -436,7 +436,7 @@
   "marca": "TP-Link",
   "modelo": "DECO X20",
   "tipo": "Repetidores",
-  "comercial": "Sistema WiFi mesh TP-Link Deco X20",
+  "comercial": "Sistema WiFi mesh TP-Link Deco X20 · paquete de 2",
   "revisar": null
  },
  {
@@ -540,7 +540,7 @@
   "marca": "Hikvision",
   "modelo": "DS-K4H258S",
   "tipo": "Cerradura",
-  "comercial": "Cerradura Hikvision DS-K4H258S",
+  "comercial": "Cerradura magnética Hikvision DS-K4H258S",
   "revisar": null
  },
  {
@@ -572,7 +572,7 @@
   "marca": "Nexxt",
   "modelo": null,
   "tipo": "Gabinete",
-  "comercial": "Gabinete Nexxt",
+  "comercial": "Gabinete de pared Nexxt",
   "revisar": "sin modelo"
  },
  {
@@ -653,14 +653,14 @@
   "modelo": null,
   "tipo": "Asistentes de voz",
   "comercial": "Asistente de voz Amazon Echo Dot 5ta · azul",
-  "revisar": null
+  "revisar": "tipo por categoría"
  },
  {
   "proveedor": "Amazon Fire TV Stick 4K control remoto por voz Alexa",
   "marca": "Amazon",
   "modelo": null,
   "tipo": "Streaming",
-  "comercial": "Amazon Fire Tv Stick",
+  "comercial": null,
   "revisar": "sin tipo"
  },
  {
@@ -692,7 +692,7 @@
   "marca": "Logitech",
   "modelo": "M170",
   "tipo": "Mouse",
-  "comercial": "Mouse Logitech M170 · gris",
+  "comercial": "Mouse inalámbrico Logitech M170 · gris",
   "revisar": null
  },
  {
@@ -716,7 +716,7 @@
   "marca": "Hikvision",
   "modelo": "DS-1272ZJ-110",
   "tipo": "Accesorios CCTV",
-  "comercial": "Soporte Hikvision DS-1272ZJ-110",
+  "comercial": "Soporte de pared Hikvision DS-1272ZJ-110",
   "revisar": null
  },
  {
@@ -724,7 +724,7 @@
   "marca": "Hikvision",
   "modelo": "DS-1280ZJ-XS",
   "tipo": "Accesorios CCTV",
-  "comercial": "Caja Hikvision DS-1280ZJ-XS",
+  "comercial": "Caja de conexiones Hikvision DS-1280ZJ-XS",
   "revisar": null
  },
  {
@@ -732,7 +732,7 @@
   "marca": "Hikvision",
   "modelo": "DS-1602ZJ",
   "tipo": "Accesorios CCTV",
-  "comercial": "Brazo Hikvision DS-1602ZJ",
+  "comercial": "Brazo de pared Hikvision DS-1602ZJ",
   "revisar": null
  },
  {
@@ -764,7 +764,7 @@
   "marca": "Nova",
   "modelo": null,
   "tipo": "Ventiladores",
-  "comercial": "Ventilador Nova · blanco",
+  "comercial": "Ventilador de pie Nova · blanco",
   "revisar": "sin modelo"
  },
  {
@@ -772,7 +772,7 @@
   "marca": "Logan",
   "modelo": null,
   "tipo": "Hervidores",
-  "comercial": "Hervidor Logan",
+  "comercial": "Hervidor eléctrico Logan",
   "revisar": "sin modelo"
  },
  {
