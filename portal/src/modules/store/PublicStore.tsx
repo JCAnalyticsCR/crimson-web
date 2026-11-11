@@ -16,8 +16,9 @@ import Checkout from "./Checkout";
 import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
 
 import ProductPage from "./ProductPage";
+import { parseCarrito } from "./carritoCompartido";
 import StoreHome from "./StoreHome";
-import { businessLines, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -152,6 +153,23 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     setBump((b) => b + 1);
     toastT.current = window.setTimeout(() => setToast(null), 5000); // tiempo para tocar "Ir al carrito" (pedido 21/10)
   };
+  /* O2-09: agrega varias lineas de una vez (carrito compartido): fusiona con lo que ya hay, nunca reemplaza */
+  const merge = (items: { p: Prod; qty: number }[]) => {
+    setCart((c) => {
+      let out = [...c];
+      for (const { p, qty } of items) {
+        const key = `${p.id}:0`;
+        const av = normAvail(p.availability);
+        const max = av?.max_qty && av.max_qty > 0 ? av.max_qty : null;
+        const cap = (n: number) => (max ? Math.min(max, n) : n);
+        const found = out.find((l) => l.key === key);
+        out = found ? out.map((l) => (l.key === key ? { ...l, qty: cap(l.qty + qty), max } : l))
+          : [...out, { key, id: p.id, variant_id: null, name: p.name, image: p.image, price: Number(p.display_price), currency: p.display_currency, qty: cap(qty), max }];
+      }
+      return out;
+    });
+    setBump((b) => b + 1);
+  };
   const setQty = (key: string, qty: number) => setCart((c) => c.map((l) => (l.key === key ? { ...l, qty: Math.max(1, Math.min(l.max && l.max > 0 ? l.max : 999, qty || 1)) } : l)));
   const remove = (key: string) => setCart((c) => c.filter((l) => l.key !== key));
   useEffect(() => {
@@ -164,6 +182,38 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   // O2-05: la lupa abre el buscador a todo el ancho (celular y tableta); se cierra al cambiar de vista
   const [searchOpen, setSearchOpen] = useState(false);
   useEffect(() => setSearchOpen(false), [loc.pathname]);
+
+  /* ---------- O2-09: enlace de carrito para ventas (/?carrito=116x1,241x1) ----------
+     Se lee una vez, se limpia de la direccion y se pregunta antes de agregar. Solo lectura: no crea nada en el
+     servidor. Tope de 12 lineas (el de /catalog?ids=). */
+  const carritoParam = !pedido && !v && rel === "/" ? sp.get("carrito") : null;
+  const [compartido, setCompartido] = useState<{ items: { id: number; qty: number }[]; hecho?: { ok: number; no: string[] } } | null>(null);
+  useEffect(() => {
+    if (!carritoParam) return;
+    const items = parseCarrito(carritoParam);
+    if (items.length) setCompartido({ items });
+    const n = new URLSearchParams(sp);
+    n.delete("carrito");
+    setSp(n, { replace: true });
+  }, [carritoParam]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sharedRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(sharedRef, !!compartido);
+  const aceptarCompartido = async () => {
+    if (!compartido) return;
+    const ids = compartido.items.map((x) => x.id);
+    let prods: Prod[] = [];
+    try { prods = (await api<{ items: Prod[] }>(`/catalog?ids=${ids.join(",")}&limit=12`)).data.items || []; } catch { prods = []; }
+    const byId = new Map(prods.map((p) => [p.id, p]));
+    const ok: { p: Prod; qty: number }[] = [];
+    const no: string[] = [];
+    for (const it of compartido.items) {
+      const p = byId.get(it.id);
+      if (p && Number(p.display_price) > 0 && !p.variants?.length && !(isShop && cannotBuy(p.availability))) ok.push({ p, qty: it.qty });
+      else no.push(p ? p.name : `Producto ${it.id}`);
+    }
+    if (ok.length) merge(ok);
+    setCompartido({ ...compartido, hecho: { ok: ok.length, no } });
+  };
 
   // ---------- comparador (hasta 3, por visitante) ----------
   const cmpKey = `crimson-shop:cmp:${slug}`;
@@ -208,6 +258,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     }
     if (v === "pagar" && S) document.title = `Finalizar pedido · ${S.name}`;
   }, [hostMode, v, S]);
+  // la direccion con ?carrito= no se indexa: robots.txt la excluye (Disallow: /*?carrito=, routers/store_seo.py)
 
   if (fatal && !home) return <div className="shop"><div className="sh-empty"><b>{fatal}</b><span>La tienda no está disponible en este momento.</span></div></div>;
   if (!home || !S || !ctx) return <div className="shop" style={{ display: "grid", placeItems: "center" }}><span className="spinner" /></div>;
@@ -218,6 +269,9 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   // O2-05: chips por prioridad del negocio (orden fijo hasta que exista el orden editable, O3-07b), no alfabeticos
   const chips = PRIORIDAD.map((re) => home.categories.find((c) => re.test(c.name))).filter((c, i, all): c is Cat => !!c && all.indexOf(c) === i);
   const L = (p: string) => `${base}${p}` || "/";
+  // O2-09: «Ver cámaras» del carrito vacio (la categoria si existe; si no, la busqueda)
+  const camCat = home.categories.find((c) => /c[aá]mara|vigil|cctv/i.test(c.name));
+  const camaras = camCat ? L(`/c/${slugs[camCat.id]}`) : L("/buscar?q=camaras");
   const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k];
   // O1-09: envio visible antes del checkout (solo en la tienda que vende; nada si el API no lo manda)
   const ship = isShop ? home.shipping_public ?? null : null;
@@ -362,14 +416,23 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
 
       <div className="sh-scrim" data-open={drawer} onClick={() => setDrawer(false)} />
       <aside ref={drawerRef} className="sh-drawer" data-open={drawer} role="dialog" aria-modal="true" aria-label={isShop ? "Carrito" : "Cotización"} aria-hidden={!drawer}>
-        <div className="sh-drawer__head"><h2>{isShop ? "Tu carrito" : "Tu cotización"}</h2><button className="sh-x" onClick={() => setDrawer(false)} aria-label="Cerrar"><Ico d={IC.x} /></button></div>
+        {/* O2-09: carrito sobrio. Titulo con cantidad, lineas enlazadas a su ficha, subtotal, a lo sumo la linea del envio
+            gratis, un solo boton rojo y WhatsApp como enlace de texto */}
+        <div className="sh-drawer__head"><h2>{isShop ? "Tu carrito" : "Tu cotización"}{count > 0 && <span className="sh-drawer__n"> ({count})</span>}</h2><button className="sh-x" onClick={() => setDrawer(false)} aria-label="Cerrar"><Ico d={IC.x} /></button></div>
         <div className="sh-drawer__body">
-          {cart.length === 0 ? <div className="sh-empty" style={{ padding: "40px 0" }}><b>Todavía no agregaste nada.</b><button className="sh-btn sh-btn--ghost" onClick={() => { setDrawer(false); navigate(L("/catalogo")); }}>Ver catálogo</button></div>
-            : cart.map((l) => <CartLine key={l.key} l={l} setQty={setQty} remove={remove} />)}
+          {cart.length === 0 ? (
+            <div className="sh-empty vt-cartempty">
+              <b>{isShop ? "Tu carrito está vacío" : "Tu cotización está vacía"}</b>
+              <div className="vt-empty__actions">
+                <Link className="sh-btn" to={L("/arma-tu-sistema")} onClick={() => setDrawer(false)}>Ver kits</Link>
+                <Link className="sh-btn sh-btn--ghost" to={camaras} onClick={() => setDrawer(false)}>Ver cámaras</Link>
+              </div>
+            </div>
+          ) : cart.map((l) => <CartLine key={l.key} l={l} href={L(`/p/producto-${l.id}`)} onNav={() => setDrawer(false)} setQty={setQty} remove={remove} />)}
         </div>
         {cart.length > 0 && (
           <div className="sh-drawer__foot">
-            <div className="sh-totrow sh-totrow--big"><span>Total estimado</span><b>{money(estimate, cart[0].currency)}</b></div>
+            <div className="sh-totrow sh-totrow--big"><span>Subtotal</span><b>{money(estimate, cart[0].currency)}</b></div>
             {gap !== null && (
               <p className="vt-freeship" role="status" data-ok={gap === 0}>{gap === 0 ? "Ya tenés envío gratis" : `Te faltan ${money(gap, cur)} para el envío gratis`}</p>
             )}
@@ -378,12 +441,41 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
                 : ship?.rates.length && gap !== 0 ? `Envío: ${ship.rates.map((r) => rateText(r, cur)).join(" · ")}.`
                   : gap === 0 ? "" : "El envío se calcula al finalizar."}
             </p>
-            {isShop ? <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={() => { setDrawer(false); go({ v: "pagar" }); }}>Finalizar pedido</button>
+            {isShop ? <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={() => { setDrawer(false); go({ v: "pagar" }); }}>Finalizar pedido · {money(estimate, cart[0].currency)}</button>
               : <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={() => { setDrawer(false); go({ v: "cotizar" }); }}>Solicitar cotización</button>}
-            {hasWa && <a className="sh-btn sh-btn--wa sh-btn--block" href={wa(S.whatsapp, quoteText(cart))} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />{isShop ? "Consultar por WhatsApp" : "Cotizar por WhatsApp"}</a>}
+            {hasWa && <a className="vt-textlink vt-cartwa" href={wa(S.whatsapp, quoteText(cart))} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />{isShop ? "Consultar por WhatsApp" : "Cotizar por WhatsApp"}<span className="sh-sr"> (se abre WhatsApp)</span></a>}
           </div>
         )}
       </aside>
+
+      {/* O2-09: carrito compartido por ventas: se pregunta antes de agregar y se dice lo que no se pudo */}
+      {compartido && (
+        <div className="sh-modal vt-shared" role="presentation">
+          <div className="sh-modal__box" ref={sharedRef} role="dialog" aria-modal="true" aria-labelledby="vt-shared-t">
+            {!compartido.hecho ? (
+              <>
+                <h2 id="vt-shared-t">Te compartieron un carrito con {compartido.items.length} producto{compartido.items.length === 1 ? "" : "s"}. ¿Agregarlos al tuyo?</h2>
+                <p className="sh-note">Se suman a lo que ya tengas; no se borra nada.</p>
+                <div className="vt-empty__actions">
+                  <button type="button" className="sh-btn sh-btn--crimson" onClick={aceptarCompartido}>Agregar</button>
+                  <button type="button" className="sh-btn sh-btn--ghost" onClick={() => setCompartido(null)}>No, gracias</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 id="vt-shared-t">{compartido.hecho.ok ? `Agregamos ${compartido.hecho.ok} producto${compartido.hecho.ok === 1 ? "" : "s"} a tu carrito` : "No pudimos agregar los productos"}</h2>
+                <div role="status">
+                  {compartido.hecho.no.length > 0 && <p className="sh-err"><Ico d={IC.x} size={16} /> No se pudo agregar (no se vende en línea en este momento): {compartido.hecho.no.join(", ")}.</p>}
+                </div>
+                <div className="vt-empty__actions">
+                  {compartido.hecho.ok > 0 && <button type="button" className="sh-btn sh-btn--crimson" onClick={() => { setCompartido(null); setDrawer(true); }}>Ver carrito</button>}
+                  <button type="button" className="sh-btn sh-btn--ghost" onClick={() => setCompartido(null)}>Cerrar</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {toast && <div className="sh-toast" role="status"><Ico d={IC.check} /><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "38vw" }}>Agregado: {toast}</span><button onClick={() => { setToast(null); setDrawer(true); }}>Ir {isShop ? "al carrito" : "a la cotización"}</button></div>}
 
@@ -410,15 +502,15 @@ function SearchBox({ value, onChange, onSubmit, autoFocus = false }: { value: st
   );
 }
 
-function CartLine({ l, setQty, remove }: { l: Line; setQty: (k: string, n: number) => void; remove: (k: string) => void }) {
+function CartLine({ l, href, onNav, setQty, remove }: { l: Line; href: string; onNav: () => void; setQty: (k: string, n: number) => void; remove: (k: string) => void }) {
   return (
     <div className="sh-line">
-      <div className="sh-line__img">{l.image ? <img src={l.image} alt="" loading="lazy" decoding="async" /> : null}</div>
+      <div className="sh-line__img">{l.image ? <img src={l.image} alt="" loading="lazy" decoding="async" width={60} height={60} /> : null}</div>
       <div style={{ minWidth: 0 }}>
-        <div className="sh-line__name">{l.name}</div>
+        <Link className="sh-line__name" to={href} onClick={onNav}>{l.name}</Link>
         <div className="sh-line__row">
           <Qty value={l.qty} onChange={(n) => setQty(l.key, n)} small />
-          <button className="sh-rm" onClick={() => remove(l.key)}>Quitar</button>
+          <button className="sh-rm" onClick={() => remove(l.key)} aria-label={`Quitar ${l.name}`}>Quitar</button>
         </div>
       </div>
       <div className="sh-line__total">{money(l.qty * l.price, l.currency)}</div>
@@ -429,11 +521,9 @@ function CartLine({ l, setQty, remove }: { l: Line; setQty: (k: string, n: numbe
 function Qty({ value, onChange, small }: { value: number; onChange: (n: number) => void; small?: boolean }) {
   return (
     <span className={`sh-qty${small ? " sh-qty--sm" : ""}`}>
-      <button type="button" onClick={() => onChange(Math.max(1, value - 1))} aria-label="Quitar uno">−</button>
+      <button type="button" onClick={() => onChange(Math.max(1, value - 1))} aria-label="Quitar uno" aria-disabled={value <= 1}>−</button>
       <input inputMode="numeric" value={value} onChange={(e) => onChange(Math.max(1, Math.min(999, Number(e.target.value.replace(/\D/g, "")) || 1)))} aria-label="Cantidad" />
       <button type="button" onClick={() => onChange(Math.min(999, value + 1))} aria-label="Agregar uno">+</button>
     </span>
   );
 }
-
-

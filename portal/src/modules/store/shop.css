@@ -309,3 +309,13 @@
 /* carrito: cuanto falta para el envio gratis (texto, sin barras ni sugerencias de productos) */
 .vt-freeship { margin: 0; font-size: var(--fs-1); font-weight: 700; color: var(--text); }
 .vt-freeship[data-ok="true"] { color: var(--ok); }
+
+/* ---------- O2-09: carrito sobrio y carrito compartido ---------- */
+.sh-drawer__n { font-weight: 400; color: var(--text-2); }
+.sh-line__name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.shop .vt-cartwa { justify-self: center; }
+.vt-cartempty { padding: 40px 0; }
+.vt-shared .sh-modal__box { max-width: 480px; display: grid; gap: 14px; }
+.vt-shared h2 { font-size: var(--fs-4); line-height: 1.3; letter-spacing: -.01em; margin: 0; }
+.shop .sh-err { display: flex; gap: 6px; align-items: flex-start; margin: 0; }
+.shop .sh-err .sh-icon { flex: none; margin-top: 2px; }

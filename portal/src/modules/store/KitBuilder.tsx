@@ -116,6 +116,7 @@ export default function KitBuilder() {
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0); // vuelve a pedir el kit aunque nada haya cambiado (tras un fallo)
   const [added, setAdded] = useState(false);
+  const [addedN, setAddedN] = useState(0);
   const [inCart, setInCart] = useState(false); // ya agrego algo: "Ir al carrito" queda a mano (pedido 21/10)
   const [alarm, setAlarm] = useState(false); // tambien le interesa una alarma: va en la asesoria y en el WhatsApp (se cotiza aparte)
   const total = ans.indoor + ans.outdoor;
@@ -212,7 +213,9 @@ export default function KitBuilder() {
   const addAll = () => {
     if (!kit || busy) return;
     // lo que no se puede comprar en linea (sin existencia ni proveedor vigente) no entra al carrito: se consulta
-    priced.filter((l) => !(ctx.isShop && cannotBuy(l.product.availability))).forEach((l) => ctx.addToCart(l.product, l.quantity));
+    const ok = priced.filter((l) => !(ctx.isShop && cannotBuy(l.product.availability)));
+    ok.forEach((l) => ctx.addToCart(l.product, l.quantity));
+    setAddedN(ok.length); // O2-09: el boton dice cuantos productos entraron de verdad
     setAdded(true);
     setInCart(true);
     window.setTimeout(() => setAdded(false), 2200);
@@ -410,8 +413,8 @@ export default function KitBuilder() {
               </div>
               <div className="vt-kitres__cta">
                 <button className="sh-btn sh-btn--crimson sh-btn--block" onClick={toAdvice} disabled={busy}><Ico d={IC.tool} />Pedir levantamiento e instalación</button>
-                <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} disabled={busy || !priced.length}>
-                  <Ico d={added ? IC.check : IC.bag} />{added ? `Agregado (${priced.length} productos)` : `Agregar el equipo al ${ctx.isShop ? "carrito" : "pedido de cotización"}`}
+                <button className="sh-btn sh-btn--block" data-done={added} onClick={addAll} aria-live="polite" disabled={busy || !priced.length}>
+                  <Ico d={added ? IC.check : IC.bag} />{added ? (addedN === priced.length ? `Agregamos ${addedN} producto${addedN === 1 ? "" : "s"}` : `Agregamos ${addedN} de ${priced.length}; ${addedN === 0 ? "todos" : `los otros ${priced.length - addedN}`} se confirman por WhatsApp`) : `Agregar el equipo al ${ctx.isShop ? "carrito" : "pedido de cotización"}`}
                 </button>
                 {inCart && <button className="sh-btn sh-btn--block vt-gocart" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
                 {ctx.store.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(ctx.store.whatsapp, kitText)} target="_blank" rel="noopener noreferrer" aria-disabled={busy} onClick={(e) => { if (busy) e.preventDefault(); }}><Ico d={IC.wa} />Enviar el kit por WhatsApp</a>}
