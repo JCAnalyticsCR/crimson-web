@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-KEY_MAX, VALUE_MAX, SPECS_MAX = 40, 120, 14
+KEY_MAX, VALUE_MAX, SPECS_MAX = 40, 240, 14
 _BULLET = re.compile(r"^\s*[-•*·]\s*(?P<k>[^:\n]{2,60}?)\s*:\s*(?P<v>.+?)\s*$")
 _GLUED = re.compile(r"\s[-•]\s(?=[A-ZÁÉÍÓÚÑ][^:\n]{1,50}:)")  # «- A: x - B: y» en una sola linea
 _EMPTY = re.compile(r"^(no (indicado|aplica|especificado|disponible|incluye datos)|n/?a|ninguno|-+|—|sin datos?|no)\.?$", re.I)
@@ -29,6 +29,24 @@ INTERNAL = re.compile(r"(?<![\w-])\d{9}(?![\w-])")
 
 def fold(s: object) -> str:
     return unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
+
+
+_QDASH = re.compile(r"(?<=\d)\s?\?\s?(?=\d)")  # «0?40 °C»: el guion del proveedor llego como «?»
+_QMINUS = re.compile(r"(?:(?<=^)|(?<=\s))\?(?=\d)")  # «?15 °C»: el signo menos
+
+
+def clean_value(v: str) -> str:
+    """Valor de la ficha: el «?» que dejo un guion mal codificado vuelve a ser guion, y un valor largo se corta en el
+    ultimo separador (coma, punto y coma o espacio) con «…», nunca a media palabra."""
+    v = _QMINUS.sub("−", _QDASH.sub("–", v))
+    if len(v) <= VALUE_MAX:
+        return v
+    cut = v[: VALUE_MAX - 1]
+    for sep in ("; ", ", ", " "):
+        i = cut.rfind(sep)
+        if i >= VALUE_MAX // 2:
+            return cut[:i].rstrip(" ,;") + "…"
+    return cut.rstrip() + "…"
 
 
 def empty_value(v: object) -> bool:
@@ -58,7 +76,7 @@ def specs_from_text(text: str | None) -> dict[str, str]:
         k = (k[:1].upper() + k[1:])[:KEY_MAX]
         if k in out:
             continue
-        out[k] = v[:VALUE_MAX]
+        out[k] = clean_value(v)
         if len(out) >= SPECS_MAX:
             break
     return out

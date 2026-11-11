@@ -123,3 +123,15 @@ def test_lote_de_fichas_la_ficha_y_el_comparador(client, auth, db_session, monke
     assert set(sd) <= {"Tipo", "Marca", "Modelo"}
     # otra categoria sin lote: sigue igual que antes
     assert client.get(f"{SLUG}/catalog", params={"ids": f"{c.id}"}).json()["items"][0]["specs"] == pre
+
+
+def test_valores_largos_se_cortan_en_un_separador_y_el_guion_mal_codificado_se_corrige():
+    from app.services.catalog_fichas import VALUE_MAX, specs_from_text
+
+    largo = "Sobrecarga DSP, cortocircuito DSP, disyuntor 12 A con restablecimiento, supresor de picos 150 J, " * 4
+    texto = "\n".join([f"- Método de protección: {largo}", "- Temperatura: 0?40 °C, ?15?45 °C almacenado"])
+    s = specs_from_text(texto)
+    v = s["Método de protección"]
+    assert len(v) <= VALUE_MAX and v.endswith("…") and not v[:-1].endswith((" ", ","))
+    assert v[:-1].split()[-1] in {w.strip(",") for w in largo.split()}  # la ultima palabra esta completa
+    assert s["Temperatura"] == "0–40 °C, −15–45 °C almacenado"
