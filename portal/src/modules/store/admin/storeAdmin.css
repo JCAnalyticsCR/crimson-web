@@ -140,3 +140,13 @@
 .pe-preview { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
 .pe-more > summary { cursor: pointer; list-style: none; }
 @media (max-width: 1100px) { .pe-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- portada ordenable y categorias (O4-07) ---------- */
+.pd-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pd-row { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.2fr) auto auto; align-items: center; }
+.pd-row.is-drag { opacity: .6; }
+.pd-handle { cursor: grab; user-select: none; color: var(--text-3); padding: 0 4px; font-size: 18px; }
+.pd-name { min-width: 0; font-size: 13px; }
+.pd-title { min-width: 0; }
+.ct-list { list-style: none; margin: 0; display: grid; gap: 6px; }
+@media (max-width: 900px) { .pd-row { grid-template-columns: auto minmax(0, 1fr); } .pd-title { grid-column: 1 / -1; } }

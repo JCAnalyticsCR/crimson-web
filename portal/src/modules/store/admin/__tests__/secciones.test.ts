@@ -24,9 +24,9 @@ describe("secciones de Mi Tienda", () => {
     expect(visibleSections(allowsFor({ "*": ["*"] }), true).map((s) => s.key)).toEqual(SECTIONS.map((s) => s.key));
   });
 
-  it("quien solo edita el catalogo ve resumen, catalogo y categorias; nunca pagos, apariencia ni publicacion", () => {
+  it("quien solo edita el catalogo ve resumen y catalogo; nunca pagos, apariencia, categorias ni publicacion", () => {
     const keys = visibleSections(allowsFor({ catalog: ["ver", "editar"] }), false).map((s) => s.key);
-    expect(keys).toEqual(["resumen", "catalogo", "categorias"]);
+    expect(keys).toEqual(["resumen", "catalogo"]);
   });
 
   it("un rol con settings.configurar que no es administrador no ve la Tienda de pruebas", () => {

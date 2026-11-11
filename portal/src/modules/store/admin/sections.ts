@@ -4,7 +4,8 @@
    Permisos (los mismos de hoy, la API manda):
    - settings.configurar (solo el administrador): apariencia, portada, kits, paginas, pagos y envios, SEO, publicacion y
      el contenido por aprobar.
-   - catalog.editar: catalogo y categorias (publicar un producto pide ademas catalog.publicar; ver costos, catalog.costos).
+   - catalog.editar: el catalogo (publicar un producto pide ademas catalog.publicar; ver costos, catalog.costos).
+   - categorias y colecciones viven en los ajustes de la vitrina (PUT /store/showcase): settings.configurar (O4-07).
    - El resumen lo ve quien abre cualquiera de las dos cosas.
    - La Tienda de pruebas: solo el rol administrador (la API responde 404 a cualquier otro). */
 
@@ -32,7 +33,7 @@ export const SECTIONS: Section[] = [
   { key: "kits", path: "kits", label: "Destacados y kits", hint: "Productos destacados y kits por necesidad", need: "settings.configurar", group: "Tienda" },
   { key: "paginas", path: "paginas", label: "Páginas", hint: "Envíos, garantías, términos, privacidad y preguntas", need: "settings.configurar", group: "Tienda" },
   { key: "catalogo", path: "catalogo", label: "Catálogo", hint: "Todos los productos de la web, con filtros de calidad", need: "catalog.editar", group: "Catálogo" },
-  { key: "categorias", path: "categorias", label: "Categorías", hint: "Orden, visibilidad, imagen y texto de cada categoría", need: "catalog.editar", group: "Catálogo" },
+  { key: "categorias", path: "categorias", label: "Categorías", hint: "Orden, visibilidad, imagen y texto de cada categoría, y colecciones", need: "settings.configurar", group: "Catálogo" },
   /* Ola 3 (O3-11): la pantalla «Contenido por aprobar» la trae la ola del catalogo; aqui queda su lugar en el menu */
   { key: "contenido", path: "contenido-por-aprobar", label: "Contenido por aprobar", hint: "Nombres, fichas y descripciones propuestos", need: "settings.configurar", group: "Catálogo" },
   { key: "pagos-envios", path: "pagos-envios", label: "Pagos y envíos", hint: "Tarifas, envío gratis, retiro, formas de pago y datos del comercio", need: "settings.configurar", group: "Venta" },

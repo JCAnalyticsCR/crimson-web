@@ -128,6 +128,60 @@ ENVIRONMENTS = {"casa": "Casa", "negocio": "Negocio", "condominio": "Condominio"
 TIMELINES = {"inmediato": "Inmediato", "semanas": "Próximas semanas", "evaluacion": "En evaluación", "futuro": "A futuro"}
 
 
+# O4-07: secciones de la portada en el orden de hoy (StoreHome.tsx). Sin tocar nada, la portada es identica: las que hoy
+# no existen («Listos para entregar» y «Colección») nacen ocultas.
+PORTADA_SECTIONS: list[tuple[str, str, bool]] = [
+    ("hero", "Portada principal", True),
+    ("sellos", "Sellos de confianza", True),
+    ("banners", "Banners", True),
+    ("kits", "Kits por necesidad", True),
+    ("categorias", "Categorías", True),
+    ("seleccion", "Selección", True),
+    ("configurador", "Armá tu sistema", True),
+    ("recientes", "Recién agregados", True),
+    ("marcas", "Marcas", True),
+    ("asesoria", "Asesoría", True),
+    ("listos", "Listos para entregar", False),
+    ("coleccion", "Colección", False),
+]
+SECTION_KEYS = {k for k, _, _ in PORTADA_SECTIONS}
+MAS_PEDIDO_MIN = 10  # «Lo más pedido» solo con ventas reales: pedidos pagados en 90 dias
+
+
+def portada_sections(saved) -> list[dict]:
+    """Orden guardado (solo llaves conocidas, sin repetir) y, al final, las que falten con su valor por defecto."""
+    out, vistos = [], set()
+    for s in saved or []:
+        k = (s or {}).get("key") if isinstance(s, dict) else None
+        if k in SECTION_KEYS and k not in vistos:
+            vistos.add(k)
+            out.append({"key": k, "visible": bool(s.get("visible", True)), "title": str(s.get("title") or "")[:80]})
+    for k, _, vis in PORTADA_SECTIONS:
+        if k not in vistos:
+            out.append({"key": k, "visible": vis, "title": ""})
+    return out
+
+
+def collection_products(items: list[dict], rule: dict, cat_ids: set[int] | None) -> list[dict]:
+    """Productos del snapshot que cumplen la regla de una coleccion, con dato real: «stock» = en bodega hoy (se
+    actualiza sola con la existencia), precio maximo con IVA, categoria (con sus hijas) y texto."""
+    terms = split_terms(rule.get("q") or "") if rule.get("q") else []
+    maxp = rule.get("max_price")
+    out = []
+    for p in items:
+        a = p.get("availability") or {}
+        if rule.get("stock_only") and a.get("state") != "en_bodega":
+            continue
+        if maxp not in (None, "") and not (0 < float(p.get("display_price") or 0) <= float(maxp)):
+            continue
+        if cat_ids is not None and p.get("category_id") not in cat_ids:
+            continue
+        if terms and not all(t in (p.get("sf") or "") for t in terms):
+            continue
+        out.append(p)
+    return out
+
+
 def showcase_cfg(store: dict) -> dict:
     """Configuracion de la vitrina con sus valores por defecto (lo guardado manda)."""
     sc = dict(store.get("showcase") or {})
@@ -143,6 +197,10 @@ def showcase_cfg(store: dict) -> dict:
         "headline": sc.get("headline") or "",
         "subline": sc.get("subline") or "",
         "seo_description": sc.get("seo_description") or "",
+        # O4-07: orden y visibilidad de las secciones de la portada, ajustes por categoria y colecciones por regla
+        "sections": portada_sections(sc.get("sections")),
+        "categories": {str(k): v for k, v in (sc.get("categories") or {}).items() if isinstance(v, dict)},
+        "collections": [c for c in (sc.get("collections") or []) if isinstance(c, dict) and c.get("slug")],
         # O4-08: titulo de la portada en Google e imagen para compartir (vacios = los de siempre)
         "seo_title": sc.get("seo_title") or "",
         "share_image": sc.get("share_image") or "",

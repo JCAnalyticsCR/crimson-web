@@ -325,6 +325,31 @@ test("[O4-08] pagos y envíos en una sección, con lo que ve el cliente; SEO con
   await expect(page.getByText(/analytics|píxel/i)).toHaveCount(0);  // sin medición de terceros
 });
 
+test("[O4-07] portada ordenable con teclado, categorías y colecciones por regla", async ({ page, baseURL, servidor }, info) => {
+  solo768(info);
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  const slug = ((await (await servidor.get("/api/store", { headers: h })).json()) as { slug: string }).slug;
+  const orden = async () => ((await (await servidor.get(`/api/public/store/${slug}/showcase`)).json()) as { sections: { key: string }[] }).sections.map((s) => s.key);
+  const antes = await orden();
+  await entrar(page, panel(baseURL), "/mi-tienda/portada");
+  // con el teclado: foco en «Bajar Portada principal» y Enter
+  await page.getByRole("button", { name: "Bajar Portada principal" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".pd-row").first()).toContainText("Sellos de confianza");
+  await page.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(orden).toEqual([antes[1], antes[0], ...antes.slice(2)]);
+  await sinScroll(page, "portada");
+  await page.getByRole("button", { name: "Deshacer" }).click();
+  await expect.poll(orden).toEqual(antes);
+
+  await ir(page, "/mi-tienda/categorias");
+  await page.getByRole("button", { name: "Listo para entregar" }).click();
+  await page.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(async () => (await servidor.get(`/api/public/store/${slug}/collections/listo-para-entregar`)).status()).toBe(200);
+  expect((await servidor.get(`/api/public/store/${slug}/collections/no-existe`)).status()).toBe(404);
+  await sinScroll(page, "categorías");
+});
+
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
    factor: correo y contrasena, el paso «Verificación en dos pasos», el codigo de la app y adentro del panel. */
 test("[O2-01d] inicio de sesión del panel con segundo factor (2FA)", async ({ page, baseURL }) => {

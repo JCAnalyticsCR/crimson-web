@@ -140,6 +140,38 @@ class FaqIn(BaseModel):
     a: str = Field(max_length=2000)
 
 
+class SectionIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    key: str = Field(max_length=20)
+    visible: bool = True
+    title: str = Field("", max_length=80)
+
+
+class CategoryCfgIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    position: int | None = Field(None, ge=0, le=9999)
+    hidden: bool = False
+    image: str = Field("", max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
+    seo_text: str = Field("", max_length=600)
+
+
+class CollectionRuleIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    stock_only: bool = False
+    max_price: Decimal | None = Field(None, ge=0, le=Decimal("99999999"))
+    category_id: int | None = None
+    q: str = Field("", max_length=80)
+
+
+class CollectionIn(BaseModel):
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+    slug: str = Field(min_length=2, max_length=60, pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")
+    title: str = Field(min_length=2, max_length=80)
+    text: str = Field("", max_length=300)
+    active: bool = True
+    rule: CollectionRuleIn = CollectionRuleIn()
+
+
 class ShowcaseIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     headline: str | None = Field(None, max_length=120)
@@ -159,6 +191,10 @@ class ShowcaseIn(BaseModel):
     trust: list[TrustIn] | None = Field(None, max_length=6)
     faq: list[FaqIn] | None = Field(None, max_length=40)
     pages: dict[str, str] | None = None
+    # O4-07: secciones de la portada, ajustes por categoria y colecciones
+    sections: list[SectionIn] | None = Field(None, max_length=20)
+    categories: dict[str, CategoryCfgIn] | None = None
+    collections: list[CollectionIn] | None = Field(None, max_length=20)
     # O4-02: version que leyo el panel (409 si otro guardo en el medio)
     version: int | None = None
 
@@ -457,6 +493,21 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
             k["photos"] = fotos
     if "pages" in patch:
         patch["pages"] = {**(sc.get("pages") or {}), **(patch["pages"] or {})}
+    if "sections" in patch:
+        patch["sections"] = sv.portada_sections(patch["sections"])
+        # «Lo más pedido» solo sale de ventas reales (plan: nada de prueba social sin respaldo)
+        if any("mas pedido" in sv.fold(s["title"]) for s in patch["sections"]):
+            pagados = _pagados_90(db, t.id)
+            if pagados < sv.MAS_PEDIDO_MIN:
+                raise HTTPException(422, f"«Lo más pedido» necesita al menos {sv.MAS_PEDIDO_MIN} pedidos pagados en 90 días; hoy hay {pagados}.")
+    if "categories" in patch:
+        mine = {str(i) for i in db.scalars(select(Category.id).where(Category.tenant_id == t.id))}
+        patch["categories"] = {k: v for k, v in (patch["categories"] or {}).items() if k in mine}
+    if "collections" in patch:
+        slugs = [c["slug"] for c in patch["collections"] or []]
+        if len(slugs) != len(set(slugs)):
+            raise HTTPException(422, "Dos colecciones no pueden tener la misma dirección")
+        patch["collections"] = [{**c, "rule": {**c["rule"], "max_price": str(c["rule"]["max_price"]) if c["rule"].get("max_price") is not None else None}} for c in patch["collections"] or []]
     sc.update(patch)
     store["showcase"] = sc
     st["store"] = store
@@ -468,6 +519,23 @@ def showcase_put(data: ShowcaseIn, p: Principal = Depends(require("settings", "c
     audit(db, t.id, p.user.id, "update", "store_showcase", t.id, {"campos": sorted(patch)}, ip=p.ip)
     db.commit()
     return {**_admin_out(t, db), "warnings": warnings}
+
+
+def _pagados_90(db: Session, tid: int) -> int:
+    """Pedidos de la tienda pagados en los ultimos 90 dias (O4-07: el titulo «Lo más pedido» solo con ventas reales)."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import func
+
+    from ..models import Order
+
+    desde = datetime.now(UTC) - timedelta(days=90)
+    return int(
+        db.scalar(
+            select(func.count()).select_from(Order).where(Order.tenant_id == tid, Order.channel == "tienda", Order.paid_at.is_not(None), Order.paid_at >= desde)
+        )
+        or 0
+    )
 
 
 class ProductShowcaseIn(BaseModel):
@@ -745,19 +813,35 @@ def _cat_tree(ctx: Ctx, counts: dict[int, int], images: dict[int, str]) -> list[
     def total(c: Category) -> int:
         return counts.get(c.id, 0) + sum(total(k) for k in kids.get(c.id, []))
 
+    # O4-07: Mi Tienda -> Categorias (orden, ocultar, imagen y texto). Sin ajustes, el arbol de siempre (por cantidad)
+    adj = sv.showcase_cfg(ctx.cfg).get("categories") or {}
+
+    def shown(c: Category) -> bool:
+        return bool(total(c)) and not (adj.get(str(c.id)) or {}).get("hidden")
+
+    def order(n: dict) -> tuple:
+        pos = (adj.get(str(n["id"])) or {}).get("position")
+        return (pos if isinstance(pos, int) else 10_000, -n["count"])
+
     def node(c: Category) -> dict:
-        subs = [node(k) for k in kids.get(c.id, []) if total(k)]
-        return {
+        a = adj.get(str(c.id)) or {}
+        subs = sorted((node(k) for k in kids.get(c.id, []) if shown(k)), key=order)
+        out = {
             "id": c.id,
             "name": c.name,
             "slug": ctx.cat_slug[c.id],
             "path": f"/c/{ctx.cat_slug[c.id]}",
             "count": total(c),
-            "image": images.get(c.id),
+            "image": a.get("image") or images.get(c.id),
             "children": subs,
-        } | ({"description": c.description} if c.description else {})  # O3-07a: el snapshot la lleva (antes nula)
+        }
+        # O3-07a: el texto de la categoria viaja en el snapshot; O4-07: el escrito en Mi Tienda -> Categorias manda
+        desc = a.get("seo_text") or c.description
+        if desc:
+            out["description"] = desc
+        return out
 
-    return sorted((node(c) for c in kids.get(None, []) if total(c)), key=lambda n: -n["count"])
+    return sorted((node(c) for c in kids.get(None, []) if shown(c)), key=order)
 
 
 def _descendants(ctx: Ctx, cid: int) -> set[int]:
@@ -941,6 +1025,8 @@ def showcase_public(slug: str, response: Response, if_none_match: str | None = H
         "banners": sv.public_banners(sc["banners"], ctx.cfg.get("domain")),
         "trust": sv.public_trust(sc["trust"], business_of(ctx.cfg).get("hours")),
         "categories": _cat_tree(ctx, counts, images),
+        # O4-07: orden y visibilidad de las secciones (la portada publica lo aplica; ver StoreHome)
+        "sections": [{"key": s["key"], "title": s["title"]} for s in sc["sections"] if s["visible"]],
         "brands": [{"name": b, "count": n} for b, n in sorted(brands.items(), key=lambda x: (x[0].lower() != "hikvision", -x[1]))[:14]],
         "featured": [ctx.card(_full.get(p.id, p), stock.get(p.id)) for p in featured[:8]],
         "featured_source": featured_source,
@@ -1696,6 +1782,41 @@ async def advisory(slug: str, request: Request, db: Session = Depends(get_db)):
         return ADVISORY_OK  # honeypot: misma respuesta, nada creado
     await run_in_threadpool(_crear_oportunidad, db, slug, data, ip)
     return ADVISORY_OK
+
+
+@pub.get("/collections/{cslug}")
+def collection_public(slug: str, cslug: str, response: Response, db: Session = Depends(get_db)):
+    """Coleccion por regla (O4-07): los productos del snapshot que HOY cumplen la regla (se actualiza sola con la
+    existencia y el precio). Una direccion que no existe o una coleccion apagada: 404 real."""
+    import gzip
+    import json
+
+    from ..services import store_snapshot
+
+    t = _tenant(db, slug)
+    sc = sv.showcase_cfg(store_cfg(t))
+    col = next((c for c in sc["collections"] if c.get("slug") == cslug and c.get("active", True)), None)
+    if not col:
+        raise HTTPException(404, "Colección no encontrada")
+    gz, _ver = store_snapshot.get_or_rebuild(db, t.id)
+    data = json.loads(gzip.decompress(gz))
+    rule = col.get("rule") or {}
+    cat_ids = None
+    if rule.get("category_id"):
+        cat_ids = set()
+
+        def walk(nodes, inside: bool) -> None:
+            for n in nodes or []:
+                hit = inside or n.get("id") == rule["category_id"]
+                if hit:
+                    cat_ids.add(n["id"])
+                walk(n.get("children"), hit)
+
+        walk(data.get("categories"), False)
+        cat_ids.add(rule["category_id"])
+    prods = sv.collection_products(data.get("products") or [], rule, cat_ids)
+    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=120"
+    return {"slug": col["slug"], "title": col["title"], "text": col.get("text") or "", "n": len(prods), "products": prods[:96], "currency": data.get("currency")}
 
 
 @pub.get("/sitemap.xml")

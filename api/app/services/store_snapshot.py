@@ -237,6 +237,8 @@ def build(db: Session, t, ctx) -> bytes:
         # O1-04 d/k: los mismos de /showcase (sin banners de relleno; sellos con dato verificable)
         "banners": sv.public_banners(sc.get("banners") or [], cfg.get("domain")),
         "trust": sv.public_trust(sc.get("trust") or [], business_of(cfg).get("hours")),
+        # O4-07: orden y visibilidad de las secciones de la portada (Mi Tienda -> Portada); la portada lo aplica
+        "sections": [{"key": x["key"], "title": x["title"]} for x in sc.get("sections") or [] if x.get("visible")],
     }
 
     version = sv.get_catalog_version(t)

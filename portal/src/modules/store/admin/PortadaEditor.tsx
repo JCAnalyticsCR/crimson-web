@@ -1,6 +1,7 @@
 /* Mi Tienda -> Portada: titular, bajada, banners y sellos de confianza en un solo borrador (O4-02): nada se guarda al
    salir de un campo ni con botones por bloque; todo sale junto con «Guardar y publicar» (y se puede deshacer).
    Editar el titular y un banner en la misma sesion no pierde nada: es un solo guardado. */
+import { useState } from "react";
 import { Card, Field, I, Icon, Loading } from "../../../ui/components";
 import { ImageField } from "../../../ui/MediaPicker";
 import { SaveBar } from "./SaveBar";
@@ -9,17 +10,33 @@ import { useDraft } from "./useDraft";
 
 export type Banner = { id?: string; image: string; title: string; text: string; link: string; cta: string; position: number; active: boolean };
 export type Trust = { icon: string; title: string; text: string };
-type Portada = { headline: string; subline: string; banners: Banner[]; trust: Trust[] };
+export type Seccion = { key: string; visible: boolean; title: string };
+type Portada = { headline: string; subline: string; banners: Banner[]; trust: Trust[]; sections: Seccion[] };
+/* O4-07: nombres de las secciones de la portada (mismo orden por defecto que el API, services/store_showcase) */
+const SECCIONES: Record<string, string> = {
+  hero: "Portada principal", sellos: "Sellos de confianza", banners: "Banners", kits: "Kits por necesidad", categorias: "Categorías",
+  seleccion: "Selección (destacados)", configurador: "Armá tu sistema", recientes: "Recién agregados", marcas: "Marcas", asesoria: "Asesoría",
+  listos: "Listos para entregar", coleccion: "Colección",
+};
 export const PORTADA_LABELS: Record<string, string> = { headline: "Titular", subline: "Bajada", banners: "Banners", trust: "Sellos", sections: "Secciones de la portada" };
 const ICONOS: [string, string][] = [["shield", "Escudo"], ["tool", "Herramienta"], ["truck", "Camión"], ["doc", "Documento"], ["chat", "Conversación"], ["clock", "Reloj"]];
 /* O1-04 d: sin imagen o con el titulo vacio o «Nuevo banner», la tienda no lo pinta (y el API lo guarda inactivo) */
 const incompleto = (b: Banner) => !b.image.trim() || ["", "nuevo banner"].includes(b.title.trim().toLowerCase());
 
-export default function PortadaEditor({ children }: { children?: React.ReactNode }) {
+export default function PortadaEditor() {
+  /* lo que hoy no se puede comprar de cada seccion (destacados y lo que arma cada kit), para avisarlo al lado */
+  const [noVende, setNoVende] = useState<Record<string, number>>({});
+  const [arrastra, setArrastra] = useState<number | null>(null);
   const d = useDraft<Portada>({
     key: "portada:showcase",
     url: "/store/showcase",
-    read: (r) => ({ headline: String(r.headline ?? ""), subline: String(r.subline ?? ""), banners: (r.banners as Banner[]) || [], trust: (r.trust as Trust[]) || [] }),
+    read: (r) => {
+      const vende = (st?: string | null) => st === "en_bodega" || st === "bajo_pedido";
+      const fp = (r.featured_products as { state?: string | null }[]) || [];
+      const kp = (r.kits_preview as { lines: { state: string | null }[] }[]) || [];
+      setNoVende({ seleccion: fp.filter((x) => !vende(x.state)).length, kits: kp.reduce((a, k) => a + k.lines.filter((ln) => !vende(ln.state)).length, 0) });
+      return { headline: String(r.headline ?? ""), subline: String(r.subline ?? ""), banners: (r.banners as Banner[]) || [], trust: (r.trust as Trust[]) || [], sections: (r.sections as Seccion[]) || [] };
+    },
     // el orden de los banners es el de la lista
     body: (x, changed, version) => ({ ...Object.fromEntries(changed.map((k) => [k, k === "banners" ? x.banners.map((b, i) => ({ ...b, position: i + 1 })) : x[k]])), version }),
   });
@@ -80,7 +97,27 @@ export default function PortadaEditor({ children }: { children?: React.ReactNode
           ))}
         </div>
       </Card>
-      {children}
+      <Card title="Orden de la portada">
+        <div className="mt-stack">
+          <p className="mt-lead">Arrastre desde el asa o use las flechas (también con el teclado). Sin cambios, la portada queda como hoy. El título «Lo más pedido» solo se acepta con al menos 10 pedidos pagados en 90 días.</p>
+          <ol className="pd-list">
+            {p.sections.map((s, i) => (
+              <li key={s.key} className={`mt-box pd-row${arrastra === i ? " is-drag" : ""}`}
+                onDragOver={(e) => { if (arrastra !== null) e.preventDefault(); }}
+                onDrop={(e) => { e.preventDefault(); if (arrastra === null || arrastra === i) return; const l = [...p.sections]; const [m] = l.splice(arrastra, 1); l.splice(i, 0, m); d.set({ sections: l }); setArrastra(null); }}>
+                <span className="pd-handle" draggable onDragStart={() => setArrastra(i)} onDragEnd={() => setArrastra(null)} aria-hidden="true" title="Arrastrar">⋮⋮</span>
+                <span className="pd-name"><b>{i + 1}. {SECCIONES[s.key] || s.key}</b>{!!noVende[s.key] && <span className="mt-warn" style={{ display: "block", fontWeight: 500 }}>{noVende[s.key] === 1 ? "1 producto de esta sección no se puede comprar hoy" : `${noVende[s.key]} productos de esta sección no se pueden comprar hoy`}</span>}</span>
+                <input className="input pd-title" value={s.title} maxLength={80} placeholder="Título (vacío = el de siempre)" aria-label={`Título de ${SECCIONES[s.key] || s.key}`} onChange={(e) => d.set({ sections: p.sections.map((x, k) => (k === i ? { ...x, title: e.target.value } : x)) })} />
+                <label className="pw-check"><input type="checkbox" checked={s.visible} onChange={(e) => d.set({ sections: p.sections.map((x, k) => (k === i ? { ...x, visible: e.target.checked } : x)) })} />Visible</label>
+                <span className="mt-row">
+                  <button className="btn btn--ghost btn--sm" onClick={() => d.set({ sections: moveItem(p.sections, i, -1) })} disabled={i === 0} aria-label={`Subir ${SECCIONES[s.key] || s.key}`}>↑</button>
+                  <button className="btn btn--ghost btn--sm" onClick={() => d.set({ sections: moveItem(p.sections, i, 1) })} disabled={i === p.sections.length - 1} aria-label={`Bajar ${SECCIONES[s.key] || s.key}`}>↓</button>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </Card>
       <SaveBar drafts={[d]} labels={PORTADA_LABELS} validate={() => (p.trust.some((t) => !t.title.trim()) ? "Cada sello necesita su título (o quítelo)." : null)} />
     </>
   );
