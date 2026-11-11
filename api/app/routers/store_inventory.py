@@ -217,6 +217,10 @@ def web_product(pid: int, data: WebProductIn, p: Principal = Depends(require("ca
     if not pr or pr.tenant_id != p.tenant.id:
         raise HTTPException(404, "Producto no encontrado")
     vals = data.model_dump(exclude_unset=True)
+    # O1-11b: publicar o despublicar en la tienda es de quien tiene catalog.publicar (el administrador, pedido 21/10),
+    # como en /products/{id}/web; con catalog.editar se cambian destacado y precio web, no la publicacion
+    if "show_on_web" in vals and vals["show_on_web"] is not None and bool(vals["show_on_web"]) != bool(pr.show_on_web) and not p.can("catalog", "publicar"):
+        raise HTTPException(403, "Solo el administrador publica o despublica productos en la tienda")
     for k, v in vals.items():
         if k != "web_price" and v is None:
             continue

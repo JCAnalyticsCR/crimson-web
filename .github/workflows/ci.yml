@@ -149,7 +149,8 @@ jobs:
         run: |
           uv run pytest -q -p no:cacheprovider -rs --junitxml="$RUNNER_TEMP/carreras.xml" \
             tests/test_inventario_reservas.py::test_ac06_concurrencia_postgres_real \
-            tests/test_tienda_inventario.py::test_ac06_tienda_postgres_real
+            tests/test_tienda_inventario.py::test_ac06_tienda_postgres_real \
+            tests/test_tienda_ajustes_guardado.py::test_dos_guardados_simultaneos_postgres_real
           grep -q 'skipped="0"' "$RUNNER_TEMP/carreras.xml" || { echo "::error::Las pruebas de Postgres real se saltaron"; exit 1; }
 
   portal:

@@ -1,10 +1,11 @@
 /* Mi Tienda -> Vitrina: lo que se ve en la portada de la tienda propia (titular, banners, destacados, kits,
    sellos), las paginas propias (envios, garantias, preguntas frecuentes, terminos y privacidad) y los datos de vitrina
    por producto (precio anterior, ficha PDF, especificaciones). Sin medicion: nada de Google ni de terceros (EX-NOGA). */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtMoney, type Product } from "../../lib/api";
+import { parseMonto } from "../../lib/parseCRC";
 import { useSession } from "../../app/session";
-import { Card, Field, I, Icon, Loading } from "../../ui/components";
+import { Card, Field, I, Icon, Loading, Modal } from "../../ui/components";
 import { ImageField } from "../../ui/MediaPicker";
 import { AvailBadge } from "../../ui/Availability";
 
@@ -46,7 +47,13 @@ export default function StoreShowcaseAdmin() {
   const { toast } = useSession();
   const [d, setD] = useState<Showcase | null>(null);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Portada");
-  const [avisos, setAvisos] = useState<string[]>([]); // lo que el ultimo guardado de kits no pudo fijar: queda a la vista hasta el siguiente
+  const [avisos, setAvisos] = useState<string[]>([]);
+  /* O1-11b: editores con cambios sin guardar; cambiar de pestana los descarta, asi que antes se avisa */
+  const [sucios, setSucios] = useState<Record<string, boolean>>({});
+  const onDirty = useCallback<OnDirty>((k, v) => setSucios((x) => (!!x[k] === v ? x : { ...x, [k]: v })), []);
+  const [irA, setIrA] = useState<(typeof TABS)[number] | null>(null);
+  const pendientes = Object.entries(sucios).filter(([, v]) => v).map(([k]) => SECCION[k] || k);
+  const cambiarTab = (t: (typeof TABS)[number]) => { if (t === tab) return; if (pendientes.length) setIrA(t); else setTab(t); }; // lo que el ultimo guardado de kits no pudo fijar: queda a la vista hasta el siguiente
   useEffect(() => { api<Showcase>("/store/showcase").then(setD).catch((e) => toast(e.message, "bad")); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const save = (patch: Partial<Showcase>) => api<Showcase>("/store/showcase", { method: "PUT", json: patch }).then((r) => {
     setD(r);
@@ -65,7 +72,7 @@ export default function StoreShowcaseAdmin() {
       {!d ? <Loading /> : (
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} role="tablist">
-            {TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} className={`btn btn--sm ${tab === t ? "btn--crimson" : "btn--ghost"}`} onClick={() => setTab(t)}>{t}</button>)}
+            {TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} className={`btn btn--sm ${tab === t ? "btn--crimson" : "btn--ghost"}`} onClick={() => cambiarTab(t)}>{t}</button>)}
           </div>
 
           {tab === "Portada" && (
@@ -75,14 +82,14 @@ export default function StoreShowcaseAdmin() {
                 <Field label="Bajada"><input className="input" defaultValue={d.subline} maxLength={300} onBlur={(e) => e.target.value !== d.subline && save({ subline: e.target.value })} /></Field>
               </div>
               <Field label="Descripción para Google y WhatsApp (portada)"><input className="input" defaultValue={d.seo_description} maxLength={300} onBlur={(e) => e.target.value !== d.seo_description && save({ seo_description: e.target.value })} /></Field>
-              <BannersEditor value={d.banners} onSave={(banners) => save({ banners })} />
-              <TrustEditor value={d.trust} onSave={(trust) => save({ trust })} />
+              <BannersEditor value={d.banners} onSave={(banners) => save({ banners })} onDirty={onDirty} />
+              <TrustEditor value={d.trust} onSave={(trust) => save({ trust })} onDirty={onDirty} />
             </div>
           )}
 
           {tab === "Destacados y kits" && (
             <div style={{ display: "grid", gap: 16 }}>
-              <FeaturedEditor ids={d.featured} items={d.featured_products} onSave={(featured) => save({ featured })} />
+              <FeaturedEditor ids={d.featured} items={d.featured_products} onSave={(featured) => save({ featured })} onDirty={onDirty} />
               <KitsEditor value={d.kits} preview={d.kits_preview || []} avisos={avisos} onSave={(kits) => save({ kits })} />
             </div>
           )}
@@ -94,11 +101,16 @@ export default function StoreShowcaseAdmin() {
               <Field label="Garantías"><textarea className="textarea" rows={8} defaultValue={d.pages.garantias} onBlur={(e) => e.target.value !== d.pages.garantias && save({ pages: { ...d.pages, garantias: e.target.value } })} /></Field>
               <Field label="Términos y condiciones" hint="El importador de Fygaro trae el texto que tenía la tienda."><textarea className="textarea" rows={8} defaultValue={d.legal.terms || ""} onBlur={(e) => e.target.value !== (d.legal.terms || "") && saveLegal({ terms: e.target.value })} /></Field>
               <Field label="Política de privacidad"><textarea className="textarea" rows={8} defaultValue={d.legal.privacy || ""} onBlur={(e) => e.target.value !== (d.legal.privacy || "") && saveLegal({ privacy: e.target.value })} /></Field>
-              <FaqEditor value={d.faq} onSave={(faq) => save({ faq })} />
+              <FaqEditor value={d.faq} onSave={(faq) => save({ faq })} onDirty={onDirty} />
             </div>
           )}
 
           {tab === "Por producto" && <ProductShowcase />}
+          {irA && (
+            <Modal title="Hay cambios sin guardar" onClose={() => setIrA(null)} foot={<><button className="btn btn--ghost" onClick={() => setIrA(null)}>Seguir editando</button><button className="btn btn--danger" onClick={() => { setTab(irA); setIrA(null); }}>Cambiar sin guardar</button></>}>
+              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>Tiene cambios sin guardar en {pendientes.join(", ")}. Si cambia de pestaña se pierden: guárdelos primero con su botón «Guardar».</p>
+            </Modal>
+          )}
 
 
         </div>
@@ -109,21 +121,41 @@ export default function StoreShowcaseAdmin() {
 
 const row: React.CSSProperties = { border: "1px solid var(--hair)", borderRadius: 10, padding: 10, display: "grid", gap: 8 };
 
+type OnDirty = (key: string, dirty: boolean) => void;
+/** Borrador de un editor de la vitrina (O1-11b). Antes cada editor se reiniciaba con lo del servidor en CUALQUIER
+    guardado (setD de otro editor): escribir un banner y guardar el titular borraba el banner. Ahora lo de afuera solo
+    se adopta si el editor no tiene cambios pendientes o si el guardado es el suyo (guardando()). Avisa al padre si
+    hay cambios sin guardar, para advertir antes de cambiar de pestaña. */
+function useDraft<T>(value: T, key: string, onDirty?: OnDirty): [T, (v: T) => void, () => void] {
+  const [draft, setDraft] = useState<T>(value);
+  const base = useRef(value);
+  const adopt = useRef(false);
+  useEffect(() => {
+    setDraft((cur) => (adopt.current || JSON.stringify(cur) === JSON.stringify(base.current) ? value : cur));
+    adopt.current = false;
+    base.current = value;
+  }, [value]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(base.current);
+  useEffect(() => { onDirty?.(key, dirty); }, [dirty, key, onDirty]);
+  useEffect(() => () => onDirty?.(key, false), [key, onDirty]);
+  return [draft, setDraft, () => { adopt.current = true; }];
+}
+const SECCION: Record<string, string> = { banners: "Banners", trust: "Sellos de confianza", featured: "Productos destacados", faq: "Preguntas frecuentes" };
+
 /** O1-04 d: sin imagen, o con el titulo vacio o «Nuevo banner»: la tienda no lo pinta (y el API lo guarda inactivo) */
 const incompleto = (b: Banner) => !b.image.trim() || ["", "nuevo banner"].includes(b.title.trim().toLowerCase());
 
-function BannersEditor({ value, onSave }: { value: Banner[]; onSave: (v: Banner[]) => void }) {
-  const [list, setList] = useState<Banner[]>(value);
-  useEffect(() => setList(value), [value]);
+function BannersEditor({ value, onSave, onDirty }: { value: Banner[]; onSave: (v: Banner[]) => void; onDirty?: OnDirty }) {
+  const [list, setList, guardando] = useDraft<Banner[]>(value, "banners", onDirty);
   const upd = (i: number, p: Partial<Banner>) => setList(list.map((b, k) => (k === i ? { ...b, ...p } : b)));
   return (
-    <div style={{ display: "grid", gap: 8 }}>
+    <div style={{ display: "grid", gap: 8 }} data-editor="banners">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <b style={{ fontSize: 13 }}>Banners (hasta 3 visibles; el primero es el grande)</b>
         <div style={{ display: "flex", gap: 6 }}>
           {/* O1-04 d: nace inactivo y sin titulo (antes «Nuevo banner» activo salia publicado tal cual) */}
           <button className="btn btn--ghost btn--sm" onClick={() => setList([...list, { image: "", title: "", text: "", link: "/catalogo", cta: "Ver más", position: list.length + 1, active: false }])} disabled={list.length >= 12}><Icon d={I.plus} />Banner</button>
-          <button className="btn btn--crimson btn--sm" onClick={() => onSave(list)}><Icon d={I.check} />Guardar banners</button>
+          <button className="btn btn--crimson btn--sm" onClick={() => { guardando(); onSave(list); }}><Icon d={I.check} />Guardar banners</button>
         </div>
       </div>
       {list.length === 0 && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Sin banners: la portada muestra el titular, las categorías y los destacados.</p>}
@@ -148,13 +180,12 @@ function BannersEditor({ value, onSave }: { value: Banner[]; onSave: (v: Banner[
   );
 }
 
-function TrustEditor({ value, onSave }: { value: Trust[]; onSave: (v: Trust[]) => void }) {
-  const [list, setList] = useState<Trust[]>(value);
-  useEffect(() => setList(value), [value]);
+function TrustEditor({ value, onSave, onDirty }: { value: Trust[]; onSave: (v: Trust[]) => void; onDirty?: OnDirty }) {
+  const [list, setList, guardando] = useDraft<Trust[]>(value, "trust", onDirty);
   const upd = (i: number, p: Partial<Trust>) => setList(list.map((b, k) => (k === i ? { ...b, ...p } : b)));
   return (
     <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><b style={{ fontSize: 13 }}>Sellos de confianza</b><button className="btn btn--crimson btn--sm" onClick={() => onSave(list)}><Icon d={I.check} />Guardar sellos</button></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><b style={{ fontSize: 13 }}>Sellos de confianza</b><button className="btn btn--crimson btn--sm" onClick={() => { guardando(); onSave(list); }}><Icon d={I.check} />Guardar sellos</button></div>
       {list.map((t, i) => (
         <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 2fr", gap: 8 }}>
           <select className="select" value={t.icon} onChange={(e) => upd(i, { icon: e.target.value })}>{["shield", "tool", "truck", "doc", "chat", "clock"].map((x) => <option key={x}>{x}</option>)}</select>
@@ -196,15 +227,14 @@ function ProductPicker({ onPick, placeholder = "Buscar producto por nombre o có
   );
 }
 
-function FeaturedEditor({ ids, items, onSave }: { ids: number[]; items: Showcase["featured_products"]; onSave: (v: number[]) => void }) {
-  const [list, setList] = useState(items);
-  useEffect(() => setList(items), [items]);
+function FeaturedEditor({ ids, items, onSave, onDirty }: { ids: number[]; items: Showcase["featured_products"]; onSave: (v: number[]) => void; onDirty?: OnDirty }) {
+  const [list, setList, guardando] = useDraft(items, "featured", onDirty);
   const move = (i: number, dir: -1 | 1) => { const b = [...list]; const j = i + dir; if (j < 0 || j >= b.length) return; [b[i], b[j]] = [b[j], b[i]]; setList(b); };
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <b style={{ fontSize: 13 }}>Productos destacados de la portada</b>
-        <button className="btn btn--crimson btn--sm" onClick={() => onSave(list.map((x) => x.id))} disabled={JSON.stringify(list.map((x) => x.id)) === JSON.stringify(ids)}><Icon d={I.check} />Guardar destacados</button>
+        <button className="btn btn--crimson btn--sm" onClick={() => { guardando(); onSave(list.map((x) => x.id)); }} disabled={JSON.stringify(list.map((x) => x.id)) === JSON.stringify(ids)}><Icon d={I.check} />Guardar destacados</button>
       </div>
       <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Con productos elegidos aquí, la portada los titula «Selección» y «Elegidos por nuestro equipo». Vacío = la tienda elige sola uno por tipo de equipo, solo entre lo que se puede comprar en línea y con precio, y los titula «Del catálogo». Se muestran hasta 8.</p>
       <ProductPicker onPick={(p) => !list.some((x) => x.id === p.id) && list.length < 24 && setList([...list, { id: p.id, name: p.name, code: p.code, show_on_web: p.show_on_web, state: p.availability?.state, label: p.availability?.label_publico || p.availability?.label }])} />
@@ -433,9 +463,8 @@ function KitPhotosEditor({ value, pv, onChange }: { value: KitPhotoSel[]; pv?: K
   );
 }
 
-function FaqEditor({ value, onSave }: { value: Faq[]; onSave: (v: Faq[]) => void }) {
-  const [list, setList] = useState<Faq[]>(value);
-  useEffect(() => setList(value), [value]);
+function FaqEditor({ value, onSave, onDirty }: { value: Faq[]; onSave: (v: Faq[]) => void; onDirty?: OnDirty }) {
+  const [list, setList, guardando] = useDraft<Faq[]>(value, "faq", onDirty);
   const upd = (i: number, p: Partial<Faq>) => setList(list.map((f, j) => (j === i ? { ...f, ...p } : f)));
   return (
     <div style={{ display: "grid", gap: 8 }}>
@@ -443,7 +472,7 @@ function FaqEditor({ value, onSave }: { value: Faq[]; onSave: (v: Faq[]) => void
         <b style={{ fontSize: 13 }}>Preguntas frecuentes</b>
         <div style={{ display: "flex", gap: 6 }}>
           <button className="btn btn--ghost btn--sm" onClick={() => setList([...list, { q: "", a: "" }])} disabled={list.length >= 40}><Icon d={I.plus} />Pregunta</button>
-          <button className="btn btn--crimson btn--sm" onClick={() => onSave(list.filter((f) => f.q.trim() && f.a.trim()))}><Icon d={I.check} />Guardar preguntas</button>
+          <button className="btn btn--crimson btn--sm" onClick={() => { guardando(); onSave(list.filter((f) => f.q.trim() && f.a.trim())); }}><Icon d={I.check} />Guardar preguntas</button>
         </div>
       </div>
       {list.map((f, i) => (
@@ -471,7 +500,14 @@ function ProductShowcase() {
           <div><b>{p.name}</b> <span className="meta">{p.code} · {p.path}</span></div>
           <div className="grid-2">
             {/* sin catalog.precios el API manda price y compare_price en null: no se muestra (ni se borra al salir del campo) */}
-            {p.price !== null && <Field label={`Precio anterior SIN IVA (${p.currency})`} hint={`Precio actual sin IVA: ${p.price}. Si el anterior es mayor, la tienda lo muestra tachado.`}><input key={`c${p.id}`} className="input input--mono" defaultValue={p.compare_price ?? ""} onBlur={(e) => save({ compare_price: e.target.value.trim() ? Number(e.target.value) : null })} /></Field>}
+            {p.price !== null && <Field label={`Precio anterior SIN IVA (${p.currency})`} hint={`Precio actual sin IVA: ${p.price}. Si el anterior es mayor, la tienda lo muestra tachado.`}><input key={`c${p.id}`} className="input input--mono" inputMode="decimal" defaultValue={p.compare_price ?? ""} onBlur={(e) => {
+              // O1-11b: «4.700» son cuatro mil setecientos (parseCRC); un monto mal escrito se rechaza con el motivo
+              const raw = e.target.value.trim();
+              if (!raw) { if (p.compare_price != null) save({ compare_price: null }); return; }
+              const r = parseMonto(raw, p.currency);
+              if (!r.ok) { toast(r.error, "bad"); return; }
+              if (r.value !== Number(p.compare_price)) save({ compare_price: r.value });
+            }} /></Field>}
             <Field label="Ficha técnica (PDF)" hint="Enlace https:// al PDF del fabricante."><input key={`d${p.id}`} className="input" defaultValue={p.datasheet_url || ""} onBlur={(e) => save({ datasheet_url: e.target.value.trim() })} /></Field>
           </div>
           <div style={{ display: "grid", gap: 6 }}>

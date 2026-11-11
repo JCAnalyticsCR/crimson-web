@@ -23,13 +23,20 @@ if (!/^http:\/\/(127\.0\.0\.1|([a-z0-9-]+\.)*localhost)(:\d+)?$/.test(TIENDA)) {
 /* E2E_PYTHON: otro interprete con las dependencias del API (por defecto, el del proyecto con uv) */
 const PYTHON = process.env.E2E_PYTHON || "uv run --locked python";
 /* E2E_COMPRA_PORTAL=dev: el servidor de desarrollo de Vite en vez del build (para depurar con el codigo sin empaquetar) */
+/* O1-11b: contrasena del administrador de prueba del panel (e2e/mi-tienda.spec.ts), al azar en cada corrida. Se fija
+   en el proceso principal antes de levantar el API (que la recibe por el entorno) y los trabajadores la heredan. No
+   queda escrita en ningun archivo. Contra un docker-compose ya levantado no existe y esas pruebas se saltan. */
+if (!YA_LEVANTADA && !process.env.E2E_PANEL_PASSWORD) {
+  const azar = Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join("");
+  process.env.E2E_PANEL_PASSWORD = `Pn1-${azar}`;
+}
 const PORTAL = process.env.E2E_COMPRA_PORTAL === "dev"
   ? "npx vite --config vite.compra.config.ts"
   : "npx vite build --config vite.compra.config.ts && npx vite preview --config vite.compra.config.ts";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "**/compra.spec.ts",
+  testMatch: /(compra|mi-tienda)\.spec\.ts$/,
   outputDir: "./test-results/compra",
   fullyParallel: false,
   workers: 1,

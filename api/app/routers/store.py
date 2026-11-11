@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -157,17 +158,71 @@ def get_store(p: Principal = Depends(require("settings", "ver"))):
     return {**store_cfg(p.tenant), "slug": p.tenant.slug}
 
 
+# cuentas en la bitacora (O1-11b): IBAN de Costa Rica y numeros de 8 cifras o mas (SINPE, telefonos) enmascarados
+_IBAN_RX = re.compile(r"\bCR\d{2}(?:[\s-]?\d){18}\b", re.I)
+_NUM_RX = re.compile(r"(?<![\w])\+?\d(?:[\s-]?\d){7,}(?![\w])")
+
+
+def mask_accounts(v):
+    """Copia con las cuentas y numeros largos enmascarados (se dejan los ultimos 4): nunca un numero completo en la
+    bitacora."""
+    if isinstance(v, dict):
+        return {k: mask_accounts(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [mask_accounts(x) for x in v]
+    if isinstance(v, str):
+
+        def tail(m: re.Match) -> str:
+            digits = re.sub(r"\D", "", m.group(0))
+            return f"{'CR' if m.group(0)[:2].upper() == 'CR' else ''}••••{digits[-4:]}"
+
+        return _NUM_RX.sub(tail, _IBAN_RX.sub(tail, v))
+    return v
+
+
+def _store_changes(before: dict, vals: dict) -> tuple[dict, dict]:
+    """Lo que cambio en PUT /store, para la bitacora: textos legales solo como «cambió» (son largos), tarifas por
+    nombre y monto, el resto tal cual; todo con las cuentas enmascaradas."""
+    b, a = {}, {}
+    for k, new in vals.items():
+        old = before.get(k)
+        if old == new:
+            continue
+        if k == "legal":
+            new_ = new or {}
+            old_ = old or {}
+            for part in sorted(set(old_) | set(new_)):
+                if (old_.get(part) or "") != (new_.get(part) or ""):
+                    b[f"legal.{part}"], a[f"legal.{part}"] = f"{len(old_.get(part) or '')} caracteres", f"{len(new_.get(part) or '')} caracteres"
+            continue
+        if k == "shipping_rates":
+            old, new = [(r.get("name"), r.get("amount"), r.get("active", True)) for r in old or []], [(r.get("name"), r.get("amount"), r.get("active", True)) for r in new or []]
+        b[k], a[k] = mask_accounts(old), mask_accounts(new)
+    return b, a
+
+
 @router.put("/store")
 def put_store(data: StoreIn, p: Principal = Depends(require("settings", "configurar")), db: Session = Depends(get_db)):
-    t = db.get(Tenant, p.tenant.id)
+    # O1-11b: se relee la fila de la empresa con candado (SELECT ... FOR UPDATE; populate_existing: la sesion ya la tenia
+    # de los permisos) y se cambian solo las llaves de la tienda que vinieron. Antes se reescribia el JSON de ajustes con
+    # la copia cargada al empezar: un guardado de la vitrina o del checkout hecho en el medio se perdia.
+    t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
     st = {**(t.settings or {})}
     vals = data.model_dump(exclude_unset=True)
     if data.shipping_rates is not None:
         vals["shipping_rates"] = _rates_with_ids(data.shipping_rates, store_cfg(t).get("shipping_rates") or [])
-    st["store"] = {**STORE_DEFAULTS, **(st.get("store") or {}), **vals}
+    before = {**STORE_DEFAULTS, **(st.get("store") or {})}
+    st["store"] = {**before, **vals}
     t.settings = st
+    from ..services.store_showcase import bump_catalog_version
     from ..services.store_snapshot import mark_dirty_after_commit
 
+    antes, despues = _store_changes(before, vals)
+    if antes or despues:
+        # bitacora (O1-11b): que cambio y como estaba, con las cuentas enmascaradas; y el catalogo se marca para que la
+        # vitrina (304 por version) y el snapshot muestren lo nuevo
+        audit(db, t.id, p.user.id, "update", "store", t.id, {"campos": sorted(despues)}, ip=p.ip, before=antes, after=despues)
+        bump_catalog_version(db, t)
     mark_dirty_after_commit(db, t.id)  # O1-13: nombre, moneda o envio cambian lo que muestra la tienda
     db.commit()
     return {**store_cfg(t), "slug": t.slug}

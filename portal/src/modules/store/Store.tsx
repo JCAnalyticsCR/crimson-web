@@ -1,5 +1,5 @@
 /* Mi Tienda: personalizacion + constructor de bloques con vista previa en vivo (mismo render que el sitio publico). */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -36,9 +36,32 @@ export default function Store() {
   const [sel, setSel] = useState<Page | null>(null);
   const [newPage, setNewPage] = useState<{ slug: string; title: string } | null>(null);
   const [add, setAdd] = useState(false);
+  /* O1-11b: lo que cambia que se ve o se cobra (despublicar, dominio, tipo de tienda, moneda) se confirma con el efecto
+     escrito; nunca con un solo clic */
+  const [ask, setAsk] = useState<{ title: string; text: string; ok: string; run: () => void; cancel?: () => void } | null>(null);
+  const domainRef = useRef<HTMLInputElement>(null);
   const load = () => { api<Cfg>("/store").then(setCfg); api<Page[]>("/store/pages").then((r) => { setPages(r); setSel((s) => (s ? r.find((x) => x.id === s.id) || r[0] || null : r[0] || null)); }); };
   useEffect(load, []);
 
+  /** texto: se guarda solo si cambio (O1-11b) */
+  const saveText = (k: "name" | "tagline" | "whatsapp", v: string) => { if (cfg && v.trim() !== (cfg[k] || "").trim()) saveCfg({ [k]: v } as Partial<Cfg>); };
+  const askKind = (kind: string) => cfg && kind !== cfg.kind && setAsk(kind === "catalogo"
+    ? { title: "¿Pasar a catálogo?", text: "Se apagan el carrito y el checkout: sus clientes verán los productos pero ya no podrán comprar en línea. Los pedidos ya hechos no se tocan.", ok: "Pasar a catálogo", run: () => saveCfg({ kind }) }
+    : { title: "¿Pasar a tienda con carrito?", text: "Se encienden el carrito y el checkout: sus clientes podrán comprar y pagar en línea con los métodos activos de Pagos y entrega.", ok: "Activar el carrito", run: () => saveCfg({ kind }) });
+  const askCurrency = (currency: string) => cfg && currency !== (cfg.currency || "CRC") && setAsk({
+    title: `¿Mostrar la tienda en ${currency === "USD" ? "dólares" : "colones"}?`,
+    text: `Todos los precios de la tienda, el carrito y los pedidos nuevos pasan a ${currency === "USD" ? "dólares ($)" : "colones (₡)"}; lo que esté en otra moneda se convierte con el tipo de cambio del día. Los pedidos ya hechos no cambian.`,
+    ok: "Cambiar la moneda", run: () => saveCfg({ currency }),
+  });
+  const askDomain = (v: string) => {
+    if (!cfg || v.trim() === (cfg.domain || "").trim()) return;
+    const reset = () => { if (domainRef.current) domainRef.current.value = cfg.domain || ""; };
+    setAsk({
+      title: "¿Cambiar el dominio de la tienda?",
+      text: v.trim() ? `La tienda pasará a abrirse en ${v.trim()}. Si ese dominio todavía no apunta al portal, sus clientes no la encontrarán; los enlaces al dominio anterior dejan de llevar a la tienda.` : "La tienda dejará de abrirse en su dominio propio y solo quedará en la dirección del portal.",
+      ok: "Cambiar el dominio", run: () => { saveCfg({ domain: v.trim() }).then((ok) => { if (!ok) reset(); }); }, cancel: reset,
+    });
+  };
   const saveCfg = (patch: Partial<Cfg>): Promise<boolean> => api<Cfg>("/store", { method: "PUT", json: patch }).then((c) => { setCfg(c); toast("Tienda actualizada"); return true; }).catch((e) => { toast(e.message, "bad"); return false; });
   const savePage = (p: Page) => api<Page>(`/store/pages/${p.id}`, { method: "PUT", json: { slug: p.slug, title: p.title, blocks: p.blocks, published: p.published, in_nav: p.in_nav, position: p.position } }).then((r) => { setSel(r); setPages(pages.map((x) => (x.id === r.id ? r : x))); toast("Página guardada"); }).catch((e) => toast(e.message, "bad"));
   const createPage = () => { if (!newPage) return; api<Page>("/store/pages", { method: "POST", json: { ...newPage, blocks: [NEW_BLOCK.hero], published: false } }).then(() => { setNewPage(null); load(); }).catch((e) => toast(e.message, "bad")); };
@@ -55,7 +78,7 @@ export default function Store() {
           {/* solo el administrador: la API de la Tienda de pruebas responde 404 a cualquier otro */}
           {me?.role === "admin" && <Link className="btn btn--ghost btn--sm" to="/mi-tienda/pruebas">Tienda de pruebas</Link>}
           {cfg && <a className="btn btn--ghost btn--sm" href={publicUrl} target="_blank" rel="noopener"><Icon d={I.store} />Ver sitio</a>}
-          {cfg && <button className={`btn btn--sm ${cfg.published ? "btn--soft" : "btn--crimson"}`} onClick={() => saveCfg({ published: !cfg.published })}>{cfg.published ? "Despublicar" : "Publicar tienda"}</button>}
+          {cfg && <button className={`btn btn--sm ${cfg.published ? "btn--soft" : "btn--crimson"}`} onClick={() => (cfg.published ? setAsk({ title: "¿Despublicar la tienda?", text: "La tienda dejará de verse para sus clientes: nadie podrá ver el catálogo ni comprar hasta que la vuelva a publicar. Los pedidos ya hechos no se tocan.", ok: "Despublicar", run: () => saveCfg({ published: false }) }) : saveCfg({ published: true }))}>{cfg.published ? "Despublicar" : "Publicar tienda"}</button>}
         </div>
       </div>
 
@@ -64,17 +87,17 @@ export default function Store() {
           <Card title="Configura el sitio a tu gusto">
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="grid-2">
-                <Field label="Nombre de la tienda"><input className="input" defaultValue={cfg.name} onBlur={(e) => saveCfg({ name: e.target.value })} /></Field>
-                <Field label="Frase"><input className="input" defaultValue={cfg.tagline} onBlur={(e) => saveCfg({ tagline: e.target.value })} /></Field>
-                <Field label="Color principal"><div style={{ display: "flex", gap: 8 }}><input type="color" value={cfg.primary} onChange={(e) => saveCfg({ primary: e.target.value })} style={{ width: 44, height: 38, border: 0, background: "none" }} /><input className="input input--mono" style={{ textAlign: "left" }} defaultValue={cfg.primary} onBlur={(e) => saveCfg({ primary: e.target.value })} /></div></Field>
-                <Field label="Color secundario"><div style={{ display: "flex", gap: 8 }}><input type="color" value={cfg.secondary} onChange={(e) => saveCfg({ secondary: e.target.value })} style={{ width: 44, height: 38, border: 0, background: "none" }} /><input className="input input--mono" style={{ textAlign: "left" }} defaultValue={cfg.secondary} onBlur={(e) => saveCfg({ secondary: e.target.value })} /></div></Field>
-                <Field label="Tipo de tienda" hint="Catálogo muestra productos; Tienda agrega carrito y checkout."><select className="select" value={cfg.kind} onChange={(e) => saveCfg({ kind: e.target.value })}><option value="catalogo">Catálogo</option><option value="tienda">Tienda (carrito)</option></select></Field>
+                <Field label="Nombre de la tienda"><input className="input" defaultValue={cfg.name} onBlur={(e) => saveText("name", e.target.value)} /></Field>
+                <Field label="Frase"><input className="input" defaultValue={cfg.tagline} onBlur={(e) => saveText("tagline", e.target.value)} /></Field>
+                <Field label="Color principal"><ColorField value={cfg.primary} onSave={(v) => saveCfg({ primary: v })} /></Field>
+                <Field label="Color secundario"><ColorField value={cfg.secondary} onSave={(v) => saveCfg({ secondary: v })} /></Field>
+                <Field label="Tipo de tienda" hint="Catálogo muestra productos; Tienda agrega carrito y checkout."><select className="select" value={cfg.kind} onChange={(e) => askKind(e.target.value)}><option value="catalogo">Catálogo</option><option value="tienda">Tienda (carrito)</option></select></Field>
                 <Field label="Tipografía"><select className="select" value={cfg.font} onChange={(e) => saveCfg({ font: e.target.value })}>{["Arial"].map((f) => <option key={f}>{f}</option>)}</select></Field>
                 <Field label="Logo"><ImageField value={cfg.logo_url} label="Logo" onChange={(url) => saveCfg({ logo_url: url })} /></Field>
-                <Field label="WhatsApp"><input className="input" defaultValue={cfg.whatsapp} onBlur={(e) => saveCfg({ whatsapp: e.target.value })} /></Field>
-                <Field label="Moneda de la tienda" hint="Precios exhibidos y pedidos. Lo que esté en otra moneda se convierte con el tipo de cambio del día."><select className="select" value={cfg.currency || "CRC"} onChange={(e) => saveCfg({ currency: e.target.value })}><option value="CRC">Colones (₡)</option><option value="USD">Dólares ($)</option></select></Field>
+                <Field label="WhatsApp"><input className="input" defaultValue={cfg.whatsapp} onBlur={(e) => saveText("whatsapp", e.target.value)} /></Field>
+                <Field label="Moneda de la tienda" hint="Precios exhibidos y pedidos. Lo que esté en otra moneda se convierte con el tipo de cambio del día."><select className="select" value={cfg.currency || "CRC"} onChange={(e) => askCurrency(e.target.value)}><option value="CRC">Colones (₡)</option><option value="USD">Dólares ($)</option></select></Field>
               </div>
-              <Field label="Dominio" hint={`Gratis: ${location.host}${publicUrl} · propio: apuntar un CNAME al portal`}><input className="input" defaultValue={cfg.domain || ""} placeholder="tienda.crimsoncr.com" onBlur={(e) => saveCfg({ domain: e.target.value })} /></Field>
+              <Field label="Dominio" hint={`Gratis: ${location.host}${publicUrl} · propio: apuntar un CNAME al portal`}><input ref={domainRef} className="input" defaultValue={cfg.domain || ""} placeholder="tienda.crimsoncr.com" onBlur={(e) => askDomain(e.target.value)} /></Field>
             </div>
           </Card>
           <ShippingRates rates={cfg.shipping_rates} onSave={(r) => saveCfg({ shipping_rates: r })} />
@@ -156,7 +179,37 @@ export default function Store() {
           <Field label="Dirección (slug)" hint="Solo minúsculas, números y guiones."><input className="input input--mono" style={{ textAlign: "left" }} value={newPage.slug} onChange={(e) => setNewPage({ ...newPage, slug: e.target.value })} /></Field>
         </Modal>
       )}
+      {ask && (
+        <Modal title={ask.title} onClose={() => { ask.cancel?.(); setAsk(null); }} foot={<><button className="btn btn--ghost" onClick={() => { ask.cancel?.(); setAsk(null); }}>Cancelar</button><button className="btn btn--danger" onClick={() => { ask.run(); setAsk(null); }}>{ask.ok}</button></>}>
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>{ask.text}</p>
+        </Modal>
+      )}
     </>
+  );
+}
+
+/** Color de la tienda (O1-11b): el selector muestra el color mientras se arrastra y se guarda al soltar (evento
+    «change» del navegador, no cada «input»); el campo de texto, al salir y solo si cambio y es #RRGGBB. */
+function ColorField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  const picker = useRef<HTMLInputElement>(null);
+  const last = useRef(value);
+  useEffect(() => { setV(value); last.current = value; }, [value]);
+  const commit = (x: string) => { if (/^#[0-9a-fA-F]{6}$/.test(x) && x.toLowerCase() !== last.current.toLowerCase()) { last.current = x; onSave(x); } };
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  useEffect(() => {
+    const el = picker.current;
+    if (!el) return;
+    const fin = () => commitRef.current(el.value);
+    el.addEventListener("change", fin);
+    return () => el.removeEventListener("change", fin);
+  }, []);
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      <input ref={picker} type="color" value={v} onChange={(e) => setV(e.target.value)} style={{ width: 44, height: 38, border: 0, background: "none" }} aria-label="Elegir color" />
+      <input className="input input--mono" style={{ textAlign: "left" }} value={v} onChange={(e) => setV(e.target.value)} onBlur={(e) => { if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) commit(e.target.value); else setV(last.current); }} />
+    </div>
   );
 }
 

@@ -16,6 +16,8 @@ const SOLO_CAPTURAS = [375, 768, 1280]; // capturas base (toHaveScreenshot)
 const SOLO_AXE = [375, 1280]; // informe de accesibilidad y recorrido de compra
 /* la compra real contra el API local (O0-03) tiene su propia configuracion y sus servidores: `npm run e2e:compra` */
 const COMPRA_REAL = "**/compra.spec.ts";
+/* el panel (Mi Tienda) contra el mismo API local: tambien va en `npm run e2e:compra` (O1-11b) */
+const PANEL_REAL = "**/mi-tienda.spec.ts";
 /* Prueba de humo en WebKit (O1-18: Safari de iPhone, el navegador que mas se rompe con sintaxis nueva). En CI corre
    siempre (la imagen de Playwright trae WebKit); en una maquina local solo con E2E_WEBKIT=1, despues de
    `npx playwright install webkit`. */
@@ -53,6 +55,7 @@ export default defineConfig({
     use: { viewport: { width: w, height: h }, isMobile: w < 1024, hasTouch: w < 1024 },
     testIgnore: [
       COMPRA_REAL,
+      PANEL_REAL,
       ...(SOLO_CAPTURAS.includes(w) ? [] : ["**/capturas.spec.ts"]),
       ...(SOLO_AXE.includes(w) ? [] : ["**/axe.spec.ts", "**/compra-mock.spec.ts"]),
     ],

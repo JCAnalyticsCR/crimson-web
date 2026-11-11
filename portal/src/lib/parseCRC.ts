@@ -24,6 +24,16 @@ export function parseCRC(raw: string | number | null | undefined): ParseCRC {
   return Number.isFinite(value) ? { ok: true, value } : { ok: false, error: CRC_ERROR };
 }
 
+/** Monto en la moneda del producto (O1-11b: precio anterior y precio web). En colones, la regla de parseCRC; en
+    dolares, punto o coma decimal con hasta dos cifras («12.50», «12,5»), sin separador de miles. */
+export function parseMonto(raw: string | number | null | undefined, currency: string): ParseCRC {
+  if (currency === "CRC") return parseCRC(raw);
+  if (typeof raw === "number") return parseCRC(raw);
+  const s = String(raw ?? "").trim().replace(/^\$\s*/, "");
+  if (!s) return { ok: true, value: 0 };
+  return /^\d+(?:[.,]\d{1,2})?$/.test(s) ? { ok: true, value: Number(s.replace(",", ".")) } : { ok: false, error: `Escriba el monto en ${currency === "USD" ? "dólares" : currency}, por ejemplo 12.50` };
+}
+
 /** monto para mostrar en un campo del panel: 4700 -> «4.700», 4700.5 -> «4.700,50» */
 export function formatCRCInput(v: number | null | undefined): string {
   const n = Number(v) || 0;

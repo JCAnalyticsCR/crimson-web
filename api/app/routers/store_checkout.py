@@ -539,7 +539,9 @@ def put_checkout_cfg(data: CheckoutCfgIn, p: Principal = Depends(require("settin
         raise HTTPException(422, "Rol desconocido en avisos")
     if data.methods.sinpe.phone and len(so.digits(data.methods.sinpe.phone)) < 8:
         raise HTTPException(422, "El número de SINPE Móvil debe tener 8 dígitos")
-    t = db.get(Tenant, p.tenant.id)
+    # O1-11b: se relee con candado y solo se cambia la llave del checkout (antes la copia cargada al empezar podia
+    # pisar un guardado de la vitrina o de Mi Tienda hecho en el medio)
+    t = db.get(Tenant, p.tenant.id, with_for_update=True, populate_existing=True)
     st = {**(t.settings or {})}
     store = {**(st.get("store") or {})}
     store["checkout"] = data.model_dump(mode="json", exclude={"web_orders_commission"})

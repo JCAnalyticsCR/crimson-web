@@ -3,6 +3,7 @@
    La disponibilidad es la de la funcion unica del API (services/availability): los mismos estados en todo lado. */
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtMoney } from "../../lib/api";
+import { formatCRCInput, parseMonto } from "../../lib/parseCRC";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, Loading, Modal } from "../../ui/components";
 
@@ -38,6 +39,8 @@ export default function WebInventory() {
   const [edit, setEdit] = useState<{ row: Row; web_price: string; web_featured: boolean; show_on_web: boolean } | null>(null);
   const [cfg, setCfg] = useState<Settings | null>(null);
   const canEdit = allows("catalog.editar");
+  // O1-11b: publicar o despublicar en la tienda es del administrador (catalog.publicar); con editar, precio y destacado
+  const canPublish = allows("catalog.publicar");
   // el tecnico y el aliado ven cantidades, nunca precios (13/10, 22:07): la API los manda vacios y la columna no sale
   const verPrecio = allows("catalog.precios");
   const canConfig = allows("settings.configurar");
@@ -54,7 +57,13 @@ export default function WebInventory() {
   const saveProduct = async () => {
     if (!edit) return;
     try {
-      await api(`/store/inventory/products/${edit.row.id}`, { method: "PATCH", json: { web_price: edit.web_price.trim() ? edit.web_price.trim() : null, web_featured: edit.web_featured, show_on_web: edit.show_on_web } });
+      // O1-11b: «4.700» son cuatro mil setecientos colones (parseCRC); un monto mal escrito no se guarda
+      const raw = edit.web_price.trim();
+      const precio = raw ? parseMonto(raw, edit.row.currency) : null;
+      if (precio && !precio.ok) { toast(precio.error, "bad"); return; }
+      const json: Record<string, unknown> = { web_price: precio ? precio.value : null, web_featured: edit.web_featured };
+      if (edit.show_on_web !== edit.row.show_on_web) json.show_on_web = edit.show_on_web; // solo si cambio
+      await api(`/store/inventory/products/${edit.row.id}`, { method: "PATCH", json });
       toast("Publicación actualizada"); setEdit(null); load();
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
@@ -135,7 +144,7 @@ export default function WebInventory() {
                       <td className="num mono" style={{ fontWeight: 700 }}>{n(r.libre)}</td>
                       <td className="muted" style={{ whiteSpace: "nowrap" }}>{r.proveedor != null ? <>{r.proveedor_nombre ? `${r.proveedor_nombre}: ` : ""}{r.proveedor} u.<div className="meta" style={{ color: r.proveedor_viejo ? "var(--bad)" : undefined }} title={r.proveedor_al ? fmtDate(r.proveedor_al.slice(0, 10)) : undefined}>{r.proveedor_al ? `consultado ${r.proveedor_hace || fmtDate(r.proveedor_al.slice(0, 10))}` : "sin fecha"}{r.proveedor_viejo ? " · dato viejo" : ""}</div>{r.proveedor_cambio_hace && <div className="meta" title="Último cambio real de existencia o costo en el proveedor">cambió {r.proveedor_cambio_hace}</div>}</> : r.proveedor_sin_vincular ? <span title="Tiene proveedor pero ningún ítem del catálogo vinculado: su existencia no cuenta">sin vincular</span> : "—"}</td>
                       {verPrecio && <td className="num mono">{r.web_price != null ? fmtMoney(r.web_price, r.currency) : <span className="muted">{r.price != null ? fmtMoney(r.price, r.currency) : "—"}</span>}</td>}
-                      <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ row: r, web_price: r.web_price != null ? String(n(r.web_price)) : "", web_featured: r.web_featured, show_on_web: r.show_on_web })}>Publicación</button>}</td>
+                      <td className="num">{canEdit && <button className="btn btn--ghost btn--sm" onClick={() => setEdit({ row: r, web_price: r.web_price != null ? (r.currency === "CRC" ? formatCRCInput(n(r.web_price)) : String(n(r.web_price))) : "", web_featured: r.web_featured, show_on_web: r.show_on_web })}>Publicación</button>}</td>
                     </tr>
                   );
                 })}
@@ -183,7 +192,7 @@ export default function WebInventory() {
 
       {edit && (
         <Modal title={`Publicación · ${edit.row.name}`} onClose={() => setEdit(null)} foot={<><button className="btn btn--ghost" onClick={() => setEdit(null)}>Cancelar</button><button className="btn btn--crimson" onClick={saveProduct}>Guardar</button></>}>
-          <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.show_on_web} onChange={(e) => setEdit({ ...edit, show_on_web: e.target.checked })} />Publicado en la tienda</label>
+          <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.show_on_web} disabled={!canPublish} onChange={(e) => setEdit({ ...edit, show_on_web: e.target.checked })} />Publicado en la tienda{!canPublish && <span className="muted" style={{ fontSize: 12 }}> · solo el administrador publica o despublica</span>}</label>
           <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={edit.web_featured} onChange={(e) => setEdit({ ...edit, web_featured: e.target.checked })} />Destacado</label>
           <Field label={`Precio web sin IVA (${edit.row.currency})`} hint={`Vacío: el precio de siempre (${fmtMoney(edit.row.price, edit.row.currency)}).`}>
             <input className="input input--mono" inputMode="decimal" value={edit.web_price} onChange={(e) => setEdit({ ...edit, web_price: e.target.value })} />
