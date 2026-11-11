@@ -350,6 +350,30 @@ test("[O4-07] portada ordenable con teclado, categorías y colecciones por regla
   await sinScroll(page, "categorías");
 });
 
+test("[O4-06] apariencia con vista previa en vivo y aviso de contraste", async ({ page, baseURL, servidor }) => {
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  await entrar(page, panel(baseURL), "/mi-tienda/apariencia");
+  const vista = page.locator(".ap-shop");
+  await expect(vista.locator(".vt-card").first()).toBeVisible();  // la tarjeta real de la tienda
+  const acento = page.getByLabel("Color de acento: código");
+  await acento.fill("#f5d90a");
+  await expect(page.getByRole("alert").filter({ hasText: "menos de 4,5" })).toBeVisible();
+  await acento.fill("#1d4ed8");
+  await expect(vista).toHaveAttribute("style", /--crimson: #1d4ed8/);  // se ve al instante, sin guardar
+  for (const ancho of ["Teléfono", "Tablet", "Escritorio"]) {
+    await page.getByRole("group", { name: "Ancho de la vista previa" }).getByRole("button", { name: ancho }).click();
+    await sinScroll(page, `apariencia ${ancho}`);
+  }
+  await page.getByRole("button", { name: "Pantalla completa" }).click();
+  await expect(page.getByRole("dialog", { name: "Vista previa de la tienda" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Vista previa de la tienda" }).getByRole("button", { name: "Cerrar", exact: true }).click();
+  await page.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(async () => ((await (await servidor.get("/api/store", { headers: h })).json()) as { theme?: { accent?: string } }).theme?.accent).toBe("#1d4ed8");
+  const slug = ((await (await servidor.get("/api/store", { headers: h })).json()) as { slug: string }).slug;
+  expect(((await (await servidor.get(`/api/public/store/${slug}`)).json()) as { store: { theme: { accent: string } } }).store.theme.accent).toBe("#1d4ed8");
+  await servidor.put("/api/store", { headers: h, data: { theme: { accent: "#e2233a" }, primary: "#e2233a" } });
+});
+
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
    factor: correo y contrasena, el paso «Verificación en dos pasos», el codigo de la app y adentro del panel. */
 test("[O2-01d] inicio de sesión del panel con segundo factor (2FA)", async ({ page, baseURL }) => {

@@ -41,7 +41,7 @@ No es la compra real: aquí no hay inventario, pago ni correo. La compra de punt
 | `axe.spec.ts` | Accesibilidad WCAG 2.1 A/AA. **Bloquean** (desde la Ola 2): contraste, enlaces y botones sin nombre; el resto en modo informe | 375, 1280 |
 | `compra-mock.spec.ts` | Recorrido ficha → carrito → 4 pasos del checkout → «Mi pedido», sobre el mock | 375, 1280 |
 | `compra.spec.ts` | La compra real contra el API local: **no** corre con `npm run e2e`, sino con `npm run e2e:compra` | 375, 768 |
-| `mi-tienda.spec.ts` | El panel (Mi Tienda) contra el API local, con un administrador de prueba de contraseña al azar: despublicar pide confirmación y escribir un titular y luego guardar un banner no pierde nada (O1-11b). Va con `npm run e2e:compra` | 768 |
+| `mi-tienda.spec.ts` | El panel (Mi Tienda por secciones, Ola 4) contra el API local, con un administrador de prueba de contraseña al azar: secciones con dirección propia y bandera `panel_v2`, Resumen «Lista para vender», guardado único con deshacer, copia local, 409 e historial, catálogo con cajón, edición en lote con vista previa y deshacer, pagos y envíos, SEO, portada ordenable con teclado, colecciones y apariencia con vista previa; sin scroll de lado. Va con `npm run e2e:compra` (puertos y datos propios con `E2E_PUERTO`, `E2E_API_PUERTO` y `E2E_DATOS`) | 375 y 768 |
 | `portada.spec.ts` | Portada honesta (O1-04): sin textos de relleno ni nada que parpadee fuera del hero, y 10 recargas con `/showcase` entre 0 y 60 ms después del snapshot siempre con kits | todos (la carrera, 1280) |
 | `pendientes.spec.ts` | Fallos conocidos, como `test.fixme` con su tarea | todos |
 | `venta-asistida.spec.ts` | Ficha «por confirmar» (O1-02) y desglose de IVA con `/item` lento (O1-03) | todos |

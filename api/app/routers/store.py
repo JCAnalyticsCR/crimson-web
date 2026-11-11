@@ -125,6 +125,17 @@ class SsrBodyIn(BaseModel):
     portada: bool = False
 
 
+class ThemeIn(BaseModel):
+    """Apariencia (O4-06): tema, color de acento, radio y fondo. La tienda los aplica como variables del contenedor .shop
+    (portal/src/modules/store/theme.ts). «crimson» usa Archivo: solo si el dueno lo aprueba (O2-04)."""
+
+    model_config = ConfigDict(extra="forbid")
+    preset: str = Field("clasico", pattern="^(clasico|crimson)$")
+    accent: str = Field("#e2233a", pattern=r"^#[0-9a-fA-F]{6}$")
+    radius: int = Field(6, ge=0, le=16)
+    background: str = Field("crema", pattern="^(crema|blanco)$")
+
+
 class StoreIn(BaseModel):
     name: str | None = None
     tagline: str | None = None
@@ -143,6 +154,7 @@ class StoreIn(BaseModel):
     business: BusinessIn | None = None
     ssr_body: SsrBodyIn | None = None
     panel_v2: bool | None = None
+    theme: ThemeIn | None = None  # O4-06
     # O4-02: version que leyo el panel (409 si otro guardo en el medio); sin ella, como siempre
     version: int | None = None
 
@@ -738,6 +750,8 @@ def store_home(slug: str, db: Session = Depends(get_db)):
     return {
         "store": {
             **{k: cfg[k] for k in ("name", "tagline", "logo_url", "primary", "secondary", "font", "kind", "whatsapp", "currency", "legal")},
+            # O4-06: el tema elegido en Mi Tienda -> Apariencia (None = como hoy); la tienda lo aplica con theme.ts
+            "theme": cfg.get("theme") or None,
             "business": business_of(cfg),  # O1-17: el pie de la tienda
         },
         "nav": [{"slug": pg.slug, "title": pg.title} for pg in pages if pg.in_nav],
