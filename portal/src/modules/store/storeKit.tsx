@@ -357,7 +357,7 @@ export function Crumbs({ items }: { items: { name: string; path?: string }[] }) 
 // ---------- SEO del lado del navegador: actualiza las mismas etiquetas que nginx incrusta (data-sh) ----------
 /** Bloque seo que devuelven /item, /catalog, /showcase e /info (O1-06): lo mismo que nginx incrusta por SSI para esa
     ruta, armado por el API (seo_meta). Aditivo: un API viejo no lo manda y la vitrina usa lo suyo. */
-export type SeoBlock = { title: string; description?: string; canonical?: string | null; robots?: string; og_type?: string; og_image?: string | null; ld?: object | null };
+export type SeoBlock = { title: string; description?: string; canonical?: string | null; robots?: string; og_type?: string; og_image?: string | null; og_image_alt?: string | null; ld?: object | null };
 export type HeadMeta = { title: string; description?: string; path?: string; image?: string | null; type?: string; noindex?: boolean; seo?: SeoBlock | null };
 /* O1-06: la ruta con la que se abrio la pagina, si el servidor ya puso sus metas (nginx SSI: etiquetas data-sh).
    En esa ruta el navegador no toca nada: el titulo, la descripcion, la canonica, robots, Open Graph y el JSON-LD que
@@ -396,6 +396,7 @@ export function useHead(m: HeadMeta | null) {
     set("property", "og:description", desc);
     set("property", "og:type", seo?.og_type || m.type || "website");
     set("property", "og:image", seo ? seo.og_image || null : m.image || null);
+    set("property", "og:image:alt", seo?.og_image ? seo.og_image_alt || seo.title : null);
     set("property", "og:url", canonical);
     let link = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
     if (canonical) { if (!link) { link = document.createElement("link"); link.rel = "canonical"; link.setAttribute("data-sh", ""); document.head.appendChild(link); } link.href = canonical; } else link?.remove();

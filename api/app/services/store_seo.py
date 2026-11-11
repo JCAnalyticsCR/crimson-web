@@ -37,6 +37,11 @@ def head_html(meta: dict) -> str:
     }
     if meta.get("image"):
         og["og:image"] = meta["image"]
+        # O1-12: texto alternativo siempre; ancho y alto solo cuando se conocen de verdad (WhatsApp y Facebook miden
+        # la foto ellos mismos; un tamano inventado la deforma)
+        og["og:image:alt"] = meta.get("image_alt") or meta["title"]
+        if meta.get("image_width") and meta.get("image_height"):
+            og["og:image:width"], og["og:image:height"] = str(meta["image_width"]), str(meta["image_height"])
     for k, v in og.items():
         if v:
             parts.append(f'<meta data-sh property="{k}" content="{esc(str(v)[:400])}">')

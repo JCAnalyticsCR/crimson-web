@@ -55,6 +55,38 @@ def _abs(base: str, url: str) -> str:
     return f"{base}{url}" if url and url.startswith("/") and not url.startswith("//") else url
 
 
+def _brand_image(base: str, cfg: dict, sc: dict) -> str | None:
+    """Foto para compartir la portada y el catalogo (O1-12): el banner principal activo con foto o, si no hay, el logo."""
+    for b in sorted(sc.get("banners") or [], key=lambda b: b.get("position", 0)):
+        if b.get("active", True) and b.get("image"):
+            return _abs(base, b["image"])
+    logo = cfg.get("logo_url") or ""
+    return _abs(base, logo) if logo.startswith(("http", "/")) else None
+
+
+def _category_image(db: Session, t: Tenant, cats: list, cid: int) -> str | None:
+    """Foto de la categoria (O1-12): la misma regla de la portada (/showcase): la primera foto de un producto publicado
+    y con precio de la categoria o de sus hijas. Una consulta corta (lee solo fotos, como mucho 40 filas)."""
+    ids, todo = {cid}, [cid]
+    while todo:
+        cur = todo.pop()
+        for c in cats:
+            if c.parent_id == cur and c.id not in ids:
+                ids.add(c.id)
+                todo.append(c.id)
+    rows = db.execute(
+        select(Product.images)
+        .where(Product.tenant_id == t.id, Product.active, Product.show_on_web, Product.category_id.in_(ids), Product.price > 0, Product.images.is_not(None))
+        .order_by(Product.web_featured.desc(), Product.id)
+        .limit(40)
+    )
+    for (imgs,) in rows:
+        url = ((imgs or [None])[0] or {}).get("url") if isinstance(imgs, list) and imgs else None
+        if url:
+            return url
+    return None
+
+
 def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = None, card: dict | None = None) -> dict:
     """Titulo, descripcion, canonica, Open Graph y JSON-LD de una ruta de la vitrina. La ficha (/item) pasa su ctx y su
     tarjeta ya armadas para no repetir las consultas (mismo resultado que sin ellas)."""
@@ -69,10 +101,13 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
     )
     org = organization_ld(base, name, logo=cfg.get("logo_url"), whatsapp=cfg.get("whatsapp"), business=business_of(cfg))
     meta = {"site_name": name, "robots": "index,follow", "description": site_desc}
+    brand_img = _brand_image(base, cfg, sc)
     if not parts:
         meta |= {
             "title": f"{name} · Tienda de seguridad electrónica y redes en Costa Rica",
             "canonical": base + "/",
+            "image": brand_img,
+            "image_alt": name,
             "ld": {
                 "@context": "https://schema.org",
                 "@graph": [
@@ -144,6 +179,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             "canonical": url,
             "og_type": "product",
             "image": _abs(base, c["image"]) if c["image"] else None,
+            "image_alt": p.name,
             "price": str(price) if price > 0 else None,
             "currency": c["display_currency"],
             "ld": {"@context": "https://schema.org", "@graph": [product_ld, sv.breadcrumb_ld(base, crumbs), org]},
@@ -156,8 +192,11 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         if not cat:
             return meta | {"title": f"Categoría no disponible · {name}", "robots": "noindex,follow", "canonical": base + "/catalogo"}
         url = f"{base}/c/{slugs[cat.id]}"
+        cat_img = _category_image(db, t, cats, cat.id)
         return meta | {
             "title": f"{cat.name} · {name}",
+            "image": _abs(base, cat_img) if cat_img else brand_img,
+            "image_alt": cat.name if cat_img else name,
             "description": cat.description or f"{cat.name} en {name}: precios con IVA, disponibilidad, envío a todo Costa Rica y asesoría técnica.",
             "canonical": url,
             "ld": {
@@ -187,6 +226,8 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             "title": f"{title} · {name}",
             "description": desc,
             "canonical": url,
+            "image": brand_img,
+            "image_alt": name,
             "ld": {"@context": "https://schema.org", "@graph": [sv.breadcrumb_ld(base, [("Tienda", "/"), (title, f"/{head}")]), org]},
         }
     if head == "info" and len(parts) == 2 and parts[1] in sv.INFO_KINDS:
@@ -243,6 +284,7 @@ def seo_block(db: Session, t: Tenant, path: str, *, ctx: Ctx | None = None, card
         "robots": m.get("robots", "index,follow"),
         "og_type": m.get("og_type", "website"),
         "og_image": m.get("image"),
+        "og_image_alt": m.get("image_alt") if m.get("image") else None,
         "ld": m.get("ld"),
     }
 

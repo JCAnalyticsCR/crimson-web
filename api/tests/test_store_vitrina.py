@@ -635,3 +635,27 @@ def test_sitemap_fiel_al_catalogo_visible(client, auth, db_session):
         if p["id"] in con_fecha:
             assert f"{p['path']}</loc><lastmod>{con_fecha[p['id']].date().isoformat()}</lastmod>" in xml
     assert "https://tienda.crimsoncr.com/</loc></url>" in xml and "/catalogo</loc></url>" in xml
+
+
+def test_vista_previa_al_compartir_portada_categoria_catalogo_y_ficha(client, auth, db_session):
+    """O1-12: al pegar la portada, una categoria, el catalogo o una ficha en WhatsApp sale foto grande con su texto
+    alternativo: la portada y el catalogo con el banner principal (o el logo), la categoria con una foto de sus equipos."""
+    _publicar(client)
+    prods = _catalogo(db_session)
+    H = {"X-Store-Host": "tienda.crimsoncr.com"}
+
+    def og(ruta):
+        h = client.get(f"/public/seo/head{ruta}", headers=H).text
+        return {k: _meta(h, "property", k) for k in ("og:image", "og:image:alt")} | {"card": _meta(h, "name", "twitter:card")}
+
+    # sin banner ni logo: la portada no inventa una foto
+    assert og("")["og:image"] is None
+    assert client.put("/store/showcase", json={"banners": [{"id": "b1", "image": "/api/media/f/banner1", "title": "Ofertas", "active": True}]}).status_code == 200
+    for ruta in ("", "/catalogo"):
+        assert og(ruta) == {"og:image": "https://tienda.crimsoncr.com/api/media/f/banner1", "og:image:alt": "Crimson Consulting", "card": "summary_large_image"}
+    cat = og("/c/videovigilancia")
+    assert cat["og:image"].startswith("https://cdn.example.com/") and cat["og:image:alt"] == "Videovigilancia" and cat["card"] == "summary_large_image"
+    ficha = og(f"/p/x-{prods['WD44PURZ'].id}")
+    assert ficha == {"og:image": "https://cdn.example.com/wd4.jpg", "og:image:alt": prods["WD44PURZ"].name, "card": "summary_large_image"}
+    # el bloque seo de la vitrina trae lo mismo
+    assert client.get("/public/store/crimson/showcase").json()["seo"]["og_image_alt"] == "Crimson Consulting"
