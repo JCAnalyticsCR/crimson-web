@@ -679,5 +679,86 @@
   "tipo": "Parlantes",
   "comercial": "Parlante JBL Charge 6 · 45 W · Bluetooth",
   "revisar": null
+ },
+ {
+  "patron": "analogica",
+  "proveedor": "Cámara bullet Hikvision HiLook THC-B140-PC(3.6MM) 4MP smart IR hasta 25 m 4 en 1",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara analógica Hikvision HiLook THC-B140-PC(3.6MM) · 4 MP",
+  "revisar": null
+ },
+ {
+  "patron": "analogica",
+  "proveedor": "Cámara turret Hikvision THC-T149-PS(2.8MM)(HILOOK std) 4 MP ColorVu luz blanca hasta 30 m",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara analógica Hikvision THC-T149-PS(2.8MM) · 4 MP",
+  "revisar": null
+ },
+ {
+  "patron": "analogica",
+  "proveedor": "Cámara domo Hikvision DS-2CE56D0T-IRMF(2.8MM) 2MP Turbo HD",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara analógica Hikvision DS-2CE56D0T-IRMF(2.8MM) · 2 MP",
+  "revisar": null
+ },
+ {
+  "patron": "analogica",
+  "proveedor": "Cámara bullet Epcom B8-TURBO-G2W 2MP hdtvi/AHD/CVI/CVBS",
+  "marca": "Epcom",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara analógica Epcom B8-TURBO-G2W · 2 MP",
+  "revisar": null
+ },
+ {
+  "patron": "analogica",
+  "proveedor": "Cámara bullet Hikvision DS-2CD1043G2-I(4MM) 4MP luz blanca IP67",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1043G2-I(4MM) · 4 MP",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Afeitadora xiaomi eléctrica S301 48700",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Cuidado personal",
+  "comercial": "Afeitadora eléctrica Xiaomi S301",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Secadora xiaomi iónica H500 50222",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Cuidado personal",
+  "comercial": "Secadora iónica Xiaomi H500",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Monitor interior de videoportero IP Hikvision DS-KH6320-WTE1 /s teclado táctil ethernet / WiFi",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Videoportero",
+  "comercial": "Monitor interior de videoportero Hikvision DS-KH6320-WTE1",
+  "revisar": null
+ },
+ {
+  "patron": "tipo",
+  "proveedor": "Sirena exterior Hikvision DS-PS1-E-WB inalambrica",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Alarma",
+  "comercial": "Sirena exterior Hikvision DS-PS1-E-WB",
+  "revisar": null
  }
 ]

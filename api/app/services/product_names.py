@@ -107,7 +107,7 @@ def tidy(name: str | None) -> str:
     return (out[:1].upper() + out[1:])[:200] if out else raw
 
 
-# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v2»)
+# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v3»)
 # Regla: [Tipo] [Marca oficial] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color].
 # Solo con lo que ya dice el nombre original: el tipo es el sustantivo con que empieza, el modelo es el codigo real y
 # los datos, el color y el paquete se copian si estan escritos (el color tambien del codigo del fabricante: BLU, GRY).
@@ -222,6 +222,13 @@ NOUNS = {
 _DE = {"de", "del"}
 _ADJ_END = ("ico", "ica", "icos", "icas", "ado", "ada", "ido", "ida", "ente", "ble", "al", "ivo", "iva", "era", "ero", "oso", "osa", "ante")
 _NOT_ADJ = {"recargable", "profesional", "original", "nuevo", "nueva", "portatil", "general", "digital", "total", "lateral"}
+_ADJ_PLACE = {"interior", "exterior"}  # «Monitor interior de videoportero»: sin ellos se lee como otro equipo
+# adjetivo pegado DESPUES de la marca que es del tipo («Afeitadora xiaomi eléctrica S101»): solo terminaciones claras
+_ADJ_AFTER_BRAND = ("ico", "ica", "icos", "icas", "ble", "ente")  # no «-ada»: «omada» es una linea
+# camara analogica: el prefijo del modelo (HiLook THC-, Hikvision DS-2CE) o el texto lo dice
+_ANALOG = re.compile(r"(?<![\w-])i?(?:thc-|ds-2ce)|\b4 en 1\b|\bhd-?tvi\b|\bturbo hd\b|\b(?:ahd|cvi|cvbs)\b|\banalog", re.I)
+# marcas de lote del proveedor pegadas al codigo: «(HILOOK std)», «(AM-STD)», «(Mul)»
+_LOT_V3 = re.compile(r"\((?:hilook|hik|ezviz)?[\s-]*(?:am-|o-)?std\)|\((?:hilook|mul)\)", re.I)
 _WIFI_TYPES = ("Router", "Punto de acceso", "Repetidor WiFi", "Sistema WiFi mesh", "Adaptador USB")
 _REDUNDANT_WIFI = {"inalambrico", "inalambrica", "wireless"}
 # lo que va detras de la marca y no es la linea ni el modelo: se salta (rasgos) o corta (region, bandas, codecs)
@@ -250,6 +257,8 @@ def _common(w: str) -> str:
 
 def _adjective(w: str) -> bool:
     f = _fold(w)
+    if f in _ADJ_PLACE:
+        return True
     return f.isalpha() and len(f) >= 5 and f.endswith(_ADJ_END) and f not in _NOT_ADJ and f not in _STOP - {"inalambrico", "inalambrica"}
 
 
@@ -280,6 +289,9 @@ def _type_v2(clean: str, brand: str | None) -> tuple[str | None, str | None, lis
 
     extra: list[str] = []
     i = 0
+    # un adjetivo de lugar antes del complemento («Monitor interior de videoportero»)
+    if len(rest) > 2 and _fold(rest[0]) in _ADJ_PLACE and _fold(rest[1]) in _DE:
+        extra, i = [_common(rest[0])], 1
     # el complemento «de X» (uno o dos: «Detector de rotura de vidrio») y despues los adjetivos, hasta 5 palabras
     while (
         len(rest) > i + 1
@@ -398,6 +410,8 @@ def _first_code(words: list[str]) -> str | None:
 
 def name_family(tipo: str) -> str | None:
     t = _fold(tipo)
+    if t.startswith("monitor"):
+        return None  # «Monitor interior de videoportero»: no es una camara (sin MP ni WiFi en el nombre comercial)
     for key, fam in (("camara", "camara"), ("videoportero", "camara"), ("grabador", "grabador"), ("switch", "switch"), ("ups", "ups"),
                      ("disco", "disco"), ("memoria", "memoria"), ("router", "wifi"), ("punto de acceso", "wifi"), ("repetidor", "wifi"),
                      ("parlante", "parlante"), ("barra de sonido", "parlante"), ("power bank", "powerbank"), ("bateria", "bateria")):  # fmt: skip
@@ -469,10 +483,12 @@ def _attrs(family: str, text: str, tipo: str = "", specs: dict | None = None) ->
 
 def _color(text: str) -> str | None:
     """el color escrito («negro», «blanca») o el del codigo del fabricante (JBLCHARGE5BLUAM -> azul)"""
+    prev = ""
     for w in _fold(text).split():
         w = w.strip(",.;:()")
-        if w in COLORS:
+        if w in COLORS and prev not in {"luz", "luces"}:  # «luz blanca» es la iluminacion, no el color
             return COLORS[w]
+        prev = w
     for tok in text.split():
         tok = tok.strip(",.;:()")
         m = _CODE_COLOR.fullmatch(tok)
@@ -498,7 +514,7 @@ def _singular_v2(label: str | None) -> str | None:
 def commercial_name(
     name: str, *, brand: str | None, model: str | None, shown_type: str | None, description: str | None = None, specs: dict | None = None
 ) -> tuple[str | None, str | None]:
-    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v2»:
+    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v3»:
     [Tipo] [Marca] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color]
     - Tipo: el sustantivo con que empieza el nombre (Grabadora -> Grabador, sin «de seguridad»); si no lo hay, el tipo
       mostrado de seguridad y redes; si tampoco, la categoria en singular y a revision («tipo por categoría»). Sin tipo
@@ -509,17 +525,20 @@ def commercial_name(
     from .brands import canonical_brand
     from .catalog_text import clean_model
 
-    clean = _clean_source(name)
+    clean = " ".join(_LOT_V3.sub(" ", _clean_source(name)).split())
     if not clean:
         return None, None
     marca = canonical_brand(brand)
     flags: list[str] = []
     tipo, short, rest = _type_v2(_PACK.sub(" ", clean), marca)
     disp = TYPE_FROM_DISPLAY.get(shown_type or "")
+    from_name = tipo is not None
     if tipo is None:
         tipo = disp
     elif tipo == "Cámara" and disp and disp.startswith("Cámara"):
         tipo = short = disp
+    if tipo in ("Cámara", "Cámara IP") and _ANALOG.search(clean):
+        tipo = short = "Cámara analógica"  # THC-, DS-2CE, «4 en 1», HD-TVI, Turbo HD, AHD/CVI/CVBS
     by_category = False
     if tipo is None:
         tipo = _singular_v2(shown_type)
@@ -528,6 +547,14 @@ def commercial_name(
         return None, ("sin tipo" if marca else None)
     src_shout = shouting(clean)
     pre, post = _split_brand(rest, marca)
+    if post and from_name and tipo == short and not tipo.startswith(("Cámara", "Grabador")):
+        # «Afeitadora xiaomi eléctrica S101»: el adjetivo en minuscula que sigue a la marca es del tipo
+        moved: list[str] = []
+        while post and post[0][:1].islower() and _adjective(post[0]) and _fold(post[0]).endswith(_ADJ_AFTER_BRAND):
+            w = post.pop(0)
+            if not (tipo in _WIFI_TYPES and _fold(w) in _REDUNDANT_WIFI):
+                moved.append(_common(w))
+        tipo = short = " ".join([tipo, *moved])
     line_words = _line_v2(post, src_shout) if post is not None else []
     if by_category and post is not None and pre:
         line_words = _line_v2(pre, src_shout) + line_words  # «Fire TV Stick amazon 4K Select»: la linea va antes de la marca

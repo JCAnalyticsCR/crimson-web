@@ -1,4 +1,4 @@
-"""O3-03, regla «nombre_v2»: los patrones por los que la muestra real de nombre_v1 no paso la revision (> 2 % de error).
+"""O3-03, reglas «nombre_v2» y «nombre_v3»: los patrones por los que las muestras reales no pasaron la revision.
 
 Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FICTICIOS que reproducen cada patron
 (misma forma que los del proveedor; codigos y numeros cambiados) y la salida esperada escrita a mano. Por patron:
@@ -12,6 +12,9 @@ Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FIC
 - variante: el color (escrito o en el codigo del fabricante: BLU, GRY) y el paquete se quedan; dos variantes nunca
   dan el mismo nombre.
 - ya_bien: lo que nombre_v1 ya hacia bien sigue igual.
+- analogica (nombre_v3): THC-, DS-2CE, «4 en 1», HD-TVI, Turbo HD o AHD/CVI/CVBS hacen «Cámara analógica»; «luz
+  blanca» no es un color y «(HILOOK std)» no es parte del codigo. En «tipo», el adjetivo que sigue a la marca va con
+  el tipo («Afeitadora eléctrica Xiaomi») y el complemento se conserva («Monitor interior de videoportero»).
 Cambiar la regla es cambiar esta tabla a conciencia (y volver a aprobar una muestra)."""
 
 import json
@@ -26,7 +29,7 @@ from app.services import product_names as pn
 from app.services.brands import canonical_brand
 
 TABLA = json.loads((Path(__file__).parent / "fixtures" / "nombres_comerciales_v2.json").read_text(encoding="utf-8"))
-PATRONES = {"inventado": 8, "restos": 12, "tipo": 12, "mayusculas": 4, "variante": 6, "ya_bien": 12}
+PATRONES = {"inventado": 8, "restos": 12, "tipo": 16, "mayusculas": 4, "variante": 6, "ya_bien": 12, "analogica": 4}
 
 
 def _gen(row: dict) -> tuple[str | None, str | None]:
@@ -100,4 +103,4 @@ def test_dos_variantes_nunca_dan_el_mismo_nombre():
 
 
 def test_la_regla_tiene_nombre_nuevo():
-    assert cd.GENERATORS["web_name"][0] == "nombre_v2"  # el lote viejo (nombre_v1) se distingue
+    assert cd.GENERATORS["web_name"][0] == "nombre_v3"  # los lotes rechazados (nombre_v1, nombre_v2) se distinguen
