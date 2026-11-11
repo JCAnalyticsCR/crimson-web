@@ -145,6 +145,9 @@ class ShowcaseIn(BaseModel):
     headline: str | None = Field(None, max_length=120)
     subline: str | None = Field(None, max_length=300)
     seo_description: str | None = Field(None, max_length=300)
+    # O4-08: titulo de la portada en Google (vacio = el de siempre) e imagen para compartir (vacia = banner o logo)
+    seo_title: str | None = Field(None, max_length=90)
+    share_image: str | None = Field(None, max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
     # EX-NOGA (decision del dueno: nada de Google Analytics ni Ads): un panel viejo todavia puede mandarlo; se acepta y
     # se descarta, nunca se guarda ni se expone
     ga4_id: str | None = Field(None, max_length=40)

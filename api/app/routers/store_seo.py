@@ -141,9 +141,10 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
     brand_img = _brand_image(base, cfg, sc)
     if not parts:
         meta |= {
-            "title": f"{name} · Tienda de seguridad electrónica y redes en Costa Rica",
+            # O4-08: el titulo y la imagen para compartir se editan en Mi Tienda -> SEO; vacios, los de siempre
+            "title": (sc.get("seo_title") or "").strip() or f"{name} · Tienda de seguridad electrónica y redes en Costa Rica",
             "canonical": base + "/",
-            "image": brand_img,
+            "image": _abs(base, sc["share_image"]) if sc.get("share_image") else brand_img,
             "image_alt": name,
             "ld": {
                 "@context": "https://schema.org",

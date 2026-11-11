@@ -143,6 +143,9 @@ def showcase_cfg(store: dict) -> dict:
         "headline": sc.get("headline") or "",
         "subline": sc.get("subline") or "",
         "seo_description": sc.get("seo_description") or "",
+        # O4-08: titulo de la portada en Google e imagen para compartir (vacios = los de siempre)
+        "seo_title": sc.get("seo_title") or "",
+        "share_image": sc.get("share_image") or "",
         # EX-NOGA: sin Google Analytics; un ga4_id viejo guardado en los ajustes se ignora al leer
     }
 

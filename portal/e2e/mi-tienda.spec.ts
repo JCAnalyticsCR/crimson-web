@@ -299,6 +299,32 @@ test("[O4-05] edición en lote con vista previa, confirmación y deshacer; preci
   await cajon.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Descartar" }).click();
 });
 
+test("[O4-08] pagos y envíos en una sección, con lo que ve el cliente; SEO con vista previa de Google", async ({ page, baseURL, servidor }) => {
+  const h = { Authorization: `Bearer ${await token(servidor)}` };
+  await entrar(page, panel(baseURL), "/mi-tienda/pagos-envios");
+  await expect(page.getByText("Así lo ve su cliente en el checkout")).toBeVisible();
+  await expect(page.getByRole("table", { name: "Tarifas de envío" })).toBeVisible();
+  await sinScroll(page, "pagos y envíos");
+  const dir = `Oficina de prueba ${Date.now() % 1000}`;
+  await page.locator(".field").filter({ has: page.locator('label:text-is("Dirección de retiro")') }).locator("input").fill(dir);
+  const barra = page.getByRole("region", { name: "Cambios sin guardar" });
+  await barra.getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(async () => ((await (await servidor.get("/api/store/checkout", { headers: h })).json()) as { checkout: { pickup: { address: string } } }).checkout.pickup.address).toBe(dir);
+  // el resumen deja de marcar «retiro sin dirección»
+  const salud = (await (await servidor.get("/api/store/health", { headers: h })).json()) as { items: { key: string; ok: boolean }[] };
+  expect(salud.items.find((x) => x.key === "retiro")?.ok ?? true).toBe(true);
+
+  await ir(page, "/mi-tienda/seo");
+  const titulo = `Tienda de prueba ${Date.now() % 100000}`;
+  await page.locator(".field").filter({ has: page.locator('label:text-is("Título de la portada")') }).locator("input").fill(titulo);
+  await expect(page.getByLabel("Vista previa en Google")).toContainText(titulo);
+  await expect(page.getByText(new RegExp(`${titulo.length} de 60 caracteres`))).toBeVisible();
+  await sinScroll(page, "seo");
+  await page.getByRole("region", { name: "Cambios sin guardar" }).getByRole("button", { name: "Guardar y publicar" }).click();
+  await expect.poll(async () => ((await (await servidor.get("/api/store/showcase", { headers: h })).json()) as { seo_title: string }).seo_title).toBe(titulo);
+  await expect(page.getByText(/analytics|píxel/i)).toHaveCount(0);  // sin medición de terceros
+});
+
 /* O2-01d: el panel ya no viene en la entrada (src/app/PanelApp.tsx, con lazy()). Su arranque completo, con segundo
    factor: correo y contrasena, el paso «Verificación en dos pasos», el codigo de la app y adentro del panel. */
 test("[O2-01d] inicio de sesión del panel con segundo factor (2FA)", async ({ page, baseURL }) => {
