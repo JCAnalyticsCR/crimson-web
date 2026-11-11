@@ -18,6 +18,7 @@ Contrato JSON del snapshot (lo consume el frontend; version v2, O1-13):
       "id": 42,
       "path": "/p/hikvision-ds-2cd2143g2-i",  -- URL de la ficha
       "name": "Hikvision DS-2CD2143G2-I",
+      "display_name": "Cámara IP Hikvision ..." -- (opcional, O3-01) nombre comercial aprobado; sin el, name
       "brand": "Hikvision" | null,
       "model": "DS-2CD2143G2-I" | null,
       "code": "HK-CAM-001",
@@ -158,6 +159,9 @@ def build(db: Session, t, ctx) -> bytes:
                 "sf": sv.search_text(p, ctx.cat_name.get(p.category_id), ctx.dtype(p)),
             }
         )
+        if p.web_name and p.web_name.strip() and p.web_name.strip() != p.name:
+            # O3-01: nombre comercial aprobado (solo si hay: el snapshot no crece para el resto)
+            items[-1]["display_name"] = p.web_name.strip()
         if p.id in backed and price_with_tax > 0:
             cmp_ = _gross(ctx.pricer.of(p, p.compare_price), rate)
             if cmp_ > price_with_tax:
@@ -416,6 +420,8 @@ _PRODUCT_ATTRS = (
     "currency",
     "supplier_stock",
     "supplier_updated_at",
+    "web_name",  # O3-01: lo que el snapshot lleva del contenido propio
+    "web_type",
 )
 
 

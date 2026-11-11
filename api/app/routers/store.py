@@ -17,6 +17,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import public_limiter
 from ..models import Category, Coupon, Customer, Invoice, Order, Product, ProductVariant, StorePage, Tenant
+from ..services import catalog_text as ctext
 from ..services import fygaro_legacy
 from ..services import store_inventory as sinv
 from ..services.documents import audit
@@ -428,6 +429,7 @@ def _order_out(o: Order):
                 "id": ln.id,
                 "product_id": ln.product_id,
                 "name": ln.name,
+                "display_name": ln.display_name or ln.name,  # O3-01: el que vio el cliente (name es el fiscal)
                 "quantity": ln.quantity,
                 "unit_price": ln.unit_price,
                 "tax_rate": ln.tax_rate,
@@ -629,6 +631,8 @@ def _prod_pub(
         "id": p.id,
         "code": p.code,
         "name": p.name,
+        # O3-01: el nombre que ve el cliente (comercial aprobado o el de siempre); "name" sigue siendo el fiscal
+        "display_name": ctext.shown_name(p),
         "price": sinv.web_price(p),
         "currency": p.currency,
         "featured": bool(p.web_featured),
@@ -993,8 +997,14 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
         if unit <= 0:
             # precio a consultar (el guardian de margen lo saco de venta, o falta el tipo de cambio de su moneda):
             # en linea no se vende a un precio que ya no es el de hoy. El resto del carrito se puede comprar.
-            raise HTTPException(409, f"{pr.name}: precio a consultar. Quitalo del carrito o escribinos y te confirmamos el precio.")
+            raise HTTPException(409, f"{ctext.shown_name(pr)}: precio a consultar. Quitalo del carrito o escribinos y te confirmamos el precio.")
         return unit, name
+
+    def shown_of(ln: CartLine) -> str:
+        """O3-01: el nombre que vio el cliente (comercial aprobado); la factura usa el fiscal (name)"""
+        pr = prods[ln.product_id]
+        v = variants.get(ln.variant_id) if ln.variant_id else None
+        return f"{ctext.shown_name(pr)} · {v.name}" if v else ctext.shown_name(pr)
 
     gross = sum((d(ln.quantity) * unit_of(ln)[0] for ln in data.lines), Decimal(0))
     coupon = valid_coupon(db, t.id, data.coupon_code, gross)
@@ -1013,6 +1023,7 @@ def _quote_cart(db: Session, t: Tenant, data: CheckoutIn):
             {
                 "product": pr,
                 "name": name,
+                "display_name": shown_of(ln),
                 "quantity": d(ln.quantity),
                 "unit_price": unit,
                 "discount_type": dt,
@@ -1104,7 +1115,7 @@ def quote_detail(items: list[dict], calc) -> dict:
     for i, lo in zip(items, calc.lines, strict=True):
         k = f"{d(i['tax_rate']).normalize():f}"
         taxes[k] = taxes.get(k, Decimal(0)) + d(lo.tax_amount)
-        lines.append({"name": i["name"], "quantity": i["quantity"], "total": lo.total, "shipping": i["product"] is None})
+        lines.append({"name": i.get("display_name") or i["name"], "quantity": i["quantity"], "total": lo.total, "shipping": i["product"] is None})
     return {"taxes": [{"rate": k, "amount": v} for k, v in sorted(taxes.items(), key=lambda x: -Decimal(x[0])) if v], "lines": lines}
 
 

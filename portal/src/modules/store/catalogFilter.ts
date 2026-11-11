@@ -16,6 +16,8 @@ export type SnapAvail = {
 
 export type SnapProduct = {
   id: number; path: string; name: string;
+  /** O3-01: nombre comercial aprobado (solo viaja si existe); O3-02: codigo publico */
+  display_name?: string | null; public_code?: string | null;
   brand: string | null; model: string | null; code: string;
   category_id: number | null; display_price: number;
   web_featured: boolean; image: string | null;
@@ -140,7 +142,9 @@ function termMatches(term: string, stems: string[], comp: string, syn: Record<st
 
 /** 0 = no coincide. Si coincide: 100 por modelo o codigo, 20 si todas las palabras estan en el nombre, 5 por marca o
     categoria que coincida, y 1 de base (services/store_search.score). */
-export function searchScore(q: string, p: { name: string; brand?: string | null; model?: string | null; code?: string | null; sf: string }, category: string | null, syn: Record<string, string[]>): number {
+export function searchScore(q: string, p: { name: string; display_name?: string | null; brand?: string | null; model?: string | null; code?: string | null; sf: string }, category: string | null, syn: Record<string, string[]>): number {
+  // O3-01: los dos nombres (el comercial y el de siempre), como store_showcase._names del API
+  if (p.display_name && p.display_name !== p.name) p = { ...p, name: `${p.name} ${p.display_name}` };
   const terms = splitQuery(q);
   if (!terms.length) return 0;
   const field = words(p.sf); // un sf viejo (con guiones y puntos) se normaliza igual
@@ -386,6 +390,8 @@ export function snapToVProd(p: SnapProduct, currency: string, cats: SnapCategory
     id: p.id,
     code: p.code,
     name: p.name,
+    display_name: p.display_name ?? null,
+    public_code: p.public_code ?? null,
     brand: p.brand,
     model: p.model ?? undefined,
     image: p.image,

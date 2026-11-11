@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import html as htmllib
 import re
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs, quote, urlsplit
 
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..models import Product, Tenant
+from ..services import catalog_text as ctext
 from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of
@@ -175,12 +176,13 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         c = card
         state = c["availability"]["state"]
         url = base + c["path"]
+        shown = ctext.shown_name(p)  # O3-01: el nombre comercial aprobado (o el de siempre)
         desc = re.sub(r"\s+", " ", (p.description_store or p.description_invoice or p.name)).strip()
         price = Decimal(str(c["display_price"]))
         crumbs = [("Tienda", "/")]
         if c.get("category_path"):
             crumbs.append((c["category"], c["category_path"]))
-        crumbs.append((p.name, c["path"]))
+        crumbs.append((shown, c["path"]))
         offer = {
             "@type": "Offer",
             "url": url,
@@ -195,7 +197,7 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
                 offer["priceValidUntil"] = (date.today() + timedelta(days=30)).isoformat()
         product_ld = {
             "@type": "Product",
-            "name": p.name,
+            "name": shown,
             "sku": p.code,
             "description": desc[:500],
             "image": [_abs(base, u) for u in (c["images"][:5] or ([c["image"]] if c["image"] else []))],
@@ -206,15 +208,19 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
             product_ld["brand"] = {"@type": "Brand", "name": p.brand}
         if p.model:
             product_ld["mpn"] = p.model
+        if p.gtin:
+            product_ld["gtin"] = p.gtin
+        title, description = _product_title(p, shown, name, c, price), _product_description(p, c, price, desc)
+        # O3-01: una ficha oculta (agotada u ocultada) sigue respondiendo; tras 60 dias oculta deja de indexarse
+        robots = "noindex,follow" if _hidden_long(p) else meta["robots"]
         return meta | {
-            "title": f"{p.name} · {name}"[:160],
-            "description": (f"{desc[:200]} · " if desc else "")
-            + ("Precio con IVA incluido. " if price > 0 else "")
-            + "Envío a todo Costa Rica, factura electrónica y soporte local.",
+            "title": title,
+            "description": description,
+            "robots": robots,
             "canonical": url,
             "og_type": "product",
             "image": _abs(base, c["image"]) if c["image"] else None,
-            "image_alt": p.name,
+            "image_alt": shown,
             "price": str(price) if price > 0 else None,
             "currency": c["display_currency"],
             "ld": {"@context": "https://schema.org", "@graph": [product_ld, sv.breadcrumb_ld(base, crumbs), org]},
@@ -298,6 +304,48 @@ def seo_meta(db: Session, t: Tenant, base: str, path: str, *, ctx: Ctx | None = 
         return meta | {"title": f"{title} · {name}", "description": f"{title} de la tienda {name}.", "canonical": url, "ld": ld}
     # busqueda, comparador y cualquier otra: no se indexan (contenido duplicado o vacio)
     return meta | {"title": f"Tienda · {name}", "robots": "noindex,follow", "canonical": base + "/"}
+
+
+HIDDEN_NOINDEX_DAYS = 60  # O3-01 (O0-07): una ficha oculta mas de 60 dias sale del indice (sigue respondiendo)
+
+
+def _hidden_long(p: Product) -> bool:
+    hs = p.hidden_since
+    if hs is None:
+        return False
+    hs = hs if hs.tzinfo else hs.replace(tzinfo=UTC)
+    return datetime.now(UTC) - hs > timedelta(days=HIDDEN_NOINDEX_DAYS)
+
+
+def _money(v: Decimal, cur: str) -> str:
+    from ..services.store_orders import fmt_money
+
+    return fmt_money(v, cur)
+
+
+def _product_title(p: Product, shown: str, store: str, c: dict, price: Decimal) -> str:
+    """Titulo de la ficha. A mano (seo_title) manda; con nombre comercial aprobado, la plantilla de O3-01; sin el, el de
+    siempre (las fichas no cambian todas a la vez: solo las que tienen un lote aprobado)."""
+    if p.seo_title and p.seo_title.strip():
+        return p.seo_title.strip()[:160]
+    if p.web_name and p.web_name.strip():
+        return f"{shown} | Precio en Costa Rica · {store}"[:160]
+    return f"{p.name} · {store}"[:160]
+
+
+def _product_description(p: Product, c: dict, price: Decimal, desc: str) -> str:
+    """Meta descripcion. A mano (seo_description) manda; con nombre comercial aprobado: «{Tipo} {Marca} {Modelo} a
+    ₡{precio} con IVA. {disponibilidad real}. Envio a todo Costa Rica y factura electronica.»"""
+    if p.seo_description and p.seo_description.strip():
+        return p.seo_description.strip()
+    if p.web_name and p.web_name.strip():
+        head = " ".join(x for x in (c.get("type"), p.brand, c.get("model")) if x) or ctext.shown_name(p)
+        precio = f" a {_money(price, c['display_currency'])} con IVA" if price > 0 else ""
+        avail = (c.get("availability") or {}).get("label") or ""
+        return f"{head}{precio}." + (f" {avail.rstrip('.')}." if avail else "") + " Envío a todo Costa Rica y factura electrónica."
+    return (
+        (f"{desc[:200]} · " if desc else "") + ("Precio con IVA incluido. " if price > 0 else "") + "Envío a todo Costa Rica, factura electrónica y soporte local."
+    )
 
 
 @seo.get("/head", response_class=PlainTextResponse)

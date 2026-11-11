@@ -22,6 +22,7 @@ import { bootStore } from "./boot";
 import { logoSrc } from "./logo";
 import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
+import { conNombreVisible } from "./storeNames";
 import "./vitrina.css";
 
 const KitBuilder = lazy(() => import("./KitBuilder"));
@@ -244,7 +245,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   const ctx = useMemo<StoreCtx | null>(() => (S ? {
     slug, base, hostMode, store: S, isShop: !!isShop,
     api: async <T,>(path: string, init?: RequestInit) => (await api<T>(path, init)).data,
-    addToCart: (p: VProd, qty = 1, variant?: VVariant) => { if (!Number(variant?.display_price ?? p.display_price)) return; add(p as unknown as Prod, variant as Variant | undefined, qty); },
+    addToCart: (p: VProd, qty = 1, variant?: VVariant) => { if (!Number(variant?.display_price ?? p.display_price)) return; add(conNombreVisible(p) as unknown as Prod, variant as Variant | undefined, qty); },
     openCart: () => setDrawer(true),
     compare,
     toggleCompare: (id: number) => setCompare((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 3 ? c : [...c, id])),

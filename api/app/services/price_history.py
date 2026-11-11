@@ -39,6 +39,12 @@ VISIBLE = (
     "description_invoice",
     "show_on_web",
     "active",
+    # O3-01: el contenido propio de la tienda (nombre comercial, tipo, especificaciones y descripcion aprobados)
+    "web_name",
+    "web_subtitle",
+    "web_type",
+    "web_specs",
+    "web_description",
     # retener por margen pone la tienda en «Consultar» (Pricer.of devuelve 0) y liberarlo la saca: el cliente lo ve
     "margin_hold",
 )

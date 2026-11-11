@@ -109,7 +109,10 @@ class OrderLine(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("order.id", ondelete="CASCADE"), index=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("product.id"))
+    # name: el nombre fiscal (Product.name), el que va a la cotizacion, la factura y Hacienda. display_name (O3-01): el
+    # que vio el cliente en la tienda (nombre comercial); carrito, correo y «Mi pedido». Vacio = el fiscal.
     name: Mapped[str] = mapped_column(String(200))
+    display_name: Mapped[str | None] = mapped_column(String(200))
     quantity: Mapped[float] = mapped_column(Numeric(14, 3), default=1)
     unit_price: Mapped[float] = mapped_column(Numeric(14, 5), default=0)
     discount_type: Mapped[str] = mapped_column(String(8), default="percent")

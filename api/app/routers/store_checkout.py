@@ -138,7 +138,7 @@ def _checkout_out(db: Session, t: Tenant, o: Order, pay: dict | None = None, dup
         "status": o.status,
         "total": o.total,
         "currency": o.currency,
-        "lines": [{"name": ln.name, "quantity": ln.quantity, "total": ln.total} for ln in o.lines],
+        "lines": [{"name": ln.display_name or ln.name, "quantity": ln.quantity, "total": ln.total} for ln in o.lines],
         "payment_method": o.payment_method,
         "payment_kind": o.payment_kind,
         "shipping_method": o.shipping_method,
@@ -252,6 +252,7 @@ def store_checkout(slug: str, data: CheckoutIn, request: Request, response: Resp
             OrderLine(
                 product_id=i["product"].id if i["product"] else None,
                 name=i["name"],
+                display_name=i.get("display_name"),
                 quantity=i["quantity"],
                 unit_price=i["unit_price"],
                 discount_type=i["discount_type"],

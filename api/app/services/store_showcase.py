@@ -465,14 +465,20 @@ def search_text(p: Product, cat_name: str | None, ptype: str | None = None) -> s
     ptype: el tipo que muestra la tienda (O1-08); sin el, el funcional."""
     from . import store_search as ss
 
-    return ss.search_field(p.name, p.brand, p.model, p.code, p.supplier_sku, cat_name, product_type(p) if ptype is None else ptype)
+    return ss.search_field(_names(p), p.brand, p.model, p.code, p.supplier_sku, cat_name, product_type(p) if ptype is None else ptype)
+
+
+def _names(p: Product) -> str:
+    """O3-01: el buscador indexa los dos nombres (el comercial y el de siempre): buscar por el viejo lo sigue encontrando"""
+    web = (getattr(p, "web_name", None) or "").strip()
+    return f"{p.name} {web}" if web and web != p.name else (p.name or "")
 
 
 def search_score(p: Product, cat_name: str | None, terms: list[str], hay: str | None = None, ptype: str | None = None) -> int:
     """0 = no coincide. La regla vive en services/store_search (la misma del navegador)."""
     from . import store_search as ss
 
-    return ss.score(" ".join(terms), name=p.name, brand=p.brand, model=p.model, code=p.code, category=cat_name, sf=hay or search_text(p, cat_name, ptype))
+    return ss.score(" ".join(terms), name=_names(p), brand=p.brand, model=p.model, code=p.code, category=cat_name, sf=hay or search_text(p, cat_name, ptype))
 
 
 def split_terms(q: str) -> list[str]:

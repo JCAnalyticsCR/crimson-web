@@ -25,6 +25,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..core.ratelimit import SlidingWindow
 from ..models import Category, Opportunity, Product, ProductTax, Tenant
+from ..services import catalog_text as ctext
 from ..services import product_typing as pt
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
@@ -457,6 +458,16 @@ class ProductShowcaseIn(BaseModel):
     compare_price: Decimal | None = Field(None, ge=0)
     datasheet_url: str | None = Field(None, max_length=500, pattern=r"^(|/[^\s]*|https://[^\s]+)$")
     specs: dict[str, str] | None = None
+    # O3-01: contenido propio de la tienda escrito a mano (marca web_manual: el generador de borradores no lo pisa)
+    web_name: str | None = Field(None, max_length=120)
+    web_subtitle: str | None = Field(None, max_length=160)
+    web_type: str | None = Field(None, max_length=60)
+    web_description: str | None = Field(None, max_length=4000)
+    warranty_months: int | None = Field(None, ge=0, le=120)
+    seo_title: str | None = Field(None, max_length=120)
+    seo_description: str | None = Field(None, max_length=200)
+    gtin: str | None = Field(None, pattern=r"^(|\d{8}|\d{12,14})$")
+    web_manual: bool | None = None
 
     @field_validator("specs")
     @classmethod
@@ -466,6 +477,9 @@ class ProductShowcaseIn(BaseModel):
         if len(v) > 30:
             raise ValueError("Máximo 30 especificaciones")
         return {str(k).strip()[:40]: str(x).strip()[:120] for k, x in v.items() if str(k).strip() and str(x).strip()}
+
+
+WEB_EDITABLE = ("web_name", "web_subtitle", "web_type", "web_description", "warranty_months", "seo_title", "seo_description", "gtin")
 
 
 def _own_product(db: Session, tid: int, pid: int) -> Product:
@@ -489,6 +503,10 @@ def showcase_product_get(pid: int, p: Principal = Depends(require("catalog", "ve
         "compare_price": pr.compare_price if precios else None,
         "datasheet_url": pr.datasheet_url,
         "specs": pr.specs or {},
+        **{k: getattr(pr, k) for k in WEB_EDITABLE},
+        "web_specs": pr.web_specs or {},
+        "web_manual": bool(pr.web_manual),
+        "display_name": ctext.shown_name(pr),
         # O1-08: lo que la ficha muestra, con el tipo que se muestra (no el funcional de los kits)
         "derived_specs": sv.derive_specs(pr, pt.display_type(pr, *pt.category_chain(_categories(db, p.tenant.id)).get(pr.category_id, (None, None)))),
         "path": sv.product_path(pr),
@@ -505,6 +523,16 @@ def showcase_product_put(pid: int, data: ProductShowcaseIn, p: Principal = Depen
         pr.datasheet_url = patch["datasheet_url"] or None
     if "specs" in patch:
         pr.specs = patch["specs"] or None
+    hand = [k for k in WEB_EDITABLE if k in patch]
+    for k in hand:
+        v = patch[k]
+        setattr(pr, k, (v or None) if isinstance(v, str) or v is None else v)
+    if "web_manual" in patch and patch["web_manual"] is not None:
+        pr.web_manual = bool(patch["web_manual"])
+    elif any(k in patch for k in ("web_name", "web_subtitle", "web_type", "web_description")):
+        pr.web_manual = True  # lo escribio una persona: ningun lote lo pisa
+    if hand or "web_manual" in patch:
+        sv.bump_catalog_version(db, p.tenant)
     audit(db, p.tenant.id, p.user.id, "update_showcase", "product", pr.id, {"campos": sorted(patch)}, ip=p.ip)
     db.commit()
     return showcase_product_get(pid, p, db)
@@ -548,6 +576,9 @@ _LIGHT_COLS = (
     Product.images,
     Product.compare_price,
     Product.description_store,
+    # O3-01/O3-04: nombre comercial y tipo corregido a mano (sin ellos, cada acceso pediria el producto de nuevo)
+    Product.web_name,
+    Product.web_type,
 )
 
 

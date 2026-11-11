@@ -417,7 +417,8 @@ def order_public(db: Session, t: Tenant, o: Order) -> dict:
         "total": o.total,
         "coupon_code": o.coupon_code,
         "lines": [
-            {"name": ln.name, "quantity": ln.quantity, "unit_price": ln.unit_price, "tax_rate": ln.tax_rate, "total": ln.total, "shipping": _is_ship(ln)}
+            # O3-01: «Mi pedido» muestra el nombre que vio el cliente; la factura conserva el fiscal (ln.name)
+            {"name": ln.display_name or ln.name, "quantity": ln.quantity, "unit_price": ln.unit_price, "tax_rate": ln.tax_rate, "total": ln.total, "shipping": _is_ship(ln)}
             for ln in o.lines
         ],
         "contact": {"name": (o.contact or {}).get("name"), "email": _mask_email((o.contact or {}).get("email"))},
@@ -589,7 +590,7 @@ def _summary_html(o: Order) -> str:
     """Resumen: productos, descuento, envio, IVA y total."""
     e = html.escape
     rows = "".join(
-        f'<tr><td style="padding:8px 0;border-bottom:1px solid {EMAIL_LINE}">{e(ln.name)} <span style="color:{EMAIL_GREY}">× {d(ln.quantity):g}</span></td>'
+        f'<tr><td style="padding:8px 0;border-bottom:1px solid {EMAIL_LINE}">{e(ln.display_name or ln.name)} <span style="color:{EMAIL_GREY}">× {d(ln.quantity):g}</span></td>'
         f'<td align="right" style="padding:8px 0;border-bottom:1px solid {EMAIL_LINE};white-space:nowrap">{fmt_money(ln.total, o.currency)}</td></tr>'
         for ln in o.lines
         if not _is_ship(ln)

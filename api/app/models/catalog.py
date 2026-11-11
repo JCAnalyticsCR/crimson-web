@@ -101,6 +101,21 @@ class Product(ArchiveMixin, TenantMixin, TimestampMixin, Base):
     # snapshot, services/store_snapshot.rebuild). Nulas = sin dato.
     web_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hidden_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # contenido de la tienda (O3-01). El nombre fiscal (name) y el codigo (code) NO se tocan: van en cotizaciones,
+    # facturas, kardex y Hacienda. Estas columnas solo cambian lo que ve el cliente de la tienda y las escribe el
+    # panel o un lote aprobado (services/catalog_drafts); la sincronizacion con el proveedor nunca las toca.
+    # web_name: nombre comercial (la regla apunta a 60 caracteres o menos); vacio = el nombre de siempre.
+    # web_manual: alguien lo edito a mano; el generador de borradores nunca lo pisa.
+    web_name: Mapped[str | None] = mapped_column(String(120))
+    web_subtitle: Mapped[str | None] = mapped_column(String(160))
+    web_type: Mapped[str | None] = mapped_column(String(60))  # tipo de equipo corregido a mano (gana sobre el deducido)
+    web_specs: Mapped[dict | None] = mapped_column(JSON)  # especificaciones aprobadas por lote
+    web_description: Mapped[str | None] = mapped_column(Text)  # descripcion propia aprobada por lote (O3-06)
+    web_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    warranty_months: Mapped[int | None] = mapped_column(Integer)
+    seo_title: Mapped[str | None] = mapped_column(String(120))
+    seo_description: Mapped[str | None] = mapped_column(String(200))
+    gtin: Mapped[str | None] = mapped_column(String(20))
 
     # Orden fijo (el de menor id primero): taxes[0] de la tienda, del snapshot y del historial de precios (O0-07) es el
     # mismo en cada carga y el mismo que usa la fila «inicial» de la migracion (ORDER BY pt.id). Sin order_by, Postgres

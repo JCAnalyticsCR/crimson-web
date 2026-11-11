@@ -9,6 +9,7 @@ import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, as
 import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
+import { conNombreVisible } from "./storeNames";
 
 type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
@@ -70,7 +71,7 @@ export default function ProductPage() {
     // Mostrar datos del snapshot inmediatamente si están en caché (cero latencia)
     if (snapCard) {
       setD({
-        ...snapCard,
+        ...conNombreVisible(snapCard),
         description: null,
         specs: {},
         datasheet_url: null,
@@ -86,7 +87,7 @@ export default function ProductPage() {
     }
     // Cargar la ficha completa (description, specs, relacionados, accesorios)
     ctx.api<Detail>(`/item/${encodeURIComponent(ref)}`)
-      .then((x) => { if (!alive) return; setD(x); setVariant(x.variants?.[0]); setFull(true); })
+      .then((x) => { if (!alive) return; setD(conNombreVisible(x)); setVariant(x.variants?.[0]); setFull(true); })
       .catch(() => { if (alive) { setD(null); setMissing(true); } });
     return () => { alive = false; };
   // snapCard se lee sincrónicamente en el efecto; no se incluye en deps para no re-ejecutar cuando el snap llega tarde

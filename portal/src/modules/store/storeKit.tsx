@@ -24,6 +24,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { mensajePedido } from "./pedidoWa";
+import { conNombreVisible } from "./storeNames";
 
 /** La disponibilidad viene del API (services/availability, audiencia publico): state en_bodega | bajo_pedido |
     consultar | agotado | servicio, con "ultimas", la cantidad (solo si la tienda la publica) y max_qty (tope en linea).
@@ -41,6 +42,8 @@ export type VProd = {
   ks?: string[] | null;
   /** fecha de alta (unix, segundos): «Nuevo» en la tarjeta hasta 30 dias */
   created_ts?: number | null;
+  /** O3-01/O3-02: nombre comercial aprobado y codigo publico (storeNames.ts); name y code son los fiscales */
+  display_name?: string | null; public_code?: string | null;
 };
 /** Datos del comercio (O1-17, Mi Tienda -> Datos del comercio). Todo opcional: vacio = no se muestra. */
 export type Business = { legal_name?: string; legal_id?: string; address?: string; phone?: string; email?: string; hours?: string };
@@ -369,6 +372,7 @@ function cardBadge(p: VProd): string | null {
 }
 /** 1 foto y nombre en un solo enlace · 2 marca · 3 nombre · 4 datos clave · 5 precio, IVA y disponibilidad · 6 accion */
 export function ProductCard({ p, avail, eager = false, badge }: { p: VProd; avail?: Avail; n?: number; eager?: boolean; badge?: string | null }) {
+  p = conNombreVisible(p); // O3-01: nombre comercial y codigo publico (con respaldo a los de siempre)
   const ctx = useStore();
   const to = usePath();
   const [done, setDone] = useState(false);
