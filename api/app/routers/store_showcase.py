@@ -652,6 +652,48 @@ class Ctx:
         leaf, top = self.cat_chain.get(p.category_id, (None, None))
         return pt.display_type(p, leaf, top)
 
+    _frozen: set[int] | None = None
+
+    def frozen(self) -> set[int]:
+        """O3-05: categorias (con sus hijas) que ya tienen un lote de especificaciones aplicado: ahi la ficha deja de
+        pintar lo deducido al vuelo. Una consulta, solo cuando se pide una ficha."""
+        if self._frozen is None:
+            from ..models import CatalogBatch
+
+            rows = list(
+                self.db.scalars(
+                    select(CatalogBatch.category_id).where(
+                        CatalogBatch.tenant_id == self.t.id, CatalogBatch.field == "web_specs", CatalogBatch.status == "aplicado"
+                    )
+                )
+            )
+            out: set[int] = set()
+            if any(r is None for r in rows):
+                out = {c.id for c in self.cats} | {-1}  # un lote de todo el catalogo: todas
+            for cid in {r for r in rows if r is not None}:
+                out |= _descendants(self, cid)
+            self._frozen = out
+        return self._frozen
+
+    def specs(self, p: Product) -> dict[str, str]:
+        """O3-05: lo que la ficha y el comparador muestran. Tipo, marca y modelo; luego lo escrito a mano (specs);
+        luego lo aprobado por lote (web_specs). Lo deducido al vuelo solo mientras la categoria no tenga lote aplicado.
+        Nunca un «No indicado»."""
+        t = self.dtype(p)
+        derived = sv.derive_specs(p, t)
+        base = {k: derived[k] for k in ("Tipo", "Marca", "Modelo") if k in derived}
+        manual = {str(k).strip()[:40]: str(v).strip()[:120] for k, v in (p.specs or {}).items() if str(k).strip() and not sv._no_data(v)}
+        if p.web_specs:
+            rest = {str(k): str(v) for k, v in p.web_specs.items() if not sv._no_data(v)}
+        elif p.category_id in self.frozen() or (p.category_id is None and -1 in self.frozen()):
+            rest = {}
+        else:
+            rest = derived
+        out = {**base, **manual}
+        for k, v in rest.items():
+            out.setdefault(k, v)
+        return out
+
     def card(self, p: Product, own: dict | None, variants: list | None = None, full: bool = False) -> dict:
         out = _prod_pub(p, variants, own, self.pricer, self.cat_name, compact=not full)
         price = Decimal(str(out["display_price"]))
@@ -941,7 +983,7 @@ def catalog(
         wanted = [i for i in want if i in by_id]
         full_ids = {p.id: p for p in _load_full(db, wanted)}
         rows = [full_ids[i] for i in wanted if i in full_ids]
-        return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": sv.derive_specs(p, ctx.dtype(p))} for p in rows], "total": len(rows)}
+        return {"items": [ctx.card(p, stock_all.get(p.id), full=True) | {"specs": ctx.specs(p)} for p in rows], "total": len(rows)}
     # Ajustes: los agotados ocultos (todos, o los que agoto el proveedor) no se listan; la ficha directa abre
     prods = [p for p in prods if not (stock_all.get(p.id) or {}).get("ocultar")]
 
@@ -1169,7 +1211,7 @@ def item(slug: str, ref: str, response: Response, db: Session = Depends(get_db))
     return {
         **out,
         "description": p.description_store or p.description_invoice,
-        "specs": sv.derive_specs(p, ctx.dtype(p)),
+        "specs": ctx.specs(p),
         "datasheet_url": p.datasheet_url,
         "net_price": net,
         "tax_amount": (gross - net).quantize(Decimal("0.01")),

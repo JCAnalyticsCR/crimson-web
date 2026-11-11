@@ -337,9 +337,11 @@ _RX = {
     "ch": re.compile(r"(\d{1,2})\s?(?:-\s?)?(?:ch|canales|canal)\b"),
     "tb": re.compile(r"(\d{1,2})\s?tb\b"),
     "gb": re.compile(r"(\d{2,4})\s?gb\b"),
-    "ports": re.compile(r"(\d{1,2})\s?(?:puertos|ptos|port|-port|p\b)"),
+    # O3-05: sin el digito de antes, «1080p» ya no da «80 puertos»
+    "ports": re.compile(r"(?<![\d.])(\d{1,2})\s?(?:puertos|ptos|port|-port|p\b)"),
     "va": re.compile(r"(\d{3,4})\s?va\b"),
-    "zoom": re.compile(r"(\d{1,2})\s?x\b"),
+    # O3-05: «25x», «25x zoom», «zoom optico de 25x»; no «2 x 4» ni «4x4»
+    "zoom": re.compile(r"zoom\s(?:optico\s)?(?:de\s)?(\d{1,2})\s?x\b|(?<![\d.x])(\d{1,2})\s?x\b(?!\s?\d)"),
 }
 
 
@@ -402,7 +404,7 @@ def derive_specs(p: Product, shown: str | None = None) -> dict[str, str]:
         elif "vision nocturna" in text or " ir " in text:
             out["Visión nocturna"] = "Sí"
         if t == "Cámara PTZ" and (m := _RX["zoom"].search(text)):
-            out["Zoom óptico"] = f"{m.group(1)}×"
+            out["Zoom óptico"] = f"{m.group(1) or m.group(2)}×"
         if "bullet" in text:
             out["Formato"] = "Bullet"
         elif "turret" in text or "eyeball" in text:
@@ -411,8 +413,13 @@ def derive_specs(p: Product, shown: str | None = None) -> dict[str, str]:
             out["Formato"] = "Domo"
         if "acusense" in text or "deteccion humana" in text or "deteccion de personas" in text or " ia" in text:
             out["Analítica"] = "Detección de personas y vehículos"
-        if "microfono" in text or "audio" in text:
+        # O3-05: solo se copia el dato. «audio bidireccional» no es «Micrófono integrado».
+        if "audio bidireccional" in text or "audio de dos vias" in text:
+            out["Audio"] = "Bidireccional"
+        elif re.search(r"(?<!sin )\bmicrofono", text):
             out["Audio"] = "Micrófono integrado"
+        elif re.search(r"(?<!sin )\baudio\b", text):
+            out["Audio"] = "Sí"
     m = _RX["ip"].search(text)
     if m:
         out["Protección"] = f"IP{m.group(1)}" + (f" / IK{_RX['ik'].search(text).group(1)}" if _RX["ik"].search(text) else "")
