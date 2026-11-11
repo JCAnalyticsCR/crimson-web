@@ -54,6 +54,15 @@ def head_html(meta: dict) -> str:
     return "\n".join(parts)
 
 
+def boot_html(data: dict | None) -> str:
+    """O2-01a: datos de arranque de la vitrina dentro del HTML (nginx los incrusta por SSI en el <body>, solo en el
+    dominio de la tienda). Mismo escape que el JSON-LD (ld_json): ningun texto del catalogo o de Mi Tienda puede cerrar
+    el <script> ni cortar la linea con U+2028/U+2029. Vacio si no hay datos."""
+    if not data:
+        return ""
+    return f'<script type="application/json" id="sh-boot">{ld_json(data)}</script>'
+
+
 SCHEMA = "https://schema.org/"
 # estados que se pagan en linea (los mismos de services/availability.SELLABLE_STATES)
 BUYABLE_STATES = ("en_bodega", "bajo_pedido", "servicio")

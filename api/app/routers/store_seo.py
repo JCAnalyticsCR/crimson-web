@@ -23,7 +23,7 @@ from ..models import Product, Tenant
 from ..services import fygaro_legacy
 from ..services import store_showcase as sv
 from ..services.availability import settings_of
-from ..services.store_seo import BUYABLE_STATES, organization_ld, schema_availability
+from ..services.store_seo import BUYABLE_STATES, boot_html, organization_ld, schema_availability
 from .store import _stock_of, business_of, store_cfg
 from .store_showcase import Ctx, _categories
 
@@ -265,6 +265,46 @@ def seo_head(path: str = "", host: str | None = Query(None, max_length=200), x_s
     except HTTPException:
         return PlainTextResponse("")
     return PlainTextResponse(sv.head_html(meta), media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})
+
+
+def boot_data(db: Session, t: Tenant, path: str) -> dict:
+    """O2-01a: lo que la vitrina necesita para pintar sin dos llamadas en serie (/store-domain y luego /store): el slug,
+    los datos base de la tienda (los mismos de /public/store/<slug>) y, en la portada, la portada (/showcase). Los textos
+    legales (decenas de KB) no viajan: solo si existen (legal_on); el texto completo llega con /store, que la vitrina
+    igual pide en segundo plano."""
+    from .store import store_home
+    from .store_showcase import showcase_public
+
+    path = "/" + (path or "").strip("/")
+    home = store_home(t.slug, db)
+    legal = home["store"].get("legal") or {}
+    home["store"] = {
+        **home["store"],
+        "legal": {"privacy": "", "terms": ""},
+        "legal_on": {"privacy": bool(legal.get("privacy")), "terms": bool(legal.get("terms"))},
+    }
+    data: dict = {"v": 1, "slug": t.slug, "path": path, "store": home}
+    if path == "/":
+        sc = showcase_public(t.slug, Response(), None, db)
+        sc.pop("seo", None)  # el <head> ya lo trae por SSI y en la primera ruta el navegador no lo toca (O1-06)
+        data["showcase"] = sc
+    return data
+
+
+@seo.get("/boot", response_class=PlainTextResponse)
+@seo.get("/boot/{path:path}", response_class=PlainTextResponse)
+def seo_boot(path: str = "", host: str | None = Query(None, max_length=200), x_store_host: str | None = Header(None), db: Session = Depends(get_db)):
+    """O2-01a: <script type="application/json" id="sh-boot"> con los datos de arranque de la ruta. nginx lo incrusta
+    por SSI en el <body> del dominio de la tienda (y lo guarda 60 s). Vacio en otro dominio, en una tienda despublicada
+    o si algo falla: la vitrina sigue como antes (pide /store-domain y /store)."""
+    t = _tenant_by_host(db, _host(x_store_host, host))
+    if not t:
+        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
+    try:
+        body = boot_html(boot_data(db, t, path))
+    except Exception:  # noqa: BLE001 - el arranque rapido nunca tumba el HTML de la tienda
+        return PlainTextResponse("", headers={"Cache-Control": "no-store"})
+    return PlainTextResponse(body, media_type="text/html; charset=utf-8", headers={"Cache-Control": "public, max-age=60"})
 
 
 def store_base(t: Tenant) -> str:

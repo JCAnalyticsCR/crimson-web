@@ -14,7 +14,9 @@
    accion = la accion de Ajustes para lo que no se vende en linea (O1-02: «ninguna» quita el boton de WhatsApp);
    retrasoItem = ms de espera de /item (O1-03: el desglose no se pinta con datos a medias);
    fallarDominio = cuantas veces /store-domain responde 503 antes de servir (O1-18: reintento de la tienda);
-   comercio = datos del comercio, titulares del pago y plazo de la reserva en la portada y el checkout (O1-17). */
+   comercio = datos del comercio, titulares del pago y plazo de la reserva en la portada y el checkout (O1-17);
+   fallarTienda = /public/store/<slug> responde 503 (O2-01a: la vitrina pinta con el arranque incrustado en el HTML);
+   latenciaApi = ms de espera de cada llamada al API (el viaje de ida y vuelta de un celular, para medir LCP). */
 import { Catalog, deriveSpecs, productPath, DEFAULT_TRUST, type RawProduct } from "../../src/demo/catalog";
 import { installMockApi } from "../../src/demo/mockApi";
 import type { SnapProduct } from "../../src/modules/store/catalogFilter";
@@ -24,7 +26,7 @@ const SLUG = "crimson";
 
 /* portadaTras (O1-04 j): ms entre el snapshot y /showcase; -1 = al azar entre 0 y 60 ms (alrededor de la ventana de la
    carrera de StoreHome). Sin la perilla: 200 ms, el orden fijo de las capturas. */
-export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e; portadaTras?: number; sinHeroe?: boolean };
+export type AjustesE2e = { accion?: string; retrasoItem?: number; fallarDominio?: number; comercio?: boolean; envio?: ShipE2e; portadaTras?: number; sinHeroe?: boolean; fallarTienda?: boolean; latenciaApi?: number };
 /** O2-08: el producto de portada de la tienda de pruebas (una camara en bodega) */
 const HEROE = 70;
 /** O1-09: lo que manda el API real en shipping_public (perilla `envio`; sin ella la tienda no muestra la franja) */
@@ -107,6 +109,8 @@ export function instalarApiE2e() {
     const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(raw, location.href);
     const base = `/api/public/store/${SLUG}`;
+    // O2-01a: el viaje de ida y vuelta que en produccion cuesta cada llamada al API (aqui todo responde en el navegador)
+    if (url.origin === location.origin && url.pathname.startsWith("/api/") && ajustes().latenciaApi) await pausa(ajustes().latenciaApi!);
     if (url.origin === location.origin && url.pathname === "/api/public/store-domain") {
       const a = ajustes();
       if (a.fallarDominio && a.fallarDominio > 0) {
@@ -117,6 +121,10 @@ export function instalarApiE2e() {
     if (url.origin !== location.origin || !url.pathname.startsWith(base)) return mock(input, init);
     const sub = url.pathname.slice(base.length);
     const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    // O2-01a: /store (datos base de la tienda) caido; la vitrina tiene que pintar con el arranque del HTML
+    if (method === "GET" && sub === "" && ajustes().fallarTienda) {
+      return new Response(JSON.stringify({ detail: "no disponible" }), { status: 503, headers: { "Content-Type": "application/json" } });
+    }
 
     if (method === "GET" && sub === "/snapshot") {
       snapshotServido();

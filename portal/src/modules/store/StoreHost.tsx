@@ -11,6 +11,7 @@
    cubre el servidor de desarrollo y cualquier enlace que se escape. */
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
+import { readBoot } from "./boot";
 
 const PublicStore = lazy(() => import("./PublicStore"));
 
@@ -64,10 +65,13 @@ function NoCargo({ onRetry }: { onRetry: () => void }) {
 }
 
 export default function StoreHost() {
-  const [slug, setSlug] = useState<string | null>(null);
+  /* O2-01a: con el bloque de arranque del HTML (boot.ts) el slug ya esta: no se espera /store-domain. El servidor lo
+     resolvio con el mismo dominio y la misma regla, asi que no hace falta volver a preguntarlo. */
+  const [slug, setSlug] = useState<string | null>(() => readBoot()?.slug ?? null);
   const [err, setErr] = useState(false);
   const [intento, setIntento] = useState(0);
   useEffect(() => {
+    if (slug) return;
     // O1-18: un tropiezo de red no deja la tienda en blanco: un reintento automatico a los 2 s y, si vuelve a fallar,
     // un aviso con «Reintentar» (que repite la misma secuencia)
     let alive = true;
@@ -79,7 +83,7 @@ export default function StoreHost() {
       .then((j) => { if (alive) setSlug(j.slug); })
       .catch(() => { if (alive) setErr(true); });
     return () => { alive = false; window.clearTimeout(t); };
-  }, [intento]);
+  }, [intento]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <NoCargo onRetry={() => { setErr(false); setIntento((n) => n + 1); }} />;
   if (!slug) return <Spin />;
   return (

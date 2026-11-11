@@ -18,6 +18,7 @@ import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
 import ProductPage from "./ProductPage";
 import { parseCarrito } from "./carritoCompartido";
 import StoreHome from "./StoreHome";
+import { bootStore } from "./boot";
 import { businessLines, cannotBuy, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
@@ -31,7 +32,8 @@ const NotFound = lazy(() => import("./StorePages").then((m) => ({ default: m.Not
 
 type Cat = { id: number; name: string; count: number };
 type Home = {
-  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean };
+  /* legal_on (O2-01a): el arranque del HTML no trae los textos legales, solo si existen; el texto llega con /store */
+  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean; legal_on?: { privacy?: boolean; terms?: boolean } };
   nav: { slug: string; title: string }[];
   categories: Cat[];
   product_count?: number;
@@ -105,7 +107,8 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   }, [sp, setSp]);
 
   // ---------- datos de la tienda (nombre, menu, envios y pagos para el checkout) ----------
-  const [home, setHome] = useState<Home | null>(null);
+  // O2-01a: con el arranque del HTML la tienda pinta ya; /store se pide igual en segundo plano (textos legales, al dia)
+  const [home, setHome] = useState<Home | null>(() => (hostMode ? bootStore<Home>(slug) : null));
   const [fatal, setFatal] = useState<string | null>(null);
   useEffect(() => { api<Home>("").then(({ data }) => setHome(data)).catch((e) => setFatal(e.message)); }, [api]);
 
@@ -272,7 +275,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
   // O2-09: «Ver cámaras» del carrito vacio (la categoria si existe; si no, la busqueda)
   const camCat = home.categories.find((c) => /c[aá]mara|vigil|cctv/i.test(c.name));
   const camaras = camCat ? L(`/c/${slugs[camCat.id]}`) : L("/buscar?q=camaras");
-  const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k];
+  const legalOn = (k: "terms" | "privacy") => !!S.legal?.[k] || !!S.legal_on?.[k];
   // O1-09: envio visible antes del checkout (solo en la tienda que vende; nada si el API no lo manda)
   const ship = isShop ? home.shipping_public ?? null : null;
   const cur = S.currency || "CRC";
@@ -355,7 +358,7 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
             // la confirmacion se abre en la direccion de seguimiento (la raiz de la tienda), no en la del producto donde
             // se estaba: "Copiar enlace" y "Rastrear mi pedido" llevan al mismo lugar que el boton del correo
             navigate(`${L("/")}?pedido=${encodeURIComponent(o.track_token)}`);
-          }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} privacyHref={S.legal?.privacy ? L("/info/privacidad") : undefined} />
+          }} onBack={() => go({})} setQty={setQty} remove={remove} quoteText={quoteText} termsHref={L("/info/terminos")} privacyHref={legalOn("privacy") ? L("/info/privacidad") : undefined} />
         ) : (
           <Suspense fallback={<Spin />}>
             <Routes>

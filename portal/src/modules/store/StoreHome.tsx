@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { AvailBadge, Grid, IC, Ico, KitPhotos, PriceTag, ProductCard, Skeleton, catIcon, money, useAvailability, useHead, usePath, useStore, waLink, quitarRetiro, sinRetiro, type KitPhoto, type SeoBlock, type VProd } from "./storeKit";
 import { snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
+import { expireBootShowcase, takeBootShowcase } from "./boot";
 
 type Cat = { id: number; name: string; path: string; count: number; image: string | null; children: { name: string; path: string; count: number }[] };
 /* photos: fotos fijas de los equipos reales del kit (o las que Andres eligio en Vitrina) */
@@ -150,7 +151,10 @@ export default function StoreHome() {
   // Precarga desde el snapshot (instantáneo si el snapshot está en caché)
   const snapD = useMemo(() => snap ? showcaseFromSnap(snap) : null, [snap]);
 
-  const [d, setD] = useState<Showcase | null>(null);
+  /* O2-01a: la portada que el servidor incrusto en el HTML (boot.ts): el titular, el producto de portada y los kits
+     estan desde el primer pintado y no cambian de texto al llegar /showcase (que se pide igual, en segundo plano) */
+  const [d, setD] = useState<Showcase | null>(() => (ctx.hostMode ? takeBootShowcase<Showcase>(ctx.slug, "/") : null));
+  useEffect(() => expireBootShowcase, []);
   const [err, setErr] = useState(false);
 
   /* Datos del snapshot mientras /showcase carga (O1-04 j). Antes: «if (snapD && !d) setD(snapD)». Si /showcase
@@ -159,7 +163,7 @@ export default function StoreHome() {
      que ya hay) y una referencia marca que /showcase llego. */
   const showcaseLlego = useRef(false);
   // O2-14: lo que solo trae /showcase (kits y producto de portada) guarda su lugar hasta que llega: nada salta
-  const [llego, setLlego] = useState(false);
+  const [llego, setLlego] = useState(() => d !== null); // con el arranque, lo de /showcase ya esta
   useEffect(() => { if (snapD && !showcaseLlego.current) setD((cur) => cur ?? snapD); }, [snapD]);
 
   // /showcase: siempre se pide para traer los kits, el producto de portada y los datos definitivos

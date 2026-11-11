@@ -22,6 +22,11 @@
     <!-- Sin JavaScript (O1-06): en el dominio de la tienda, el nombre del comercio y su WhatsApp y telefono reales
          (/public/seo/noscript). En el panel, o sin nginx, no hay nada. -->
     <!--# if expr="$is_store" --><noscript><!--# include virtual="/__noscript" --></noscript><!--# endif -->
+    <!-- Arranque rapido (O2-01a): en el dominio de la tienda, nginx incrusta <script type="application/json" id="sh-boot">
+         con el slug, los datos base de la tienda y, en la portada, la portada (/public/seo/boot). La vitrina pinta con
+         eso sin esperar /store-domain ni /store, y revalida en segundo plano. Si el API no responde, no hay nada y la
+         vitrina sigue como antes. -->
+    <!--# if expr="$is_store" --><!--# include virtual="/__boot$seo_path" --><!--# endif -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
