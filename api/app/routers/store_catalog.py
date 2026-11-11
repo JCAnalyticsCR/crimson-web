@@ -129,3 +129,66 @@ def undo(bid: int, p: Principal = Depends(require("catalog", "publicar")), db: S
     audit(db, p.tenant.id, p.user.id, "undo", "catalog_batch", bid, {"deshechos": out["deshechos"], "cambiados": len(out["cambiados_despues"])}, ip=p.ip)
     db.commit()
     return out
+
+
+# ---------------------------------------------------------------- O3-08: orden «Recomendados» y fijados
+class OrdenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recomendados: bool | None = None  # se enciende solo cuando el dueno reconfirma por escrito (21/10)
+    min_publish_crc: int | None = Field(None, ge=0, le=1_000_000)
+
+
+class PinsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    product_ids: list[int] = Field(default_factory=list, max_length=8)  # «Fijar arriba en su categoria»: 8 como maximo
+
+
+def _save_o3(db: Session, t, **vals) -> dict:
+    from ..services import store_ranking
+    from ..services.store_showcase import bump_catalog_version
+
+    st = dict(t.settings or {})
+    cur = dict(st.get("tienda_o3") or {})
+    cur.update({k: v for k, v in vals.items() if v is not None})
+    st["tienda_o3"] = cur
+    t.settings = st
+    bump_catalog_version(db, t)
+    return store_ranking.cfg(t)
+
+
+@router.get("/orden")
+def orden_get(p: Principal = Depends(require("catalog", "ver"))):
+    from ..services import store_ranking
+
+    return store_ranking.cfg(p.tenant)
+
+
+@router.put("/orden")
+def orden_put(data: OrdenIn, p: Principal = Depends(require("catalog", "publicar")), db: Session = Depends(get_db)):
+    out = _save_o3(db, p.tenant, **data.model_dump(exclude_unset=True))
+    audit(db, p.tenant.id, p.user.id, "update", "store_orden", p.tenant.id, data.model_dump(exclude_unset=True), ip=p.ip)
+    db.commit()
+    return out
+
+
+@router.put("/pins/{cid}")
+def pins_put(cid: int, data: PinsIn, p: Principal = Depends(require("catalog", "publicar")), db: Session = Depends(get_db)):
+    from sqlalchemy import select
+
+    from ..models import Category, Product
+
+    c = db.get(Category, cid)
+    if not c or c.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Categoría no encontrada")
+    ids = list(dict.fromkeys(data.product_ids))
+    own = set(db.scalars(select(Product.id).where(Product.tenant_id == p.tenant.id, Product.id.in_(ids or [0]))))
+    if set(ids) - own:
+        raise HTTPException(422, "Hay productos que no son de su catálogo")
+    from ..services import store_ranking
+
+    pins = dict(store_ranking.cfg(p.tenant)["pins"])
+    pins[str(cid)] = ids
+    out = _save_o3(db, p.tenant, pins={k: v for k, v in pins.items() if v})
+    audit(db, p.tenant.id, p.user.id, "update", "store_pins", cid, {"productos": ids}, ip=p.ip)
+    db.commit()
+    return out

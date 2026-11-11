@@ -209,7 +209,7 @@ export default function CategoryPage({ mode }: { mode: "all" | "category" | "sea
               <button className="sh-btn sh-btn--ghost sh-btn--sm vt-show-m" onClick={() => setSheet(true)} aria-haspopup="dialog"><Ico d={IC.filter} />Filtros{activeCount ? ` (${activeCount})` : ""}</button>
               <label className="vt-sort"><span className="sh-meta vt-hide-m">Ordenar</span>
                 <select className="sh-select" value={sort} onChange={(e) => set({ orden: e.target.value === "relevance" ? null : e.target.value })} aria-label="Ordenar por">
-                  {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  {SORTS.map(([v, l]) => <option key={v} value={v}>{v === "relevance" && snap?.rank === "recomendados" ? "Recomendados" : l}</option>)}
                 </select>
               </label>
             </div>

@@ -727,7 +727,10 @@ def product_from_item(
     completar"): codigo propio sin choques, nombre legible, categoria padre/hija del proveedor, IVA 13 %, Hikvision
     destacado y el vínculo "creado" (que el borrado del admin respeta). Lo que el panel ya completo (precio, CABYS,
     fotos, descripcion, categoria, costo) entra tal cual; lo que no, queda como lo dejaria auto_catalog. Solo flush."""
-    featured = (it.brand or "").upper() in HIKVISION_BRANDS
+    from . import store_ranking
+
+    # O3-08: con el orden «Recomendados» encendido (reconfirmado por el dueno), Hikvision ya no nace destacado
+    featured = (it.brand or "").upper() in HIKVISION_BRANDS and not store_ranking.cfg(t)["recomendados"]
     specs = description_store if description_store is not None else ("\n".join((it.description or "").splitlines()[1:]).strip() or None)
     cost_v = cost if cost is not None else it.cost
     prod = Product(
@@ -769,6 +772,25 @@ def product_from_item(
 
     catalog_drafts.on_new_product(db, prod)
     return prod
+
+
+def publish_ok(db: Session, t: Tenant, prod: Product) -> bool:
+    """O3-08 (solo con el interruptor encendido): el alta automatica no publica si el precio final es menor que el
+    minimo, si la familia no es de la especialidad o si no tiene una categoria hoja."""
+    from ..models import Category
+    from . import product_typing as pt
+    from . import store_ranking
+
+    rk = store_ranking.cfg(t)
+    if not rk["recomendados"]:
+        return True
+    if prod.category_id is None or db.scalar(select(func.count()).select_from(Category).where(Category.parent_id == prod.category_id)):
+        return False
+    cats = list(db.scalars(select(Category).where(Category.tenant_id == t.id)))
+    if not pt.functional_family(pt.category_chain(cats).get(prod.category_id, (None, None))[1]):
+        return False
+    final = Decimal(str(prod.price or 0)) * Decimal("1.13")
+    return prod.currency != "CRC" or final >= rk["min_publish_crc"]
 
 
 def auto_catalog_run(
@@ -862,6 +884,8 @@ def auto_catalog_run(
                 skip_sin_costo += 1
                 continue
             prod = product_from_item(db, t, it, sup_name, price=price, margin=margin, publish=publish_web, iva=iva_obj, fx=fx)
+            if publish_web and not publish_ok(db, t, prod):
+                prod.show_on_web = False  # O3-08: no se publica solo (queda para revisar en el panel)
             featured = bool(prod.web_featured)
             if featured:
                 destacados += 1

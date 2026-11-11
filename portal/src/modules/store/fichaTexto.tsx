@@ -3,6 +3,7 @@
 export function Descripcion({ texto }: { texto: string }) {
   const lineas = texto.split("\n").map((l) => l.trim()).filter(Boolean);
   const vineta = (l: string) => /^[-•]\s*/.test(l);
+  if (!lineas.some(vineta)) return <p className="sh-desc">{texto}</p>; // sin viñetas: exactamente como antes
   const bloques: { lista: boolean; lineas: string[] }[] = [];
   for (const l of lineas) {
     const lista = vineta(l);

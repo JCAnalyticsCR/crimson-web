@@ -18,6 +18,8 @@ const SOLO_AXE = [375, 1280]; // informe de accesibilidad y recorrido de compra
 const COMPRA_REAL = "**/compra.spec.ts";
 /* el panel (Mi Tienda) contra el mismo API local: tambien va en `npm run e2e:compra` (O1-11b) */
 const PANEL_REAL = "**/mi-tienda.spec.ts";
+/* O3-11: «Contenido por aprobar» (panel) contra el API local: tambien va en `npm run e2e:compra` */
+const CONTENIDO_REAL = "**/contenido.spec.ts";
 /* Prueba de humo en WebKit (O1-18: Safari de iPhone, el navegador que mas se rompe con sintaxis nueva). En CI corre
    siempre (la imagen de Playwright trae WebKit); en una maquina local solo con E2E_WEBKIT=1, despues de
    `npx playwright install webkit`. */
@@ -56,6 +58,7 @@ export default defineConfig({
     testIgnore: [
       COMPRA_REAL,
       PANEL_REAL,
+      CONTENIDO_REAL,
       ...(SOLO_CAPTURAS.includes(w) ? [] : ["**/capturas.spec.ts"]),
       ...(SOLO_AXE.includes(w) ? [] : ["**/axe.spec.ts", "**/compra-mock.spec.ts"]),
     ],

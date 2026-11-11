@@ -29,6 +29,8 @@ export type SnapProduct = {
   ks?: string[];
   /** O3-04: familia (camaras, parlantes, switches, ups) y el valor de cada filtro propio, calculados por el API */
   fam?: string; fa?: Record<string, string>;
+  /** O3-08: calidad de ficha (0 a 3) para el orden «Recomendados»; solo viaja con el interruptor encendido */
+  q?: number;
 };
 
 export type SnapCategory = {
@@ -57,6 +59,8 @@ export type Snapshot = {
   showcase: SnapShowcase;
   /** O1-14: tabla de sinonimos del buscador (raiz -> raices del grupo). Falta en un snapshot viejo: sin sinonimos. */
   syn?: Record<string, string[]>;
+  /** O3-08: «recomendados» cuando el dueno encendio el orden nuevo; pins = fijados por categoria (8 como maximo) */
+  rank?: string; pins?: Record<string, number[]>;
 };
 
 // ── Tipos de resultados ───────────────────────────────────────────────────────
@@ -221,6 +225,14 @@ function cmpDefault(a: SnapProduct, b: SnapProduct): number {
   return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
 }
 
+/* O3-08: «Recomendados» (services/store_ranking.recommended_key): comprable hoy, fijado en su categoria, calidad de
+   ficha, precio (los «a consultar» al final), nombre e id. «Nombre»: de la A a la Z por el nombre que se ve. */
+const foldKey = (p: SnapProduct) => fold(p.display_name || p.name);
+const cmpStr = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+function cmpName(a: SnapProduct, b: SnapProduct): number {
+  return cmpStr(foldKey(a), foldKey(b)) || a.id - b.id;
+}
+
 // ── Función principal ─────────────────────────────────────────────────────────
 
 /**
@@ -380,7 +392,20 @@ export function filterCatalog(snap: Snapshot, params: CatalogParams): CatalogRes
 
   // ── Ordenamiento ────────────────────────────────────────────────────────────
   const sorted = [...rows];
-  if (sort === "relevance") {
+  const recomendados = snap.rank === "recomendados";
+  const pins = snap.pins || {};
+  const pinned = (p: SnapProduct) => {
+    const cats = catObj ? [catObj.id] : p.category_id != null ? [p.category_id] : [];
+    return cats.some((c) => (pins[String(c)] || []).includes(p.id));
+  };
+  if (sort === "relevance" && recomendados) {
+    const buy = (p: SnapProduct) => (stateOf(p) === "en_bodega" || stateOf(p) === "bajo_pedido" ? 0 : 1);
+    sorted.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0) || buy(a) - buy(b) || Number(pinned(b)) - Number(pinned(a))
+      || (b.q ?? 0) - (a.q ?? 0) || Number(a.display_price <= 0) - Number(b.display_price <= 0)
+      || (a.display_price > 0 ? a.display_price : 0) - (b.display_price > 0 ? b.display_price : 0) || cmpName(a, b));
+  } else if (sort === "name" && recomendados) {
+    sorted.sort(cmpName);
+  } else if (sort === "relevance") {
     sorted.sort((a, b) => {
       const sd = (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0);
       if (sd !== 0) return sd;

@@ -114,7 +114,7 @@ def build(db: Session, t, ctx) -> bytes:
         _published_light,
         _stock_map,
     )
-    from ..services import family_filters, store_search
+    from ..services import family_filters, store_ranking, store_search
     from ..services import store_showcase as sv
     from ..services.brands import canonical_brand
     from ..services.catalog_text import public_code, shown_model
@@ -130,6 +130,10 @@ def build(db: Session, t, ctx) -> bytes:
 
     # campos de tarjeta liviana (sin descripciones ni specs)
     backed = compare_backed(db, t.id, [p for p in pool if p.compare_price])
+    rk = store_ranking.cfg(t)
+    with_specs: set[int] = set()
+    if rk["recomendados"]:
+        with_specs = _specs_ids(db, t.id)
     items = []
     for p in pool:
         own = stock_all.get(p.id)
@@ -164,6 +168,10 @@ def build(db: Session, t, ctx) -> bytes:
         pc = public_code(p)
         if pc != (p.code or ""):
             items[-1]["public_code"] = pc  # O3-02: el codigo que ve el cliente, solo si difiere del propio
+        if rk["recomendados"]:  # O3-08: calidad de ficha para el orden «Recomendados» del navegador
+            q_ = store_ranking.quality(p.web_name, len(p.images or []), p.id in with_specs)
+            if q_:
+                items[-1]["q"] = q_
         dt_ = ctx.dtype(p)
         fam_ = family_filters.family(dt_, ctx.leaf(p))
         if fam_:  # O3-04: la familia y los valores de sus filtros ya calculados (el navegador no los recalcula)
@@ -245,7 +253,22 @@ def build(db: Session, t, ctx) -> bytes:
         "types": types,
         "showcase": showcase,
     }
+    if rk["recomendados"]:  # O3-08: el navegador ordena igual que el API (sin el interruptor no viaja nada)
+        payload["rank"] = "recomendados"
+        payload["pins"] = rk["pins"]
     return gzip.compress(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(), compresslevel=6)
+
+
+def _specs_ids(db: Session, tid: int) -> set[int]:
+    from sqlalchemy import select as _select
+
+    from ..models import Product
+
+    return {
+        pid
+        for pid, ws, s in db.execute(_select(Product.id, Product.web_specs, Product.specs).where(Product.tenant_id == tid, Product.active, Product.show_on_web))
+        if ws or s
+    }
 
 
 def rebuild(db: Session, tid: int) -> None:

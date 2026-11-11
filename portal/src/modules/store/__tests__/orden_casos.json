@@ -1,0 +1,88 @@
+{
+ "productos": [
+  {
+   "id": 1,
+   "name": "Cámara Zeta",
+   "state": "en_bodega",
+   "pinned": false,
+   "q": 1,
+   "price": 1500
+  },
+  {
+   "id": 2,
+   "name": "Árbol de cables",
+   "state": "bajo_pedido",
+   "pinned": true,
+   "q": 0,
+   "price": 1200
+  },
+  {
+   "id": 3,
+   "name": "Bocina Alfa",
+   "state": "consultar",
+   "pinned": true,
+   "q": 3,
+   "price": 1000
+  },
+  {
+   "id": 4,
+   "name": "cámara alfa",
+   "state": "en_bodega",
+   "pinned": true,
+   "q": 0,
+   "price": 1900
+  },
+  {
+   "id": 5,
+   "name": "Disco Beta",
+   "state": "en_bodega",
+   "pinned": false,
+   "q": 3,
+   "price": 1800
+  },
+  {
+   "id": 6,
+   "name": "Ñandú router",
+   "state": "en_bodega",
+   "pinned": false,
+   "q": 3,
+   "price": 0
+  },
+  {
+   "id": 7,
+   "name": "Enchufe",
+   "state": "agotado",
+   "pinned": false,
+   "q": 2,
+   "price": 500
+  },
+  {
+   "id": 8,
+   "name": "Disco Alfa",
+   "state": "en_bodega",
+   "pinned": false,
+   "q": 3,
+   "price": 1800
+  }
+ ],
+ "recomendados": [
+  2,
+  4,
+  8,
+  5,
+  6,
+  1,
+  3,
+  7
+ ],
+ "nombre": [
+  2,
+  3,
+  4,
+  1,
+  8,
+  5,
+  7,
+  6
+ ]
+}

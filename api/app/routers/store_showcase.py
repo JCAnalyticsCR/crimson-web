@@ -30,6 +30,7 @@ from ..services import catalog_text as ctext
 from ..services import category_paths
 from ..services import family_filters as ff
 from ..services import product_typing as pt
+from ..services import store_ranking as ranking
 from ..services import store_showcase as sv
 from ..services.availability import settings_of, sort_key
 from ..services.brands import brand_key, canonical_brand
@@ -1090,8 +1091,22 @@ def catalog(
         if len(cnt) > 1 or (cnt and sum(cnt.values()) < n_) or g in ffil:  # un grupo que no acota nada no se ofrece
             groups.append({"key": g, "label": label, "values": ff.sort_values(g, cnt)})
 
-    if sort == "relevance":  # primero lo que se puede comprar ya (lo propio), luego bajo pedido
+    rk = ranking.cfg(t)  # O3-08: apagado hasta que el dueno lo reconfirme (con el apagado, el orden de siempre)
+    if sort == "relevance" and rk["recomendados"]:
+        qual = _quality(db, t.id, rows)
+        viewing = {cat_obj.id} if cat_obj else None
+        rows.sort(
+            key=lambda p: (
+                -scores.get(p.id, 0),
+                *ranking.recommended_key(
+                    av[p.id], ranking.pinned_in(rk["pins"], viewing, p.id, p.category_id), qual.get(p.id, 0), float(disp[p.id]), ctext.shown_name(p), p.id
+                ),
+            )
+        )
+    elif sort == "relevance":  # primero lo que se puede comprar ya (lo propio), luego bajo pedido
         rows.sort(key=lambda p: (-scores.get(p.id, 0), sort_key(stock_all.get(p.id)), _rank_default(p)))
+    elif sort == "name" and rk["recomendados"]:
+        rows.sort(key=lambda p: ranking.name_key(ctext.shown_name(p), p.id))  # O3-08: de la A a la Z, nada arriba
     elif sort == "name":
         # destacados y Hikvision primero, luego alfabético dentro de cada grupo
         rows.sort(key=lambda p: (not bool(p.web_featured), (p.brand or "").lower() != "hikvision", p.name.lower()))
@@ -1139,6 +1154,16 @@ def catalog(
         "nav": nav,
         "seo": _seo(db, t, f"/c/{ctx.cat_slug[cat_obj.id]}" if cat_obj else ("/buscar" if terms else "/catalogo")),
     }
+
+
+def _quality(db: Session, tid: int, prods: list[Product]) -> dict[int, int]:
+    """O3-08: calidad de ficha de cada producto (una consulta: las especificaciones no van en las columnas livianas)"""
+    with_specs = {
+        pid
+        for pid, ws, s in db.execute(select(Product.id, Product.web_specs, Product.specs).where(Product.tenant_id == tid, Product.active, Product.show_on_web))
+        if ws or s
+    }
+    return {p.id: ranking.quality(p.web_name, len(p.images or []), p.id in with_specs) for p in prods}
 
 
 def _seo(db: Session, t: Tenant, path: str, **kw) -> dict | None:

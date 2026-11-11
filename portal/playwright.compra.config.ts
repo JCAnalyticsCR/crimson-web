@@ -41,7 +41,7 @@ const PORTAL = process.env.E2E_COMPRA_PORTAL === "dev"
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: /(compra|mi-tienda)\.spec\.ts$/,
+  testMatch: /(compra|mi-tienda|contenido)\.spec\.ts$/,
   outputDir: "./test-results/compra",
   fullyParallel: false,
   workers: 1,
