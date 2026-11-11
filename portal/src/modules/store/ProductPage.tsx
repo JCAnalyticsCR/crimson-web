@@ -1,11 +1,11 @@
-/* Ficha de producto: /p/<nombre>-<id>. Galeria con lupa (escritorio) y visor a pantalla completa con zoom
-   (todo dentro de la pagina), marca/modelo/SKU, precio con IVA y desglose, precio anterior, disponibilidad,
-   cantidad limitada a lo disponible, carrito (del modulo de pedidos), instalacion, WhatsApp, especificaciones,
-   ficha tecnica PDF, "¿Que necesito ademas?", relacionados y compartir. En movil la barra de compra queda fija.
+/* Ficha de producto: /p/<nombre>-<id>. O2-07: en orden de decision. Arriba del boton solo lo que decide (galeria,
+   marca, nombre, precio con IVA, disponibilidad, envio, cantidad y boton); lo demas va debajo, plegado y presente en la
+   pagina (Lo esencial, descripcion, especificaciones, accesorios y relacionados). En celular la barra fija aparece solo
+   cuando el boton principal sale de la pantalla. Visor a pantalla completa con zoom (todo dentro de la pagina).
    Si el snapshot está cargado, muestra nombre/foto/precio/disponibilidad al instante sin esperar /item. */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, Viewfinder, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, ShipInfo, sinRetiro, type SeoBlock, type Variant, type VProd } from "./storeKit";
+import { AvailBadge, Crumbs, EmptyHelp, Grid, IC, Ico, PriceTag, ProductCard, assistAction, cannotBuy, money, normAvail, useAvailability, useHead, usePath, useStore, waLink, ShipInfo, type SeoBlock, type Variant, type VProd } from "./storeKit";
 import { mensajePedido } from "./pedidoWa";
 import { pidFromRef, snapToVProd } from "./catalogFilter";
 import { useSnapshot } from "./useSnapshot";
@@ -14,7 +14,24 @@ type Detail = VProd & {
   description: string | null; specs: Record<string, string>; datasheet_url: string | null; net_price: string | number; tax_amount: string | number;
   breadcrumbs: { name: string; path: string }[]; related: VProd[]; accessories: { title: string; reason: string; items: VProd[] }[]; whatsapp: string;
   seo?: SeoBlock | null;
+  /** O3-01 (aditivo): meses de garantia del fabricante; solo se publica con el candado legal (O1-00) */
+  warranty_months?: number | null;
 };
+
+/** «¿Lo instalamos nosotros?» solo en seguridad y redes */
+const INSTALABLE = /segur|c[aá]mara|vigil|cctv|grabador|acceso|alarma|cerradura|videoportero|red(es)?\b|wifi|switch|router|cable|conectiv/i;
+/** datos que ya estan arriba (o no dicen nada) y no van en «Lo esencial» */
+const SIN_ESENCIAL = new Set(["Tipo", "Marca", "Modelo", "Impuesto"]);
+/** descripcion que no aporta: repite el nombre o es la linea del proveedor en mayusculas */
+function descUtil(desc: string | null, name: string): boolean {
+  const t = (desc || "").trim();
+  if (t.length < 24) return false;
+  const norm = (x: string) => x.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (norm(t) === norm(name) || norm(name).includes(norm(t))) return false;
+  const letras = t.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, "");
+  const mayus = t.replace(/[^A-ZÁÉÍÓÚÑ]/g, "").length;
+  return !(letras.length > 0 && mayus / letras.length > 0.7);
+}
 
 export default function ProductPage() {
   const ctx = useStore();
@@ -26,16 +43,16 @@ export default function ProductPage() {
   const [photo, setPhoto] = useState(0);
   const [variant, setVariant] = useState<Variant | undefined>();
   const [qty, setQty] = useState(1);
-  const [added, setAdded] = useState(false);
-  // ya lo agrego: "Ir al carrito" queda a mano hasta salir de la ficha (pedido 21/10; antes el enlace se iba a los 2 s)
+  // ya lo agrego: la linea «Agregado. En tu carrito: n · Ver carrito» queda debajo del boton hasta salir de la ficha
   const [inCart, setInCart] = useState(false);
   const [shared, setShared] = useState(false);
   // O1-03: la ficha completa (/item) ya llego. Antes de eso solo hay la tarjeta del snapshot, sin el desglose de IVA:
   // no se pinta «Precio sin IVA ₡X + IVA 13 % ₡0» con datos a medias, solo el precio final y «IVA incluido».
   const [full, setFull] = useState(false);
   const [zoom, setZoom] = useState(false);
-  const addT = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(addT.current), []);
+  // barra fija (celular): solo cuando el boton principal no esta a la vista
+  const [mainEl, mainBtn] = useState<HTMLDivElement | null>(null); // ref de funcion: sigue al boton aunque cambie de rama
+  const [mainVisible, setMainVisible] = useState(true);
 
   // Primer pintado desde el snapshot (sin esperar /item)
   const { snap } = useSnapshot(ctx.slug);
@@ -78,6 +95,15 @@ export default function ProductPage() {
   useEffect(() => setInCart(false), [ref]);
   // el nombre cambio -> direccion canonica sin recargar
   useEffect(() => { if (d && `/p/${ref}` !== d.path) nav(to(d.path), { replace: true }); }, [d]); // eslint-disable-line react-hooks/exhaustive-deps
+  // O2-07: la barra fija aparece solo cuando el boton principal sale de pantalla
+  useEffect(() => {
+    if (!mainEl || typeof IntersectionObserver !== "function") { setMainVisible(true); return; }
+    // la raiz se estira hacia abajo: «visible» = el boton no quedo arriba de la pantalla. Asi un salto directo de abajo
+    // hacia arriba (ancla, Fin, scrollIntoView) tambien cambia el estado
+    const io = new IntersectionObserver(([e]) => setMainVisible(e.isIntersecting), { rootMargin: "0px 0px 100000px 0px" });
+    io.observe(mainEl);
+    return () => io.disconnect();
+  }, [mainEl]);
 
   const ids = useMemo(() => (d ? [d.id, ...d.related.map((r) => r.id), ...d.accessories.flatMap((g) => g.items.map((i) => i.id))] : []), [d]);
   const avail = useAvailability(ids);
@@ -116,13 +142,21 @@ ${url}`) : "";
   const waText = `Hola ${S.name}, me interesa: ${d.name}${d.code ? ` (${d.code})` : ""}${qty > 1 ? ` · ${qty} unidades` : ""}\n${url}`;
   const installHref = to(`/asesoria?producto=${d.id}&cantidad=${qty}&instalar=1`);
   const inCompare = ctx.compare.includes(d.id);
+  const buyable = !ask && !soldOut;
+  const enCarrito = ctx.cartQty?.(d.id) ?? 0;
+  const instalable = INSTALABLE.test([d.category, d.type, ...d.breadcrumbs.map((b) => b.name)].filter(Boolean).join(" "));
+  // fila de confianza: garantia y devoluciones solo con el candado legal (O1-00) y con el dato; sin candado, lo demas
+  const factura = ctx.shipping?.invoice ?? true;
+  const garantia = ctx.trustOk && d.warranty_months ? `Garantía: ${d.warranty_months} meses del fabricante` : "";
+  const confianza = [garantia, factura ? "Factura electrónica" : "", ctx.payText || ""].filter(Boolean);
+  const esencial = Object.entries(d.specs).filter(([k, v]) => !SIN_ESENCIAL.has(k) && v && v.length < 60).slice(0, 5);
+  const verDesc = descUtil(d.description, d.name);
+  const reporte = S.whatsapp ? waLink(S.whatsapp, `Hola ${S.name}, creo que un dato de esta ficha está mal: ${d.name}${d.code ? ` (código ${d.code})` : ""}\n${url}`)
+    : S.business?.email ? `mailto:${S.business.email}?subject=${encodeURIComponent(`Dato incorrecto: ${d.name}`)}&body=${encodeURIComponent(url)}` : "";
 
   const add = () => {
     ctx.addToCart(d, qty, variant);
-    setAdded(true);
-    setInCart(true);
-    window.clearTimeout(addT.current);
-    addT.current = window.setTimeout(() => setAdded(false), 1800);
+    setInCart(true); // el foco no se mueve: el aviso de 5 s y la linea de abajo lo anuncian
   };
   const share = async () => {
     const data = { title: d.name, text: `${d.name} · ${S.name}`, url };
@@ -132,16 +166,18 @@ ${url}`) : "";
       setShared(true); window.setTimeout(() => setShared(false), 2000);
     } catch { /* cancelado por la persona */ }
   };
-  const meta = [d.brand && `Marca ${d.brand}`, d.model && d.model !== d.code && `Modelo ${d.model}`, d.code && `SKU ${d.code}`].filter(Boolean) as string[];
+  const marcaCat = [d.brand, d.category].filter(Boolean).join(" · ");
+  const modeloCodigo = [d.model && d.model !== d.code && `Modelo ${d.model}`, d.code && `Código ${d.code}`].filter(Boolean).join(" · ");
 
   return (
-    <div className="sh-wrap vt-product">
+    <div className="sh-wrap vt-product" data-sticky={!mainVisible || undefined}>
       <Crumbs items={[...d.breadcrumbs, { name: d.name }]} />
       <div className="vt-pdp">
-        <Gallery imgs={imgs} name={d.name} code={d.code} photo={photo} setPhoto={setPhoto} onZoom={() => setZoom(true)} />
+        <Gallery imgs={imgs} name={d.name} photo={photo} setPhoto={setPhoto} onZoom={() => setZoom(true)} />
         <div className="vt-info">
-          <div className="vt-info__meta sh-meta">{meta.map((m) => <span key={m}>{m}</span>)}</div>
+          {marcaCat && <p className="vt-info__brand">{marcaCat}</p>}
           <h1>{d.name}</h1>
+          {modeloCodigo && <p className="vt-info__code">{modeloCodigo}</p>}
           <div className="vt-info__price">
             <PriceTag p={shown} big />
             <AvailBadge a={a} />
@@ -152,7 +188,7 @@ ${url}`) : "";
               {save > 0 && <b> · Ahorrás {money(save, d.display_currency)}</b>}
             </p>
           )}
-          {!ask && !soldOut && ctx.isShop && <ShipInfo price={Number(price)} cur={d.display_currency} />}
+          {buyable && ctx.isShop && <ShipInfo price={Number(price)} cur={d.display_currency} />}
           {(d.variants?.length ?? 0) > 0 && (
             <fieldset className="vt-variants"><legend className="sh-meta">Opciones</legend>
               {d.variants.map((v) => <button key={v.id} type="button" className="sh-chip" aria-pressed={variant?.id === v.id} onClick={() => setVariant(v)}>{v.name}</button>)}
@@ -163,13 +199,16 @@ ${url}`) : "";
             {ask ? (
               <>
                 <p className="vt-buybox__note">Este equipo se cotiza según el proyecto. Escribinos y te pasamos el precio.</p>
-                {S.whatsapp && <a className="sh-btn sh-btn--wa sh-btn--block" href={waLink(S.whatsapp, `Hola ${S.name}, quiero precio de: ${d.name} (${d.code})\n${url}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir precio por WhatsApp</a>}
-                <Link className="sh-btn sh-btn--block" to={to(`/asesoria?producto=${d.id}&cantidad=${qty}`)}>Solicitar cotización</Link>
+                <div ref={mainBtn} className="vt-buybox__main">
+                  {S.whatsapp ? <a className="sh-btn sh-btn--wa sh-btn--block" href={waLink(S.whatsapp, `Hola ${S.name}, quiero precio de: ${d.name} (${d.code})\n${url}`)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Pedir precio por WhatsApp</a>
+                    : <Link className="sh-btn sh-btn--block" to={contactHref}>Solicitar cotización</Link>}
+                </div>
+                {S.whatsapp && <Link className="vt-textlink" to={contactHref}>Solicitar cotización</Link>}
               </>
             ) : assist ? (
               <>
                 {act === "whatsapp" && (
-                  <div className="vt-buy">
+                  <div className="vt-buy" ref={mainBtn}>
                     <Qty value={qty} max={maxQty} onChange={setQty} />
                     <a className="sh-btn sh-btn--wa vt-buy__add vt-buy__wa" href={pedidoHref} target="_blank" rel="noopener noreferrer" aria-describedby="vt-wa-hint"><Ico d={IC.wa} />Pedir por WhatsApp</a>
                   </div>
@@ -184,18 +223,28 @@ ${url}`) : "";
               </>
             ) : (
               <>
-                <div className="vt-buy">
+                <div className="vt-buy" ref={mainBtn}>
                   <Qty value={qty} max={maxQty} onChange={setQty} />
-                  <button className="sh-btn sh-btn--crimson vt-buy__add" data-done={added} onClick={add}>
-                    <Ico d={added ? IC.check : IC.bag} />{added ? "Agregado" : ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
+                  <button type="button" className="sh-btn sh-btn--crimson vt-buy__add" onClick={add}>
+                    <Ico d={IC.bag} />{ctx.isShop ? "Agregar al carrito" : "Agregar a la cotización"}
                   </button>
                 </div>
-                {a && (a.state === "disponible" || a.state === "ultimas") && a.cantidad != null && a.cantidad > 0 && a.cantidad < 999 ? <p className="vt-buybox__note">Quedan {a.cantidad} en bodega{a.max_qty && a.max_qty > a.cantidad ? `; ${a.max_qty - a.cantidad} más bajo pedido` : ""}.</p> : null}
-                {inCart && <button className="sh-btn sh-btn--block vt-buy__go" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>}
-                <Link className="vt-install" to={installHref}>
-                  <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Técnicos de Crimson · te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />
-                </Link>
-                {S.whatsapp && <a className="sh-btn sh-btn--ghost sh-btn--block" href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar por WhatsApp</a>}
+                {/* pedido 21/10: el aviso de 5 s con «Ir al carrito» sigue; esta linea queda fija y el foco no se mueve */}
+                <p className="vt-added" role="status">
+                  {inCart && enCarrito > 0 ? <>Agregado. En tu {ctx.isShop ? "carrito" : "cotización"}: {enCarrito} · <button type="button" className="vt-added__go" onClick={ctx.openCart}>Ver {ctx.isShop ? "carrito" : "cotización"}</button></> : null}
+                </p>
+                {a && (a.state === "disponible" || a.state === "ultimas") && a.cantidad != null && a.cantidad > 0 && a.cantidad < 999 && a.max_qty && a.max_qty > a.cantidad ? <p className="vt-buybox__note">{a.max_qty - a.cantidad} más bajo pedido.</p> : null}
+                {confianza.length > 0 && (
+                  <p className="vt-trustrow">
+                    <Ico d={IC.doc} size={16} /><span>{confianza.join(" · ")}{ctx.trustOk && <> · <Link to={to("/info/envios")}>Cambios y devoluciones</Link></>}</span>
+                  </p>
+                )}
+                {instalable && (
+                  <Link className="vt-install" to={installHref}>
+                    <Ico d={IC.tool} /><span><b>¿Lo instalamos nosotros?</b><small>Te cotizamos la instalación sin compromiso</small></span><Ico d={IC.next} />
+                  </Link>
+                )}
+                {S.whatsapp && <a className="vt-textlink" href={waLink(S.whatsapp, waText)} target="_blank" rel="noopener noreferrer" aria-describedby="vt-wa-hint2"><Ico d={IC.wa} size={16} />Consultar por WhatsApp<span className="sh-sr" id="vt-wa-hint2"> (se abre WhatsApp)</span></a>}
               </>
             )}
             <div className="vt-buybox__tools">
@@ -204,34 +253,34 @@ ${url}`) : "";
               {d.datasheet_url && <a className="vt-tool" href={d.datasheet_url} target="_blank" rel="noopener noreferrer"><Ico d={IC.pdf} />Ficha técnica (PDF)</a>}
             </div>
           </div>
-
-          <ul className="vt-assure">
-            <li><Ico d={IC.shield} /><span>Garantía de fábrica gestionada por Crimson</span></li>
-            <li><Ico d={IC.tool} /><span>Soporte técnico local en Costa Rica</span></li>
-            <li><Ico d={IC.doc} /><span>Factura electrónica en cada compra</span></li>
-            <li><Ico d={IC.truck} /><span>{sinRetiro(ctx.shipping) ? "Envío a todo el país" : "Envío a todo el país o retiro coordinado"}</span></li>
-          </ul>
         </div>
       </div>
 
+      {/* debajo, plegado: el contenido esta en la pagina (Google y el buscador del navegador lo encuentran) */}
       <div className="vt-pdp__detail">
-        {Object.keys(d.specs).length > 0 && (
-          <section aria-labelledby="vt-specs" className="vt-specs">
-            <h2 id="vt-specs">Especificaciones</h2>
-            <dl>{Object.entries(d.specs).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}<div><dt>Impuesto</dt><dd>IVA {d.tax_rate} % incluido</dd></div></dl>
-          </section>
+        {esencial.length >= 3 && (
+          <Fold id="esencial" title="Lo esencial" open>
+            <ul className="vt-essentials">{esencial.map(([k, v]) => <li key={k}><b>{k}:</b> {v}</li>)}</ul>
+          </Fold>
         )}
-        {d.description && (
-          <section aria-labelledby="vt-desc" className="vt-descr">
-            <h2 id="vt-desc">Descripción</h2>
+        {verDesc && (
+          <Fold id="desc" title="Descripción">
             <p className="sh-desc">{d.description}</p>
-          </section>
+          </Fold>
+        )}
+        {Object.keys(d.specs).length > 0 && (
+          <Fold id="specs" title="Especificaciones">
+            <div className="vt-specs">
+              <p className="vt-specs__src">Datos según el distribuidor{reporte && <> · <a href={reporte} target={reporte.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer">Reportar un dato incorrecto</a></>}</p>
+              <dl>{Object.entries(d.specs).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}<div><dt>Impuesto</dt><dd>IVA {d.tax_rate} % incluido</dd></div></dl>
+            </div>
+          </Fold>
         )}
       </div>
 
       {d.accessories.length > 0 && (
         <section className="vt-sec" aria-labelledby="vt-acc">
-          <div className="vt-sec__head"><div><span className="sh-eyebrow">Para que funcione completo</span><h2 id="vt-acc">¿Qué necesito además?</h2></div><Link className="vt-more" to={to("/arma-tu-sistema")}>Armar el sistema completo →</Link></div>
+          <div className="vt-sec__head"><div><span className="sh-eyebrow">Para que funcione completo</span><h2 id="vt-acc">¿Qué necesito además?</h2></div><Link className="vt-more" to={to("/arma-tu-sistema")}>Armar el sistema completo</Link></div>
           <div className="vt-acc">
             {d.accessories.map((g) => (
               <div key={g.title} className="vt-acc__group">
@@ -245,13 +294,13 @@ ${url}`) : "";
 
       {d.related.length > 0 && (
         <section className="vt-sec" aria-labelledby="vt-rel">
-          <div className="vt-sec__head"><h2 id="vt-rel">También te puede servir</h2>{d.category_path && <Link className="vt-more" to={to(d.category_path)}>Ver {d.category} →</Link>}</div>
+          <div className="vt-sec__head"><h2 id="vt-rel">También te puede servir</h2>{d.category_path && <Link className="vt-more" to={to(d.category_path)}>Ver {d.category}</Link>}</div>
           <Grid items={d.related} avail={avail} rail />
         </section>
       )}
 
-      {/* barra fija de compra en movil: precio y CTA siempre a mano */}
-      <div className="vt-stickybuy" aria-hidden={false}>
+      {/* barra fija de compra en celular: solo cuando el boton principal ya no se ve (no tapa nada mientras esta a la vista) */}
+      <div className="vt-stickybuy" data-show={!mainVisible}>
         <div><PriceTag p={shown} /></div>
         {ask ? <a className="sh-btn sh-btn--crimson" href="#comprar">Pedir precio</a>
           : assist ? (act === "whatsapp"
@@ -260,12 +309,31 @@ ${url}`) : "";
           : agotado ? (S.whatsapp
             ? <a className="sh-btn sh-btn--ghost" href={agotadoHref} target="_blank" rel="noopener noreferrer"><Ico d={IC.wa} />Consultar</a>
             : <Link className="vt-textlink" to={contactHref}>Prefiero que me contacten</Link>)
-          : inCart && !added ? <button className="sh-btn" onClick={ctx.openCart}><Ico d={IC.bag} />Ir {ctx.isShop ? "al carrito" : "a la cotización"}</button>
-            : <button className="sh-btn sh-btn--crimson" data-done={added} onClick={add}><Ico d={added ? IC.check : IC.bag} />{added ? "Agregado" : "Agregar"}</button>}
+          : <button type="button" className="sh-btn sh-btn--crimson" onClick={add}><Ico d={IC.bag} />Agregar</button>}
       </div>
 
       {zoom && <Lightbox imgs={imgs} start={photo} name={d.name} onClose={(i) => { setPhoto(i); setZoom(false); }} />}
     </div>
+  );
+}
+
+/** Bloque plegable: boton con aria-expanded y el contenido siempre en la pagina (oculto con hidden="until-found" donde
+    el navegador lo entiende, para que la busqueda de la pagina lo abra). */
+function Fold({ id, title, open = false, children }: { id: string; title: string; open?: boolean; children: ReactNode }) {
+  const [on, setOn] = useState(open);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const abrir = () => setOn(true);
+    el.addEventListener("beforematch", abrir);
+    return () => el.removeEventListener("beforematch", abrir);
+  }, []);
+  return (
+    <section className="vt-fold" aria-labelledby={`vt-${id}-t`}>
+      <h2 id={`vt-${id}-t`}><button type="button" aria-expanded={on} aria-controls={`vt-${id}`} onClick={() => setOn(!on)}>{title}<Ico d={on ? IC.minus : IC.plus} size={18} /></button></h2>
+      <div id={`vt-${id}`} ref={body} className="vt-fold__body" hidden={on ? undefined : ("until-found" as unknown as boolean)}>{children}</div>
+    </section>
   );
 }
 
@@ -282,44 +350,49 @@ function Qty({ value, onChange, max }: { value: number; onChange: (n: number) =>
   );
 }
 
-/** Foto principal con lupa: en escritorio con mouse sigue al puntero (gate de rAF, sin layout por evento);
-    clic o toque abre el visor a pantalla completa. */
-function Gallery({ imgs, name, code, photo, setPhoto, onZoom }: { imgs: string[]; name: string; code: string; photo: number; setPhoto: (n: number) => void; onZoom: () => void }) {
-  const box = useRef<HTMLButtonElement>(null);
-  const raf = useRef(0);
-  const pt = useRef({ x: 0, y: 0 });
-  const rect = useRef<DOMRect | null>(null);
-  const [lens, setLens] = useState(false);
-  const canLens = typeof matchMedia === "function" && matchMedia("(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)").matches;
-  const move = (e: RPointerEvent) => {
-    if (!canLens || e.pointerType !== "mouse") return;
-    pt.current = { x: e.clientX, y: e.clientY };
-    if (raf.current) return;
-    raf.current = requestAnimationFrame(() => {
-      raf.current = 0;
-      const r = rect.current;
-      const img = box.current?.querySelector("img");
-      if (!r || !img) return;
-      img.style.transformOrigin = `${((pt.current.x - r.left) / r.width) * 100}% ${((pt.current.y - r.top) / r.height) * 100}%`;
-    });
+/** O2-07: galeria 1:1 que se desliza con el dedo (scroll nativo con snap), con «anterior» y «siguiente» y miniaturas
+    que se alcanzan con el teclado. Sin rotulos de visor. Un toque o clic en la foto abre el visor a pantalla completa. */
+function Gallery({ imgs, name, photo, setPhoto, onZoom }: { imgs: string[]; name: string; photo: number; setPhoto: (n: number) => void; onZoom: () => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const n = imgs.length;
+  const ir = (i: number) => {
+    const k = (i + n) % n;
+    setPhoto(k);
+    const el = track.current;
+    if (el) el.scrollTo({ left: k * el.clientWidth, behavior: "auto" });
   };
-  const enter = (e: RPointerEvent) => { if (!canLens || e.pointerType !== "mouse") return; rect.current = box.current?.getBoundingClientRect() || null; setLens(true); };
-  const leave = () => { setLens(false); cancelAnimationFrame(raf.current); raf.current = 0; };
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
-  const cur = imgs[Math.min(photo, imgs.length - 1)];
+  // al deslizar con el dedo, la foto visible manda (sin trabajo por cada evento: se lee al terminar)
+  useEffect(() => {
+    const el = track.current;
+    if (!el || n < 2) return;
+    let t = 0;
+    const onScroll = () => { window.clearTimeout(t); t = window.setTimeout(() => setPhoto(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))), 80); };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => { el.removeEventListener("scroll", onScroll); window.clearTimeout(t); };
+  }, [n, setPhoto]);
   return (
     <div className="vt-gallery">
-      <Viewfinder className="vt-gallery__main" label={`CAM 01 · ${code}`} right={imgs.length > 1 ? `${photo + 1}/${imgs.length}` : undefined}>
-        {cur ? (
-          <button ref={box} type="button" className="vt-gallery__zoom" data-lens={lens} onPointerEnter={enter} onPointerMove={move} onPointerLeave={leave} onClick={onZoom} aria-label={`Ampliar foto de ${name}`}>
-            <img src={cur} alt={name} fetchPriority="high" decoding="async" width={800} height={800} />
-            <span className="vt-gallery__hint"><Ico d={IC.zoom} size={16} />Ampliar</span>
-          </button>
+      <div className="vt-gallery__main">
+        {n ? (
+          <div className="vt-gallery__track" ref={track}>
+            {imgs.map((u, i) => (
+              <button key={u + i} type="button" className="vt-gallery__slide" onClick={onZoom} tabIndex={i === photo ? 0 : -1} aria-label={`Ampliar foto ${i + 1} de ${n}: ${name}`}>
+                <img src={u} alt={n > 1 ? `${name}, foto ${i + 1} de ${n}` : name} fetchPriority={i === 0 ? "high" : undefined} loading={i === 0 ? "eager" : "lazy"} decoding="async" width={800} height={800} />
+              </button>
+            ))}
+          </div>
         ) : <span className="sh-noimg">Sin foto</span>}
-      </Viewfinder>
-      {imgs.length > 1 && (
+        {n > 1 && (
+          <>
+            <button type="button" className="vt-gallery__nav vt-gallery__nav--prev" onClick={() => ir(photo - 1)} aria-label="Foto anterior"><Ico d={IC.back} /></button>
+            <button type="button" className="vt-gallery__nav vt-gallery__nav--next" onClick={() => ir(photo + 1)} aria-label="Foto siguiente"><Ico d={IC.next} /></button>
+            <span className="vt-gallery__count" aria-hidden="true">{photo + 1} / {n}</span>
+          </>
+        )}
+      </div>
+      {n > 1 && (
         <ul className="vt-thumbs" aria-label="Fotos">
-          {imgs.map((u, i) => <li key={u + i}><button type="button" className="vt-thumb" aria-current={i === photo} aria-label={`Foto ${i + 1} de ${imgs.length}`} onClick={() => setPhoto(i)}><img src={u} alt="" loading="lazy" decoding="async" width={72} height={72} /></button></li>)}
+          {imgs.map((u, i) => <li key={u + i}><button type="button" className="vt-thumb" aria-current={i === photo} aria-label={`Foto ${i + 1} de ${n}`} onClick={() => ir(i)}><img src={u} alt="" loading="lazy" decoding="async" width={72} height={72} /></button></li>)}
         </ul>
       )}
     </div>

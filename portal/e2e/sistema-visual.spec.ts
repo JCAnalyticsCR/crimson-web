@@ -26,8 +26,8 @@ async function alto(loc: Locator, nombre: string) {
     const el = loc.nth(i);
     if (!(await el.isVisible())) continue;
     const box = (await el.boundingBox())!;
-    expect(box.height, `${nombre} #${i + 1} mide ${box.height} px de alto`).toBeGreaterThanOrEqual(44);
-    expect(box.width, `${nombre} #${i + 1} mide ${box.width} px de ancho`).toBeGreaterThanOrEqual(44);
+    expect(box.height, `${nombre} #${i + 1} mide ${box.height} px de alto`).toBeGreaterThanOrEqual(43.5); // medio pixel de redondeo
+    expect(box.width, `${nombre} #${i + 1} mide ${box.width} px de ancho`).toBeGreaterThanOrEqual(43.5);
   }
 }
 

@@ -296,23 +296,7 @@
   .shop *, .shop *::before, .shop *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-/* ---------- O1-02: venta asistida en la ficha («por confirmar») ----------
-   Va aqui y no en vitrina.css (vedado hasta O2-07, que lo pliega alla). La zona de compra nunca ensancha la columna:
-   los botones parten renglon en vez de empujar todo fuera de la pantalla a 320 px. */
-.shop .vt-buybox { min-width: 0; }
-.shop .vt-buybox .sh-btn { white-space: normal; text-align: center; line-height: 1.2; }
-.shop .vt-buybox__hint { margin: -6px 0 0; font-size: var(--fs-1); color: var(--text-3); text-align: center; }
-.shop .vt-textlink { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; color: var(--ink); font-weight: 700; font-size: var(--fs-2); text-decoration: underline; text-underline-offset: 3px; }
-.shop .vt-textlink:hover { text-decoration-thickness: 2px; }
-.shop .vt-stickybuy .vt-textlink { flex: 0 1 auto; text-align: right; }
-.shop .vt-acc__list .vt-add.vt-add--pill { width: auto; height: 44px; }
-.shop .vt-qty button[aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
-
-/* ---------- O1-03: precio de la ficha legible en celular ----------
-   La regla movil de vitrina.css (.vt-price b a 16,5 px, pensada para la tarjeta) le ganaba al precio grande de la
-   ficha. Mas especifica aqui, sin tocar vitrina.css (se pliega alla en O2-07). «IVA incluido» a 14 px y sin mayusculas. */
-.shop .vt-price.vt-price--big b { font-size: var(--fs-6); }
-.shop .vt-price.vt-price--big small { font-family: inherit; font-size: var(--fs-1); letter-spacing: normal; text-transform: none; font-weight: 400; color: var(--text-2); }
+/* O1-02 y O1-03 (arreglos de la ficha) quedaron plegados en vitrina.css con O2-07 */
 
 /* ---------- O1-17: datos del comercio en el pie ---------- */
 .shop .sh-foot__biz { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }

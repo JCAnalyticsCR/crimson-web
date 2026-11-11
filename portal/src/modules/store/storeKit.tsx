@@ -52,7 +52,7 @@ export function businessLines(b?: Business | null): string[] {
   const contacto = [t(b.phone) && `Tel. ${t(b.phone)}`, t(b.email), t(b.hours)].filter(Boolean).join(" · ");
   return [quien, contacto].filter(Boolean);
 }
-export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string } };
+export type HomeStore = { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean };
 
 /** Envio visible antes del checkout (O1-09, GET /public/store/{slug} -> shipping_public). Todo derivado de Mi Tienda;
     montos con IVA en la moneda de la tienda. Aditivo: un API viejo no lo manda y no se muestra nada. */
@@ -115,7 +115,27 @@ export type StoreCtx = {
   toggleCompare: (id: number) => void;
   /** O1-09: envio publico (puede faltar con un API viejo) */
   shipping?: ShipPub | null;
+  /** O2-07: cuantas unidades de ese producto hay en el carrito (la ficha lo dice bajo el boton) */
+  cartQty?: (id: number) => number;
+  /** O2-07: los medios de pago activos en palabras («Tarjeta, SINPE o transferencia»); vacio = no se dice nada */
+  payText?: string;
+  /** O1-00 (aditivo, apagado por defecto): con el candado legal se publican garantia y devoluciones */
+  trustOk?: boolean;
 };
+/** «Tarjeta, SINPE o transferencia» a partir de los nombres de los metodos de pago activos */
+export function payWords(names: string[]): string {
+  const out: string[] = [];
+  const add = (w: string) => { if (!out.includes(w)) out.push(w); };
+  for (const n of names) {
+    const f = n.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    if (/tarjeta|onvo|card/.test(f)) add("Tarjeta");
+    else if (/sinpe/.test(f)) add("SINPE");
+    else if (/transfer/.test(f)) add("transferencia");
+    else if (/efectivo/.test(f)) add("efectivo");
+  }
+  const w = out.map((x, i) => (i === 0 ? x[0].toUpperCase() + x.slice(1) : x));
+  return w.length > 1 ? `${w.slice(0, -1).join(", ")} o ${w[w.length - 1]}` : w[0] || "";
+}
 const Ctx = createContext<StoreCtx | null>(null);
 export const StoreProvider = ({ value, children }: { value: StoreCtx; children: ReactNode }) => <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 export function useStore(): StoreCtx {

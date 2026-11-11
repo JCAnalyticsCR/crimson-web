@@ -30,9 +30,13 @@ test("[O1-02] ficha por confirmar: «Pedir por WhatsApp» activo con producto, c
   // nada de los textos viejos
   await expect(page.locator("main")).not.toContainText("No lo podemos vender en línea");
   await expect(page.locator("main")).not.toContainText("Sin existencias");
-  // la barra fija (celular y tableta) tambien ofrece el pedido, activo
+  // la barra fija (celular y tableta) tambien ofrece el pedido, activo; O2-07: aparece cuando el boton principal sale
+  // de la pantalla
   const ancho = page.viewportSize()!.width;
-  if (ancho < 900) await expect(page.locator(".vt-stickybuy").getByRole("link", { name: "Pedir por WhatsApp" })).toBeVisible();
+  if (ancho < 900) {
+    await page.locator(".sh-foot").scrollIntoViewIfNeeded();
+    await expect(page.locator(".vt-stickybuy").getByRole("link", { name: "Pedir por WhatsApp" })).toBeVisible();
+  }
   const m = await medirAncho(page);
   expect(m.documento).toBeLessThanOrEqual(m.ventana);
 });

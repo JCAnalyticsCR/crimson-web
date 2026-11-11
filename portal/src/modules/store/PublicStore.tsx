@@ -17,7 +17,7 @@ import OrderStatus, { OrderLookup, rememberOrder } from "./OrderStatus";
 
 import ProductPage from "./ProductPage";
 import StoreHome from "./StoreHome";
-import { businessLines, catSlugs, freeShipGap, normAvail, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
+import { businessLines, catSlugs, freeShipGap, normAvail, payWords, rateText, safeStore, StoreProvider, useFocusTrap, type Business, type ShipPub, type StoreCtx, type VProd, type Variant as VVariant } from "./storeKit";
 import "./shop.css";
 import "./vitrina.css";
 
@@ -30,7 +30,7 @@ const NotFound = lazy(() => import("./StorePages").then((m) => ({ default: m.Not
 
 type Cat = { id: number; name: string; count: number };
 type Home = {
-  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business };
+  store: { name: string; tagline: string; logo_url: string | null; primary: string; secondary: string; font: string; kind: string; whatsapp: string; currency: string; legal: { privacy: string; terms: string }; business?: Business; trust_ok?: boolean };
   nav: { slug: string; title: string }[];
   categories: Cat[];
   product_count?: number;
@@ -188,7 +188,10 @@ export default function PublicStore({ slug: slugProp, hostMode = false }: { slug
     compare,
     toggleCompare: (id: number) => setCompare((c) => (c.includes(id) ? c.filter((x) => x !== id) : c.length >= 3 ? c : [...c, id])),
     shipping: home?.shipping_public ?? null,
-  } : null), [S, slug, base, hostMode, isShop, api, compare, home]); // eslint-disable-line react-hooks/exhaustive-deps
+    cartQty: (id: number) => cart.filter((l) => l.id === id).reduce((n, l) => n + l.qty, 0),
+    payText: payWords((home?.payment_methods || []).map((m) => m.name)),
+    trustOk: S.trust_ok === true,
+  } : null), [S, slug, base, hostMode, isShop, api, compare, home, cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hostMode) {

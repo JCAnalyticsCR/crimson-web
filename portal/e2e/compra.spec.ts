@@ -106,12 +106,14 @@ test("la misma compra solo con teclado: ni ratón ni dedo", async ({ page, servi
   const libres = await existencia(servidor, p.id);
   await vigilarPuntero(page);
 
-  // ficha: Tab hasta «Agregar al carrito», Enter; el boton que aparece debajo lleva al carrito
+  // ficha: Tab hasta «Agregar al carrito», Enter; la linea que queda debajo (O2-07: «Agregado. En tu carrito: 1 ·
+  // Ver carrito») lleva al carrito
   await abrirFicha(page, p);
   const compra = page.locator(".vt-buybox");
   await tabHasta(page, compra.getByRole("button", { name: "Agregar al carrito" }));
   await page.keyboard.press("Enter");
-  await tabHasta(page, compra.getByRole("button", { name: "Ir al carrito" }));
+  await expect(compra.getByRole("status")).toContainText("Agregado. En tu carrito: 1");
+  await tabHasta(page, compra.getByRole("button", { name: "Ver carrito" }));
   await page.keyboard.press("Enter");
 
   // carrito
