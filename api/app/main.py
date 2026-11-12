@@ -63,6 +63,7 @@ from .routers import (
 from .routers import bitacora as bitacora_router
 from .routers import cartera as cartera_router
 from .routers import fiscal_queue as fiscal_queue_router
+from .routers import income_statement as income_statement_router
 from .routers import invoice_proofs as invoice_proofs_router
 from .routers import public_quotes as public_quotes_router
 from .routers import report_board as report_board_router
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(store_seo.seo)
     app.include_router(reception.router)
     app.include_router(accounting.router)
+    app.include_router(income_statement_router.router)  # Contable -> Resultados (estado de resultados mensual)
     app.include_router(quickbooks.router)  # asientos QBO (conta-asientos)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)
