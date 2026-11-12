@@ -45,7 +45,7 @@
   "modelo": "ARG-SP-3045BK",
   "tipo": "Parlantes",
   "comercial": "Parlante Argom Ultrabass · 20 W · Bluetooth · negro",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "proveedor": "Parlante Klip Xtreme Titan 10W bluetooth KBS-300",
@@ -53,7 +53,7 @@
   "modelo": "KBS-300",
   "tipo": "Parlantes",
   "comercial": "Parlante Klip Xtreme Titan · 10 W · Bluetooth",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "proveedor": "Parlante Xiaomi Mi Portable 16W bluetooth negro",
@@ -285,7 +285,7 @@
   "modelo": "WD43PURZ",
   "tipo": "Disco duro",
   "comercial": "Disco duro Western Digital Purple · 4 TB",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "proveedor": "Disco duro de 2TB Western Digital Purple WD23PURZ",
@@ -301,7 +301,7 @@
   "modelo": "ST6000VX009",
   "tipo": "Disco duro",
   "comercial": "Disco duro Seagate SkyHawk · 6 TB",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "proveedor": "HD INTERNO HIKVISION 1TB SATA VIDEOVIGILANCIA HS-HDD-1T",
@@ -453,7 +453,7 @@
   "modelo": "BE600M1",
   "tipo": "UPS",
   "comercial": "UPS APC Back-UPS · 600 VA",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "proveedor": "UPS CDP R-UPR758 750VA 375W 8 tomas",

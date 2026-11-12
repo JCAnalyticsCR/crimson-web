@@ -107,7 +107,7 @@ def tidy(name: str | None) -> str:
     return (out[:1].upper() + out[1:])[:200] if out else raw
 
 
-# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v4»)
+# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v5»)
 # Regla: [Tipo] [Marca oficial] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color].
 # Solo con lo que ya dice el nombre original: el tipo es el sustantivo con que empieza, el modelo es el codigo real y
 # los datos, el color y el paquete se copian si estan escritos (el color tambien del codigo del fabricante: BLU, GRY).
@@ -561,6 +561,30 @@ def _check_line(line: str, name: str, model_s: str | None) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+# nombre_v5: tokens tecnicos que tienen forma de codigo pero no son el del fabricante (AC1200, 10000MAH, 850NM, IP67...)
+_TECH_CODE = re.compile(
+    r"(?:ac|ax|axe|be|n)\d{3,5}|\d[\d.,-]*[a-z]{1,3}|\d+[ac]\d+[ac]|[1i]p[x\d]\d|rj\d\d|cat\d\w?|rs-?\d{3}|iec-?\d+|lifepo4"
+    r"|h\.?26[45]\+?|\d+-?pack|\d+(?:canales|puertos|ch)|wi-?fi\d|usb\d(?:\.\d)?|dc\d+v"
+)
+
+
+def _maker_codes(clean: str) -> list[str]:
+    """los codigos de fabricante del original: letras y digitos, 4 o mas, con o sin guiones o «+». Fuera los de bodega
+    o proveedor (5 digitos o mas, ...-WST-..., EAN, codigo pegado de 7 digitos o mas) y los tecnicos (AC1200, 1080P...)"""
+    out: list[str] = []
+    for tok in clean.split():
+        for part in tok.strip(",.;:").split("/"):
+            core = re.sub(r"\(.*$", "", part.lstrip("(")).rstrip("+")
+            core = _REGION_SUFFIX.sub("", core) if len(core) > 4 else core
+            f = _fold(core)
+            if not (_CODE.fullmatch(core) and re.search(r"\d", f) and re.search(r"[a-z]", f) and _alnum(core) >= 4):
+                continue
+            if re.search(r"\d{7,}", f) or "-wst-" in f or re.fullmatch(r"\d{5,}[a-z]?", f) or _TECH_CODE.fullmatch(f) or _datum(core, ""):
+                continue
+            out.append(core)
+    return out
+
+
 def _pack(text: str) -> str | None:
     m = _PACK.search(text)
     n = m and (m.group(1) or m.group(2))
@@ -578,7 +602,7 @@ def _singular_v2(label: str | None) -> str | None:
 def commercial_name(
     name: str, *, brand: str | None, model: str | None, shown_type: str | None, description: str | None = None, specs: dict | None = None
 ) -> tuple[str | None, str | None]:
-    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v4»:
+    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v5»:
     [Tipo] [Marca] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color]
     - Tipo: el sustantivo con que empieza el nombre (Grabadora -> Grabador, sin «de seguridad»); si no lo hay, el tipo
       mostrado de seguridad y redes; si tampoco, la categoria en singular y a revision («tipo por categoría»). Sin tipo
@@ -672,6 +696,9 @@ def commercial_name(
         flags.append("variante en el código")  # JBLCHARGE6SQUADAM
     if re.search(r"\bkit\b", _fold(name)) and "kit" not in _fold(out):
         flags.append("variante sin indicar (kit)")  # «Tapo C410 kit ... con panel solar» no es solo la camara
+    shown = re.sub(r"[^a-z0-9]", "", _fold(out))
+    if any(re.sub(r"[^a-z0-9]", "", _fold(c)) not in shown for c in _maker_codes(clean)):
+        flags.append("código del fabricante fuera del nombre")  # «TL-R480T+», «H6065», «OPC-TR13N» se perdian
     return out[:120], (", ".join(flags) or None)
 
 

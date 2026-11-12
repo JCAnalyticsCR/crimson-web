@@ -43,7 +43,7 @@
   "tipo": "Parlantes",
   "descripcion": "- Diseno: portatil\n- Potencia: 5W RMS\n- Color: negro",
   "comercial": "Parlante Argom Rocksound · Bluetooth",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "patron": "inventado",
@@ -56,7 +56,7 @@
    "Color": "negro"
   },
   "comercial": "Parlante Argom Rocksound Mini · Bluetooth",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "patron": "inventado",
@@ -336,7 +336,7 @@
   "modelo": null,
   "tipo": "Accesorios",
   "comercial": "Kit de carcasa Zebra P1080390-600",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "patron": "tipo",
@@ -624,7 +624,7 @@
   "modelo": null,
   "tipo": "Iluminación",
   "comercial": "Bombillo inteligente Govee H6009",
-  "revisar": null
+  "revisar": "código del fabricante fuera del nombre"
  },
  {
   "patron": "ya_bien",
@@ -894,7 +894,7 @@
   "modelo": null,
   "tipo": "Power banks",
   "comercial": "Power bank inalámbrico Argom S15W · 15000 mAh",
-  "revisar": "color sin traducir"
+  "revisar": "color sin traducir, código del fabricante fuera del nombre"
  },
  {
   "patron": "v4",
@@ -922,5 +922,68 @@
   "tipo": "Cámara WiFi",
   "comercial": "Cámara TP-Link Tapo C425 · 4 MP",
   "revisar": "variante sin indicar (kit)"
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Router tp link load balance broadband router puertos WAN / LAN TL-R470T+ un",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router TP-Link Load Balance Broadband",
+  "revisar": "código del fabricante fuera del nombre"
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Lampara de pared govee gilde y light H6066 H6066101",
+  "marca": "Govee",
+  "modelo": null,
+  "tipo": "Iluminación",
+  "comercial": "Lámpara de pared Govee Gilde",
+  "revisar": "código del fabricante fuera del nombre"
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Afeitadora oraimo smart trimmer 3 precision OPC-TR14N",
+  "marca": "Oraimo",
+  "modelo": null,
+  "tipo": "Cuidado personal",
+  "comercial": "Afeitadora Oraimo Trimmer 3 Precision",
+  "revisar": "código del fabricante fuera del nombre"
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Switch ugreen CM218 HDMI bidireccional 2X1 4K 60HZ hdr 3D 50967",
+  "marca": "Ugreen",
+  "modelo": null,
+  "tipo": "Switch",
+  "comercial": "Switch HDMI Ugreen CM218",
+  "revisar": null
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Parlante xiaomi mi portable speaker 16W bluetooth 29693",
+  "marca": "Xiaomi",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante Xiaomi Mi Portable Speaker · 16 W · Bluetooth",
+  "revisar": null
+ },
+ {
+  "patron": "v5",
+  "proveedor": "UPS cdp LIUPR-656 600VA 300W UPS línea interactiva litio LIFEPO4 120VAC 6 tomas",
+  "marca": "CDP",
+  "modelo": null,
+  "tipo": "UPS",
+  "comercial": "UPS CDP LIUPR-656 · 600 VA",
+  "revisar": null
+ },
+ {
+  "patron": "v5",
+  "proveedor": "Grabadora DVR Hikvision DS-7208HGHI-M1 (c) 8CANALES 1920 × 1080 / 60HZ H.265",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Grabador DVR",
+  "comercial": "Grabador DVR Hikvision DS-7208HGHI-M1 · 8 canales",
+  "revisar": null
  }
 ]

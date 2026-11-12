@@ -1,4 +1,4 @@
-"""O3-03, reglas «nombre_v2» a «nombre_v4»: los patrones por los que las muestras reales no pasaron la revision.
+"""O3-03, reglas «nombre_v2» a «nombre_v5»: los patrones por los que las muestras reales no pasaron la revision.
 
 Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FICTICIOS que reproducen cada patron
 (misma forma que los del proveedor; codigos y numeros cambiados) y la salida esperada escrita a mano. Por patron:
@@ -20,6 +20,9 @@ Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FIC
   «Cámara IP/WiFi» solo si el nombre lo sostiene. El prefijo suelto se une si es inequivoco (tl WR941HP ->
   TL-WR941HP); si no, revision. Modelo de menos de 4 letras o numeros, terminado en «/», con un dato tecnico suelto
   (RJ45, 1080P, 2MPX) o con una palabra que no esta en el original: revision.
+- v5 (nombre_v5): un codigo de fabricante del original (letras y digitos, 4 o mas) que no esta en el nombre manda la
+  fila a revision («código del fabricante fuera del nombre»); no cuentan los de bodega (5 digitos o mas, -WST-, EAN)
+  ni los tecnicos (AC1200, 1080P, 4K, 10000MAH, 45W, H.265, 850NM, IP67, LIFEPO4).
 Cambiar la regla es cambiar esta tabla a conciencia (y volver a aprobar una muestra)."""
 
 import json
@@ -34,7 +37,7 @@ from app.services import product_names as pn
 from app.services.brands import canonical_brand
 
 TABLA = json.loads((Path(__file__).parent / "fixtures" / "nombres_comerciales_v2.json").read_text(encoding="utf-8"))
-PATRONES = {"inventado": 8, "restos": 12, "tipo": 16, "mayusculas": 4, "variante": 6, "ya_bien": 12, "analogica": 4, "v4": 10}
+PATRONES = {"inventado": 8, "restos": 12, "tipo": 16, "mayusculas": 4, "variante": 6, "ya_bien": 12, "analogica": 4, "v4": 10, "v5": 5}
 
 
 def _gen(row: dict) -> tuple[str | None, str | None]:
@@ -126,5 +129,17 @@ def test_lo_que_no_va_a_revision_pasa_la_validacion():
                 assert not re.search(r"(?<![\w.(-])(rj\d\d|\d{3,4}p|\d+(?:\.\d+)?mm|\d+mpx?)(?![\w-])|/$", out.split(" · ")[0], re.I), out
 
 
+def test_codigo_del_fabricante_siempre_en_lo_que_no_va_a_revision():
+    assert pn._maker_codes("Router tp link load balance TL-R470T+ un") == ["TL-R470T"]
+    assert pn._maker_codes("Router AC1200 AX3000 2.4GHZ 1080P 4K 10000MAH 45W H.265 850NM IP67 LIFEPO4 GUO-1780-WST-18650 7501234567890") == []
+    for tabla in (TABLA, json.loads((Path(__file__).parent / "fixtures" / "nombres_comerciales.json").read_text(encoding="utf-8"))):
+        for r in tabla:
+            out, flag = pn.commercial_name(r["proveedor"], brand=r["marca"], model=r["modelo"], shown_type=r["tipo"], specs=r.get("ficha"))
+            if out and not flag:
+                shown = re.sub(r"[^a-z0-9]", "", pn._fold(out))
+                clean = pn._LOT_V3.sub(" ", pn._clean_source(r["proveedor"]))
+                assert all(re.sub(r"[^a-z0-9]", "", pn._fold(c)) in shown for c in pn._maker_codes(clean)), out
+
+
 def test_la_regla_tiene_nombre_nuevo():
-    assert cd.GENERATORS["web_name"][0] == "nombre_v4"  # los lotes rechazados (nombre_v1 a v3) se distinguen
+    assert cd.GENERATORS["web_name"][0] == "nombre_v5"  # los lotes rechazados (nombre_v1 a v4) se distinguen

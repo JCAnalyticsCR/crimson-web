@@ -2,7 +2,7 @@
 
 Todas son reglas y plantillas sobre lo que el producto ya tiene escrito: ninguna llama a una IA ni a un servicio
 externo, y ninguna publica nada (solo proponen borradores que un administrador aprueba en «Contenido por aprobar»).
-- web_name (O3-03, «nombre_v4»): product_names.commercial_name, solo con el nombre original y la ficha aprobada (clave
+- web_name (O3-03, «nombre_v5»): product_names.commercial_name, solo con el nombre original y la ficha aprobada (clave
   exacta). nombre_v1 sacaba datos de la descripcion libre y fallo la revision de la muestra real: el lote nuevo se
   distingue por la regla.
 - web_specs (O3-05, «ficha_v1»): las viñetas «- Clave: valor» de la descripcion (sin rellenos) y lo que el nombre dice
@@ -54,7 +54,7 @@ def _type(p, ctx: cd.GenCtx):
     return (single, "tipo por categoria") if single else (None, None)
 
 
-cd.register("web_name", "nombre_v4", _name)
+cd.register("web_name", "nombre_v5", _name)
 cd.register("web_specs", "ficha_v1", _specs)
 cd.register("web_description", "descripcion_v1", _description)
 cd.register("web_type", "tipo_v1", _type)
