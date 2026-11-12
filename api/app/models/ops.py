@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, event
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -197,8 +197,25 @@ class Expense(TenantMixin, TimestampMixin, Base):
     recurrence_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     bank_instrument_id: Mapped[int | None] = mapped_column(ForeignKey("bank_instrument.id", name="fk_expense_bank_instrument"))
     check_number: Mapped[str | None] = mapped_column(String(20))
+    # pago real (reunion con la contadora 10/11): fecha en que salio la plata y numero de referencia del banco (SINPE,
+    # transferencia, voucher). Lo escribe «Marcar pagada» (services/expense_payment) junto con payment_method,
+    # bank_account_id y bank_instrument_id; «Desmarcar» lo limpia. Otros modulos leen paid_date con este nombre.
+    paid_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    payment_reference: Mapped[str | None] = mapped_column(String(120))
+    # condicion de venta que traia el XML del proveedor (contado | credito | otro). Solo una pista: el emisor a veces
+    # pone credito y se pago de contado o al reves, asi que nunca decide si esta pagado.
+    xml_condition: Mapped[str | None] = mapped_column(String(10))
 
     __table_args__ = (UniqueConstraint("tenant_id", "recurrence_id", "recurrence_date", name="uq_expense_recurrence_date"),)
+
+
+@event.listens_for(Expense, "before_insert")
+@event.listens_for(Expense, "before_update")
+def _paid_date_default(_mapper, _conn, e: Expense) -> None:
+    """Un gasto que nace o queda "pagado" por otro camino (planilla, comision, gasto creado desde el extracto, recurrencia
+    con estado pagado) sin fecha de pago toma la de la factura: paid_date nunca queda vacio en un gasto pagado."""
+    if e.status == "pagado" and e.paid_date is None:
+        e.paid_date = e.date
 
 
 # ---------- Recurrencias (plan 4): plantilla -> factura en la fecha programada ----------

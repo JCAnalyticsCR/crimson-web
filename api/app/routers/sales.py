@@ -920,6 +920,15 @@ def void_invoice(iid: int, p: Principal = Depends(require("sales", "anular")), d
 @router.post("/invoices/{iid}/payments", response_model=InvoiceOut, status_code=201)
 def pay_invoice(iid: int, data: PaymentIn, p: Principal = Depends(require("payments", "crear")), db: Session = Depends(get_db)):
     inv = _own(db, Invoice, iid, p.tenant.id, p)
+    # cuenta donde entro la plata (la conciliacion la cruza con el estado de cuenta): siempre de la misma empresa
+    if data.bank_account_id:
+        from ..models import BankAccount
+
+        ba = db.get(BankAccount, data.bank_account_id)
+        if ba is None or ba.tenant_id != p.tenant.id:
+            raise HTTPException(404, "Cuenta bancaria no encontrada")
+    if data.paid_at and data.paid_at > invoice_states.cr_today():
+        raise HTTPException(422, "La fecha del cobro no puede ser futura")
     # El vendedor registra "por_confirmar"; quien tiene payments.confirmar lo registra directo como confirmado.
     pay_status = "confirmado" if p.can("payments", "confirmar") else "por_confirmar"
     svc.add_payment(db, p.tenant.id, p.user.id, inv, data, payment_status=pay_status)
