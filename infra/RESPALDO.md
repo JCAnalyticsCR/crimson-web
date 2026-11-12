@@ -13,7 +13,7 @@ respaldo sirve. Un respaldo que nunca se restauró no es un respaldo: es una esp
 | Qué | Dónde vive hoy | Cómo se respalda |
 |---|---|---|
 | Base de datos (todas las tablas) | Postgres de Railway | `python -m app.tools.backup` (zip portable) y opcionalmente `pg_dump` |
-| Archivos (fotos, PDF, logos, comprobantes) | **Dentro de Postgres**, tabla `media`, columna `data` (bytea) | Van dentro del mismo zip (`blobs/media/...`) |
+| Archivos (fotos, PDF, logos, comprobantes) | Postgres (`media.data`, `storage = db`) o el Storage Bucket de Railway (`storage = s3`) | Van dentro del mismo zip (`blobs/media/...`); los del bucket los baja el respaldo (sección 8) |
 | Variables de entorno (`JWT_SECRET`, `DATABASE_URL`, llaves de correo, BCCR, ONVO) | Railway → Variables | A mano, en el gestor de contraseñas de la empresa. **Nunca** junto al respaldo |
 | Código | GitHub | Ya está versionado; el respaldo anota la migración de Alembic para saber con qué versión restaurar |
 
@@ -23,7 +23,7 @@ Notas importantes:
   bandeja de correo se guardan cifrados con una llave derivada de `JWT_SECRET`. Sin ese valor la base se
   restaura completa, pero esos secretos hay que volver a escribirlos en Ajustes.
 - Las **sesiones** (`refresh_token`) no se respaldan nunca: después de restaurar todos vuelven a iniciar sesión.
-- Si algún día los archivos salen de Postgres (a S3/R2 o a un volumen de Railway), ver la sección 8.
+- Los archivos que ya viven en el Storage Bucket: ver la sección 8 (el bucket no tiene versionado ni respaldo propio).
 
 ## 2. El archivo de respaldo
 
@@ -388,15 +388,69 @@ Se puede restaurar en una base vacía con la misma herramienta (los usuarios ten
 
 ## 8. Archivos (multimedia)
 
-**Hoy:** viven en Postgres (`media.data`). El respaldo los incluye y `media_index.csv` lista cada uno con
-su SHA-256, así que se puede comprobar uno por uno. La restauración verifica que cada archivo restaurado
-tenga el mismo hash.
+Cada fila de `media` dice dónde están sus bytes (`media.storage`):
 
-**Si se mueven a un bucket S3/R2:** activar versionado en el bucket, replicar a un segundo bucket en otro
-proveedor (`rclone sync origen: destino: --backup-dir` en el mismo cron) y respaldar la tabla `media` (que
-quedaría solo con la llave/URL) con `--sin-archivos`.
+| Estado | `storage` | `data` | Se lee de |
+|---|---|---|---|
+| en la base (lo de siempre) | `db` | con bytes | Postgres |
+| copiado y verificado | `s3` | con bytes | bucket (si falla, la base) |
+| liberado | `s3` | `NULL` | solo el bucket |
 
-**Si se mueven a un volumen de Railway:** los volúmenes no se copian solos fuera de Railway. Agregar al
-cron un `tar` del volumen cifrado con `age` y subido igual que el zip.
+**Cómo se respaldan los del bucket:** el respaldo diario los **baja del bucket y los mete en el mismo zip**
+(`blobs/media/<id>_data`), verificando el sha256 de su fila. El zip sigue siendo autosuficiente y se restaura igual
+que antes: la fila vuelve con sus bytes en la base y `storage = s3` (si el bucket existe se lee de allí; si no, de la
+base). Se eligió así porque el bucket de Railway **no tiene versionado, ni bloqueo, ni respaldo propio** (un objeto
+borrado no se recupera; un bucket borrado, solo durante 52 h): la copia fuera de Railway tiene que llevar los archivos.
+Consecuencia: el zip diario NO se achica (≈ 230 MB de archivos siguen yendo cifrados al destino); lo que se achica es
+Postgres, sus respaldos nativos de Railway y el `.pgdump`. El `.pgdump` **no** trae los archivos del bucket.
+
+- El servicio `respaldo` necesita las variables del bucket (`BUCKET`, `ENDPOINT`, `ACCESS_KEY_ID`,
+  `SECRET_ACCESS_KEY`, `REGION`) como referencias, igual que el api. `--revisar` dice si las ve.
+- Si un archivo del bucket no se pudo bajar o no coincide con su sha256, el respaldo **igual se cifra y se sube**, la
+  corrida termina en falla (código 3, paso "archivos del bucket") y llega el correo con los `media.id`.
+  `manifest.json` los lista en `media_problems` (id y motivo, sin nombres).
+- La descarga de datos de una empresa (Ajustes → Exportar) también baja los archivos del bucket.
+
+### 8.1 Traslado de la base al bucket (una vez)
+
+Código: `api/app/services/media_store.py` (dónde van y de dónde se leen), `api/app/services/bucket_s3.py` (cliente S3
+con Firma V4 sobre httpx, sin boto3) y `api/app/tools/media_al_bucket.py` (el guion). Variables:
+
+| Variable | Valor |
+|---|---|
+| `BUCKET`, `ENDPOINT`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `REGION` | referencias al bucket: `${{<bucket>.BUCKET}}`, etc. (también se aceptan `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) |
+| `MEDIA_STORAGE` | `db` (por defecto) o `s3`: dónde van los archivos **nuevos**. Sin las variables del bucket sigue en `db` |
+| `MEDIA_S3_PATH_STYLE` | solo `true` si la pestaña Credentials del bucket pide path-style |
+| `MEDIA_PUBLIC_REDIRECT` | `false` (por defecto): los públicos se entregan en streaming. `true`: 302 a URL prefirmada (1–2 h) |
+
+Orden (cada paso se puede parar y volver atrás):
+
+1. **Crear el bucket** en el mismo proyecto y región que Postgres. Enlazar las cinco variables como referencias en
+   **api, worker y respaldo** (el worker guarda los PDF del buzón de recepción y arma los correos con logo).
+   Todavía `MEDIA_STORAGE=db`: nada cambia.
+2. **Desplegar** este código (la migración `b7c4e1a9d302` solo agrega `media.storage` con valor `db` y deja
+   `media.data` admitir NULL: sin reescribir la tabla).
+3. `railway run --service api python -m app.tools.media_al_bucket simular` → cuenta archivos y bytes por estado y
+   prueba las credenciales (un HEAD; no escribe). Tiene que decir `Bucket: ok`.
+4. `MEDIA_STORAGE=s3` en api y worker → lo nuevo ya va al bucket. Probar: subir una foto en el panel, verla, y verla
+   en la tienda.
+5. `... media_al_bucket copiar` (lotes de 50, reanudable; se puede cortar y volver a correr). Sube, **relee** y compara
+   sha256 y tamaño; solo entonces marca `s3`. No borra nada de la base.
+6. **Verificar:** `simular` debe mostrar `pendiente 0`. Abrir fotos públicas y privadas al azar. Correr el respaldo
+   diario a mano (`railway cron run` del servicio `respaldo`) y confirmar `OK` y `archivos_del_bucket` en el resumen.
+7. `... media_al_bucket liberar` (vista previa) y luego `liberar --si` (confirma con HEAD que cada objeto está y mide
+   lo mismo; `--releer` para comparar el sha256 completo). Escribe un resumen `.json`.
+8. **Devolver el espacio:** `VACUUM FULL media;` (bloquea la tabla `media` mientras corre: en ventana, con la tienda
+   avisada; sin espacio libre en el volumen para la copia nueva, falla) o `pg_repack -t media` (sin bloqueo largo; hay
+   que instalar la extensión). Un `VACUUM` simple deja el espacio reutilizable pero no achica el volumen.
+
+**Volver atrás:** `MEDIA_STORAGE=db` y `... media_al_bucket revertir` (baja del bucket a la base las filas `s3`,
+verificando sha256; no borra los objetos). Bajar la migración se niega mientras haya filas sin bytes en la base.
+
+**Riesgos:** (a) si el bucket se cae, los archivos liberados dan 503 hasta que vuelva (lo copiado y no liberado sigue
+saliendo de la base); (b) una subida con el bucket caído queda en la base (`storage = db`) y la próxima corrida de
+`copiar` la lleva; (c) un objeto borrado a mano en el bucket solo vive en los respaldos diarios: el respaldo lo marca
+y avisa; (d) con `MEDIA_PUBLIC_REDIRECT=true` la imagen se cachea por la URL prefirmada (se renueva cada 1–2 h) y
+la respuesta del bucket no lleva la CSP propia: por eso no es el modo por defecto.
 
 En pruebas y desarrollo **no se descargan archivos reales de producción**: se usan datos inventados.

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, require
 from ..models import InvoicePaymentProof, Media
 from ..services import invoice_proofs as ip
+from ..services import media_store
 from ..services.documents import audit
 
 router = APIRouter(tags=["pagos"])
@@ -51,10 +52,9 @@ def proof_file(pid: int, p: Principal = Depends(require("payments", "ver")), db:
         raise HTTPException(404, "Comprobante no encontrado")
     audit(db, p.tenant.id, p.user.id, "view_proof", "invoice", pr.invoice_id, {"proof_id": pr.id}, ip=p.ip)
     db.commit()
-    return Response(
-        m.data,
-        media_type=m.content_type,
-        headers={
+    return media_store.response(
+        m,
+        {
             "Cache-Control": "private, no-store",
             "Content-Disposition": f'inline; filename="{m.filename}"',
             "Content-Security-Policy": "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",

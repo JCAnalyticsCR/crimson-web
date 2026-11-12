@@ -4,6 +4,7 @@ Reglas: tipo validado por firma de bytes (no por la extension ni el Content-Type
 (puede llevar scripts), tope de tamano, URL con llave aleatoria y cabeceras que impiden ejecutar contenido.
 Publico vs privado: ver services/media_access.py. Lo que sube el equipo desde levantamientos, OT, proyectos,
 contabilidad o tickets nace privado y solo se entrega con enlace firmado que vence.
+Donde quedan los bytes (base o Storage Bucket) y como se entregan: services/media_store.py.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import hashlib
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -22,6 +23,7 @@ from ..core.db import get_db
 from ..core.deps import Principal, get_principal
 from ..models import Media
 from ..services import media_access as ma
+from ..services import media_store
 from ..services.documents import audit
 
 router = APIRouter(tags=["multimedia"])
@@ -116,11 +118,11 @@ def save_media(
         content_type=kind,
         size=len(data),
         sha256=digest,
-        data=data,
         created_by=user_id,
         visibility=visibility,
         module=module if visibility == "private" else None,
     )
+    media_store.attach(m, data)  # base o bucket segun MEDIA_STORAGE (si el bucket falla, base)
     db.add(m)
     db.flush()
     info = {"type": kind, "size": len(data)}
@@ -215,10 +217,11 @@ def delete_media(mid: int, p: Principal = Depends(get_principal), db: Session = 
     db.delete(m)
     audit(db, p.tenant.id, p.user.id, "delete", "media", mid, ip=p.ip)
     db.commit()
+    media_store.forget(m)  # despues del commit: si la base fallo, el objeto sigue sirviendo
 
 
 @router.get("/media/f/{key}", tags=["publico"])
-def serve(key: str, e: int | None = None, s: str | None = None, db: Session = Depends(get_db)):
+def serve(key: str, request: Request, e: int | None = None, s: str | None = None, db: Session = Depends(get_db)):
     m = db.scalar(select(Media).where(Media.key == key))
     if not m:
         raise HTTPException(404, "Archivo no encontrado")
@@ -234,14 +237,18 @@ def serve(key: str, e: int | None = None, s: str | None = None, db: Session = De
         # nunca en caches compartidos; el navegador lo guarda a lo sumo hasta que vence la firma
         cache = f"private, max-age={max(0, min(int(e or 0) - int(time.time()), 3600))}"
     disp = "inline" if m.content_type.startswith("image/") else "attachment"
-    return Response(
-        m.data,
-        media_type=m.content_type,
-        headers={
-            "Cache-Control": cache,
-            "Content-Disposition": f'{disp}; filename="{m.filename}"',
-            "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-        },
-    )
+    headers = {
+        "Cache-Control": cache,
+        "Content-Disposition": f'{disp}; filename="{m.filename}"',
+        "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
+    if m.visibility != "private" and m.sha256:
+        # el contenido de una llave nunca cambia: el navegador que ya lo tiene no hace bajar nada (ni de la base ni del bucket)
+        etag = f'"{m.sha256}"'
+        if etag in (request.headers.get("if-none-match") or ""):
+            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": cache})
+        headers["ETag"] = etag
+    # privado: la firma ya se verifico arriba y se entrega en streaming; nunca con URL prefirmada del bucket
+    return media_store.response(m, headers, allow_redirect=m.visibility != "private")

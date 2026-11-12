@@ -6,6 +6,12 @@ Formato: un .zip con
   blobs/<tabla>/<pk>_<columna>   binarios (los archivos de multimedia viven en la tabla media como bytea)
   media_index.csv        lista legible de archivos (nombre, tipo, tamano, sha256)
 
+Archivos en el Storage Bucket (media.storage = "s3", sin bytes en la base): el respaldo los BAJA del bucket y los mete en
+el mismo blobs/media/<id>_data, verificando el sha256 de la fila. Asi el zip sigue siendo autosuficiente (el bucket de
+Railway no tiene versionado ni respaldo propio) y se restaura igual que antes: la fila vuelve con sus bytes en la base y
+storage "s3" (si el bucket existe se lee de alli; si no, de la base). Lo que no se pudo bajar o no coincide queda en
+manifest["media_problems"] (id y motivo, sin nombres) y el respaldo diario avisa.
+
 No depende de pg_dump: funciona igual sobre SQLite y Postgres, y se puede restaurar de uno a otro. Los valores se
 serializan de forma canonica (fechas en UTC sin zona, decimales sin ceros de mas, JSON con llaves ordenadas) para
 que el hash de una tabla sea el mismo antes y despues de restaurar, sin importar el motor.
@@ -297,6 +303,24 @@ def serialize_table(t: sa.Table, rows: Iterable[dict], columns: list[str], blobs
     return _table_doc(t, columns, out_rows), out_rows
 
 
+def _bucket_blob(r: dict) -> tuple[bytes | None, str | None]:
+    """Bytes de un archivo de multimedia que vive en el bucket: (bytes, None) o (None, motivo)."""
+    from . import media_store
+    from .bucket_s3 import S3Error
+
+    if not media_store.configured():
+        return None, "bucket sin configurar (BUCKET, ENDPOINT, ACCESS_KEY_ID, SECRET_ACCESS_KEY)"
+    try:
+        raw = media_store.fetch(r["tenant_id"], r["key"])
+    except (S3Error, ValueError) as e:
+        return None, f"bucket: {getattr(e, 'status', '')} {getattr(e, 'code', '') or type(e).__name__}".strip()
+    if r.get("size") is not None and len(raw) != r["size"]:
+        return None, "tamano distinto al de la fila"
+    if r.get("sha256") and sha(raw) != r["sha256"]:
+        return None, "sha256 distinto al de la fila"
+    return raw, None
+
+
 def write_backup(conn: Connection, metadata: sa.MetaData, dest, *, tenant=None, redact: bool = False, include_blobs: bool = True, dialect: str | None = None) -> dict:
     """Escribe el zip en dest (ruta o archivo binario abierto). Devuelve el manifest."""
     tid = tenant.id if tenant is not None else None
@@ -307,7 +331,8 @@ def write_backup(conn: Connection, metadata: sa.MetaData, dest, *, tenant=None, 
     files: dict[str, str] = {}
     manifest_tables: dict[str, dict] = {}
     media_rows = []
-    blob_count = blob_bytes = 0
+    blob_count = blob_bytes = from_bucket = 0
+    media_problems: list[dict] = []
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as z:
         for t in tables:
             if t.name not in rows_by_table:
@@ -325,6 +350,12 @@ def write_backup(conn: Connection, metadata: sa.MetaData, dest, *, tenant=None, 
                     rec = conn.execute(sa.select(*(t.c[c] for c in bcols)).where(cond)).one()
                     for c in bcols:
                         raw = rec._mapping[c]
+                        if raw is None and t.name == "media" and c == "data" and r.get("storage") == "s3":
+                            raw, motivo = _bucket_blob(r)
+                            if motivo:
+                                media_problems.append({"id": r.get("id"), "motivo": motivo})
+                            else:
+                                from_bucket += 1
                         if raw is None:
                             blobs[(key, c)] = (None, 0)
                             continue
@@ -365,6 +396,8 @@ def write_backup(conn: Connection, metadata: sa.MetaData, dest, *, tenant=None, 
             "skipped_tables": sorted(SKIP_TABLES - {"alembic_version"}),
             "tables": manifest_tables,
             "totals": {"tables": len(manifest_tables), "rows": sum(v["rows"] for v in manifest_tables.values()), "blobs": blob_count, "blob_bytes": blob_bytes},
+            "media_from_bucket": from_bucket,
+            "media_problems": media_problems,
             "files": files,
             "sha256": global_hash(files),
         }

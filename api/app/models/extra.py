@@ -11,7 +11,11 @@ from .base import TenantMixin, TimestampMixin
 
 # ---------- Multimedia: imagenes de productos, logo de tienda, adjuntos de gastos ----------
 class Media(TenantMixin, TimestampMixin, Base):
-    """Archivo guardado en Postgres (bytea). La URL publica usa una llave aleatoria, nunca el id secuencial."""
+    """Archivo de multimedia. La URL publica usa una llave aleatoria, nunca el id secuencial.
+
+    Los bytes viven en Postgres (data, storage="db") o en el Storage Bucket (storage="s3", objeto media/<empresa>/<key>,
+    ver services/media_store.py). Una fila "s3" con data todavia llena es una copia verificada que aun no se libero
+    (app/tools/media_al_bucket.py). Nadie lee data directo: services/media_store.read() / response()."""
 
     __tablename__ = "media"
 
@@ -21,7 +25,8 @@ class Media(TenantMixin, TimestampMixin, Base):
     content_type: Mapped[str] = mapped_column(String(80))
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
-    data: Mapped[bytes] = deferred(mapped_column(LargeBinary))
+    data: Mapped[bytes | None] = deferred(mapped_column(LargeBinary, nullable=True))
+    storage: Mapped[str] = mapped_column(String(4), default="db", server_default="db")  # db | s3
     created_by: Mapped[int | None] = mapped_column(ForeignKey("user.id"))
     # public: tienda, logo, eventos (URL abierta, como siempre). private: evidencia interna (levantamientos, OT,
     # proyectos, contabilidad, tickets); solo se sirve con enlace firmado de vida corta (services/media_access.py)

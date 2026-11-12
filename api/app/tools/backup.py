@@ -9,6 +9,7 @@
 
 Si la base es Postgres y `pg_dump` esta en el PATH, ademas deja al lado un volcado nativo (.pgdump, formato
 custom) salvo que se pida --sin-pg-dump. El .zip es el que sirve para cualquier motor; el .pgdump es el plan B.
+OJO: el .pgdump NO trae los archivos que viven en el Storage Bucket (media.storage = "s3"); el .zip si (los baja).
 Sale con codigo 0 y una linea "OK <ruta> sha256=<hash>" que un cron puede revisar.
 """
 
@@ -100,6 +101,10 @@ def main(argv: list[str] | None = None) -> int:
     engine.dispose()  # sin conexiones abiertas: el cron de respaldo diario tiene que terminar limpio
     tot = m["totals"]
     print(f"Respaldo: {tot['tables']} tablas, {tot['rows']} filas, {tot['blobs']} archivos ({tot['blob_bytes'] / 1_048_576:.1f} MB)")
+    if m.get("media_from_bucket") or m.get("media_problems"):
+        print(f"Archivos bajados del bucket: {m.get('media_from_bucket', 0)} · con problema: {len(m.get('media_problems') or [])}")
+    for x in (m.get("media_problems") or [])[:20]:
+        print(f"AVISO archivo media.id={x.get('id')} no entro al respaldo: {x.get('motivo')}", file=sys.stderr)
     print(f"Migracion: {', '.join(m['alembic_revisions']) or 'sin alembic_version'} - motor: {dialect}")
     if dialect == "postgresql" and not a.sin_pg_dump and not a.tenant:
         dump = pg_dump(url, out.with_suffix(".pgdump"))

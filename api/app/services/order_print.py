@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Media, Order, Tenant
+from . import media_store
 from . import store_orders as so
 
 _KEY = re.compile(r"/media/f/([A-Za-z0-9_\-]+)")
@@ -35,7 +36,8 @@ def logo_src(db: Session, t: Tenant) -> str | None:
         media = db.scalar(select(Media).where(Media.key == m.group(1), Media.tenant_id == t.id))
         if not media or not (media.content_type or "").startswith("image/") or (media.size or 0) > MAX_LOGO:
             return None
-        return f"data:{media.content_type};base64,{base64.b64encode(media.data).decode()}"
+        raw = media_store.read(media)  # base o bucket segun la fila
+        return f"data:{media.content_type};base64,{base64.b64encode(raw).decode()}" if raw else None
     return url if url.startswith("https://") else None
 
 

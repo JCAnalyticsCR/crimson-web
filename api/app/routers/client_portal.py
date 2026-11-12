@@ -37,7 +37,7 @@ from ..models import (
     TenantUser,
     User,
 )
-from ..services import invoice_states
+from ..services import invoice_states, media_store
 from ..services import sla as slasvc
 from ..services.client_access import invite_client
 from ..services.documents import audit
@@ -344,7 +344,8 @@ async def upload(file: UploadFile = File(...), p: Principal = Depends(need("tick
     digest = hashlib.sha256(data).hexdigest()
     same = db.scalar(select(Media).where(Media.tenant_id == p.tenant.id, Media.sha256 == digest, Media.created_by == p.user.id))
     if not same:
-        same = Media(tenant_id=p.tenant.id, key=secrets.token_urlsafe(18), filename="foto-portal", content_type=kind, size=len(data), sha256=digest, data=data, created_by=p.user.id)
+        same = Media(tenant_id=p.tenant.id, key=secrets.token_urlsafe(18), filename="foto-portal", content_type=kind, size=len(data), sha256=digest, created_by=p.user.id)
+        media_store.attach(same, data)
         db.add(same)
         db.flush()
         audit(db, p.tenant.id, p.user.id, "upload_portal", "media", same.id, {"type": kind, "size": len(data)}, ip=p.ip)

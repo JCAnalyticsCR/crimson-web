@@ -68,7 +68,7 @@ from ..models import (
 )
 from ..models.allies import COST_WAITING
 from ..services import allies as costsvc
-from ..services import ally_access, ally_pricing
+from ..services import ally_access, ally_pricing, media_store
 from ..services import media_access as ma
 from ..services import scope_items as scopesvc
 from ..services import sla as slasvc
@@ -2596,11 +2596,11 @@ async def media_subir(file: UploadFile = File(...), ctx: AllyCtx = Depends(need(
             content_type=kind,
             size=len(data),
             sha256=digest,
-            data=data,
             created_by=ctx.p.user.id,
             visibility="private",
             module="field",
         )
+        media_store.attach(m, data)
         db.add(m)
         db.flush()
         audit(db, ctx.p.tenant.id, ctx.p.user.id, "upload_aliado", "media", m.id, {"type": kind, "size": len(data)}, ip=ctx.p.ip)

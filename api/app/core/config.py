@@ -6,7 +6,7 @@ import logging
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,6 +80,27 @@ class Settings(BaseSettings):
     media_email_url_days: int = 30  # informes que viajan por correo: el cliente abre el correo dias despues
     # Tope de archivos (fotos y PDF) que puede subir cada empresa aliada desde su portal, en MB (se guardan en la base)
     ally_media_quota_mb: int = 1024
+
+    # ---------- Donde viven los bytes de multimedia (services/media_store.py) ----------
+    # db (por defecto, lo de siempre): media.data en Postgres. s3: los archivos NUEVOS van al Storage Bucket de Railway.
+    # Con MEDIA_STORAGE=s3 pero sin las cinco variables del bucket, sigue en db (y lo avisa en el log): nunca tumba el
+    # arranque. Leer del bucket lo decide cada fila (media.storage), no esta variable.
+    media_storage: Literal["db", "s3"] = "db"
+    # Nombres EXACTOS que publica un Railway Bucket (docs.railway.com/storage-buckets). En el api y el worker se crean
+    # como referencias: BUCKET=${{<bucket>.BUCKET}}, etc. Tambien se aceptan los nombres estandar del SDK de AWS.
+    media_s3_endpoint: str | None = Field(None, validation_alias=AliasChoices("ENDPOINT", "AWS_ENDPOINT_URL", "MEDIA_S3_ENDPOINT"))
+    media_s3_bucket: str | None = Field(None, validation_alias=AliasChoices("BUCKET", "MEDIA_S3_BUCKET"))
+    media_s3_access_key_id: str | None = Field(None, validation_alias=AliasChoices("ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID", "MEDIA_S3_ACCESS_KEY_ID"))
+    media_s3_secret_access_key: SecretStr | None = Field(
+        None, validation_alias=AliasChoices("SECRET_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY", "MEDIA_S3_SECRET_ACCESS_KEY")
+    )
+    media_s3_region: str = Field("auto", validation_alias=AliasChoices("REGION", "AWS_REGION", "AWS_DEFAULT_REGION", "MEDIA_S3_REGION"))
+    media_s3_path_style: bool = False  # solo si la pestana Credentials del bucket pide path-style (buckets viejos)
+    # Archivos PUBLICOS en el bucket: por defecto el api los entrega en streaming (mismas cabeceras y cache de siempre, RAM
+    # acotada a un bloque). True = 302 a una URL prefirmada de vida corta (sin egreso del api). Los privados SIEMPRE en
+    # streaming despues de la firma propia: nunca una URL prefirmada.
+    media_public_redirect: bool = False
+    media_presign_seconds: int = Field(3600, ge=300, le=6 * 3600)  # ventana de la URL prefirmada (vale entre 1 y 2 ventanas)
 
     # Integraciones (vacias = adaptadores en modo manual/sandbox)
     # ONVO por variable de entorno = respaldo de una sola empresa; lo normal es Ajustes -> Pasarelas (cifrado por empresa)

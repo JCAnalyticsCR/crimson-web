@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from ..core.config import settings
 from ..core.security import read_purpose_token, sign_purpose_token
 from ..models import Customer, EmailOutbox, Media, Order, Tenant
-from . import email_layout, store_inventory
+from . import email_layout, media_store, store_inventory
 from .documents import audit
 from .totals import d
 
@@ -1361,10 +1361,10 @@ def proof_media(db: Session, t: Tenant, data: bytes, filename: str | None) -> Me
             content_type=kind,
             size=len(data),
             sha256=digest,
-            data=data,
             visibility="private",
             module="sales",
         )
+        media_store.attach(m, data)
         db.add(m)
         db.flush()
     return m

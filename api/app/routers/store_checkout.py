@@ -35,7 +35,7 @@ from ..core.ratelimit import (
 )
 from ..models import Media, Order, OrderLine, Tenant
 from ..providers.payments import key_mode
-from ..services import cr_geo, email_check, onvo, store_history, store_inventory
+from ..services import cr_geo, email_check, media_store, onvo, store_history, store_inventory
 from ..services import inventory as invsvc
 from ..services import store_orders as so
 from ..services.documents import audit
@@ -401,7 +401,7 @@ def order_proof_file(slug: str, token: str, n: int, request: Request, db: Sessio
     headers = {**_PROOF_HEADERS, "Content-Disposition": f'inline; filename="{name}"'}
     if m.content_type != "application/pdf":
         headers["Content-Security-Policy"] = _PROOF_CSP_IMG
-    return Response(m.data, media_type=m.content_type, headers=headers)
+    return media_store.response(m, headers)
 
 
 @router.post("/public/store/{slug}/orders/{token}/card")
@@ -953,10 +953,9 @@ def proof_file(oid: int, mid: int, p: Principal = Depends(require("sales", "ver"
         raise HTTPException(404, "Comprobante no encontrado")
     audit(db, p.tenant.id, p.user.id, "view_proof", "order", o.id, {"media_id": mid}, ip=p.ip)
     db.commit()
-    return Response(
-        m.data,
-        media_type=m.content_type,
-        headers={
+    return media_store.response(
+        m,
+        {
             "Cache-Control": "private, no-store",
             "Content-Disposition": f'inline; filename="{m.filename}"',
             "Content-Security-Policy": "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",

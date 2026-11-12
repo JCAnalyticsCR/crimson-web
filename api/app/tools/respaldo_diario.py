@@ -6,7 +6,10 @@ Ver infra/RESPALDO.md seccion 4 (configuracion) y seccion 5 (prueba de restaurac
     python -m app.tools.respaldo_diario --probar-aviso   # manda un correo de prueba a RESPALDO_AVISO_A
 
 Pasos:
-1. app.tools.backup -> .zip temporal (toda la base, con archivos, sin pg_dump).
+1. app.tools.backup -> .zip temporal (toda la base, con archivos, sin pg_dump). Los archivos que viven en el Storage
+   Bucket (media.storage = "s3") se bajan del bucket y entran al mismo zip, verificados contra el sha256 de su fila:
+   este servicio necesita las variables del bucket (BUCKET, ENDPOINT, ACCESS_KEY_ID, SECRET_ACCESS_KEY, REGION). Si
+   alguno no se pudo bajar o no coincide, el respaldo igual se cifra y se sube, pero la corrida termina en falla y avisa.
 2. Verificacion: restaura ese .zip en una SQLite desechable y compara conteos y hashes (app.tools.restore). Con
    RESPALDO_VERIFICAR=hashes solo revisa los hashes del zip. Si la verificacion falla el respaldo cifrado IGUAL se sube
    (puede servir en Postgres) pero el proceso termina en falla y avisa.
@@ -318,6 +321,11 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
         herramienta("rclone")  # antes de leer la base: sin herramientas no se genera un zip que no se puede subir
         tmp = Path(tempfile.mkdtemp(prefix="crimson-respaldo-", dir=cfg.tmp))
         zip_path, m = respaldar(tmp, nombre)
+        problemas = m.get("media_problems") or []
+        if problemas:  # el bucket no tiene versionado ni respaldo propio: un archivo que falta aqui no esta en ningun lado
+            ids = ", ".join(str(x.get("id")) for x in problemas[:10]) + (" ..." if len(problemas) > 10 else "")
+            motivos = sorted({str(x.get("motivo")) for x in problemas})[:3]
+            fallos.append(Fallo(VERIFICACION, "archivos del bucket", f"{len(problemas)} archivos no entraron al respaldo (media.id {ids}): {'; '.join(motivos)}"))
         try:
             verificacion = verificar(zip_path, tmp, cfg.verificar)
         except Fallo as f:
@@ -347,6 +355,8 @@ def ejecutar(env: Mapping[str, str] | None = None, ahora: datetime | None = None
             "tablas": tot["tables"],
             "filas": tot["rows"],
             "archivos": tot["blobs"],
+            "archivos_del_bucket": m.get("media_from_bucket", 0),
+            "archivos_con_problema": len(m.get("media_problems") or []),
             "verificacion": verificacion,
             "destinatarios": len(cfg.recipients) + len(cfg.prueba),
             "llave_prueba": bool(cfg.prueba),
@@ -460,6 +470,10 @@ def revisar(env: Mapping[str, str]) -> int:
     prueba = f"{len(cfg.prueba)} de prueba (solo diario/)" if cfg.prueba else "sin llave de prueba"
     print(f"OK configuracion: destino {cfg.destino}, {len(cfg.recipients)} llaves publicas de custodios, {prueba}, verificacion {cfg.verificar}")
     print(f"   correo de falla: {avisos} · latido: {'si' if env.get('RESPALDO_PING_URL') else 'NO (sin RESPALDO_PING_URL)'}")
+    from ..services import media_store
+
+    bucket = "si" if media_store.configured() else "NO (sin BUCKET/ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY: obligatorio si hay archivos en el bucket)"
+    print(f"   bucket de multimedia: {bucket}")
     return OK
 
 

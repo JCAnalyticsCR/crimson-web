@@ -27,6 +27,7 @@ from ..models import Media, ReceivedDocument, ReceptionMessage, ReceptionRespons
 from ..providers.hacienda import xml44
 from ..services import hacienda_config as hc
 from ..services import identificador as idf
+from ..services import media_store
 from ..services import reception as rsvc
 from ..services import reception_proposal as rprop
 from ..services import reception_state as rstate
@@ -630,7 +631,8 @@ def _file(db: Session, doc: ReceivedDocument, which: str, last: ReceptionRespons
         if not doc.pdf_media_id:
             return None
         m = db.get(Media, doc.pdf_media_id)
-        return (bytes(m.data), "application/pdf") if m and m.data else None
+        raw = media_store.read(m) if m else None
+        return (raw, "application/pdf") if raw else None
     else:
         return None
     return (body.encode("utf-8"), "application/xml") if body else None
