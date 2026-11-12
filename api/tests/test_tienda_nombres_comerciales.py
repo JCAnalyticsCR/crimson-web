@@ -1,4 +1,4 @@
-"""O3-03: nombres comerciales por regla, aprobados por lote (regla «nombre_v3»; v1 y v2 no pasaron las muestras reales).
+"""O3-03: nombres comerciales por regla, aprobados por lote (regla «nombre_v4»; v1 a v3 no pasaron las muestras reales).
 
 Prueba dorada: 100 nombres con la forma de los del proveedor (marcas y modelos de fabricante; codigos internos y de
 lote ficticios) y la salida aprobada en tests/fixtures/nombres_comerciales.json. Cambiar la regla es cambiar esa
@@ -77,16 +77,16 @@ def test_lote_de_nombres_por_regla_con_repetidos_a_revision(client, auth, db_ses
         ids.append(p.id)
     db_session.commit()
     sim = client.post("/store/content/generate", json={"field": "web_name", "category_id": cat.id, "simulate": True}).json()
-    assert sim["rule"] == "nombre_v3"  # el lote nuevo se distingue de los rechazados (nombre_v1, nombre_v2)
+    assert sim["rule"] == "nombre_v4"  # el lote nuevo se distingue de los rechazados (nombre_v1 a v3)
     assert [r["after"] for r in sim["preview"]] == ["Parlante JBL Charge 6 · 45 W · Bluetooth · negro"] * 2 + [
         "Parlante JBL Go 4 · Bluetooth · rojo",
         "Parlante JBL Charge 6 · 45 W · Bluetooth · azul",
     ]
-    assert [r["flag"] for r in sim["preview"]] == ["nombre repetido", "nombre repetido", None, None]
+    assert [r["flag"] for r in sim["preview"]] == ["nombre repetido", "nombre repetido", "modelo dudoso", None]  # «Go 4»: 3 caracteres
     bid = client.post("/store/content/generate", json={"field": "web_name", "category_id": cat.id, "simulate": False}).json()["batch_id"]
     flags = {d.product_id: d.flag for d in db_session.scalars(select(CatalogDraft).where(CatalogDraft.batch_id == bid))}
-    assert flags == {ids[0]: "nombre repetido", ids[1]: "nombre repetido", ids[2]: None, ids[3]: None}
-    assert db_session.get(CatalogBatch, bid).rule == "nombre_v3"
+    assert flags == {ids[0]: "nombre repetido", ids[1]: "nombre repetido", ids[2]: "modelo dudoso", ids[3]: None}
+    assert db_session.get(CatalogBatch, bid).rule == "nombre_v4"
     db_session.expire_all()
     assert [db_session.get(Product, i).name for i in ids] == [d[1] for d in datos]  # el fiscal no cambia
     assert all(db_session.get(Product, i).web_name is None for i in ids)  # hasta que se apruebe y aplique

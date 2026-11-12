@@ -21,7 +21,7 @@
   "modelo": null,
   "tipo": "Parlantes",
   "comercial": "Parlante JBL Go 4 · Bluetooth · rojo",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Parlante JBL Xtreme 4 100W bluetooth camuflado JBLXTREME4CAMOAM",
@@ -165,7 +165,7 @@
   "modelo": "C6N",
   "tipo": "Cámara WiFi",
   "comercial": "Cámara WiFi EZVIZ C6N",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Camara WiFi EZVIZ H6c Pro 2K interior",
@@ -173,7 +173,7 @@
   "modelo": "H6C PRO",
   "tipo": "Cámara WiFi",
   "comercial": "Cámara WiFi EZVIZ H6C Pro · 2K",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Camara WiFi Ezviz C3TN exterior 1080p vision nocturna",
@@ -421,7 +421,7 @@
   "modelo": "U6-LITE",
   "tipo": "Punto de acceso WiFi",
   "comercial": "Punto de acceso Ubiquiti UniFi U6 · WiFi 6",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Repetidor de señal WiFi TP-Link RE205 AC750 doble banda",
@@ -437,7 +437,7 @@
   "modelo": "DECO X20",
   "tipo": "Repetidores",
   "comercial": "Sistema WiFi mesh TP-Link Deco X20 · paquete de 2",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Adaptador USB WiFi TP-Link Archer T2U Nano AC600",
@@ -445,7 +445,7 @@
   "modelo": "ARCHER T2U NANO",
   "tipo": "Adaptadores",
   "comercial": "Adaptador USB TP-Link Archer T2U Nano",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "UPS APC Back-UPS 600VA 330W 6 tomas BE600M1",
@@ -509,7 +509,7 @@
   "modelo": "DS-KIS204T",
   "tipo": "Videoportero",
   "comercial": "Videoportero Hikvision DS-KIS204T",
-  "revisar": null
+  "revisar": "variante sin indicar (kit)"
  },
  {
   "proveedor": "Timbre inteligente EZVIZ DB2C WiFi bateria",
@@ -533,7 +533,7 @@
   "modelo": "DS-K1T341AMF",
   "tipo": "Control de acceso",
   "comercial": "Control de acceso Hikvision DS-K1T341AMF",
-  "revisar": null
+  "revisar": "tipo deducido, no es el del nombre"
  },
  {
   "proveedor": "Cerradura magnetica Hikvision DS-K4H258S 280kg",
@@ -629,7 +629,7 @@
   "modelo": "T30",
   "tipo": "Enchufes inteligentes",
   "comercial": "Enchufe inteligente EZVIZ T30",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "proveedor": "Bombillo inteligente Tapo L530E WiFi multicolor",
@@ -653,7 +653,7 @@
   "modelo": null,
   "tipo": "Asistentes de voz",
   "comercial": "Asistente de voz Amazon Echo Dot 5ta · azul",
-  "revisar": "tipo por categoría"
+  "revisar": "tipo por categoría, modelo dudoso, prefijo suelto"
  },
  {
   "proveedor": "Amazon Fire TV Stick 4K control remoto por voz Alexa",

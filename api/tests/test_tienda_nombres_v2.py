@@ -1,4 +1,4 @@
-"""O3-03, reglas «nombre_v2» y «nombre_v3»: los patrones por los que las muestras reales no pasaron la revision.
+"""O3-03, reglas «nombre_v2» a «nombre_v4»: los patrones por los que las muestras reales no pasaron la revision.
 
 Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FICTICIOS que reproducen cada patron
 (misma forma que los del proveedor; codigos y numeros cambiados) y la salida esperada escrita a mano. Por patron:
@@ -15,6 +15,11 @@ Prueba dorada nueva: tests/fixtures/nombres_comerciales_v2.json, con nombres FIC
 - analogica (nombre_v3): THC-, DS-2CE, «4 en 1», HD-TVI, Turbo HD o AHD/CVI/CVBS hacen «Cámara analógica»; «luz
   blanca» no es un color y «(HILOOK std)» no es parte del codigo. En «tipo», el adjetivo que sigue a la marca va con
   el tipo («Afeitadora eléctrica Xiaomi») y el complemento se conserva («Monitor interior de videoportero»).
+- v4 (nombre_v4, conservadora): lo que NO va a revision tiene que estar bien siempre. Gana el sustantivo inicial
+  (Regleta, Botón sin contacto, Switch HDMI, Módulo SFP, Espumadera); un tipo que no sale del nombre va a revision.
+  «Cámara IP/WiFi» solo si el nombre lo sostiene. El prefijo suelto se une si es inequivoco (tl WR941HP ->
+  TL-WR941HP); si no, revision. Modelo de menos de 4 letras o numeros, terminado en «/», con un dato tecnico suelto
+  (RJ45, 1080P, 2MPX) o con una palabra que no esta en el original: revision.
 Cambiar la regla es cambiar esta tabla a conciencia (y volver a aprobar una muestra)."""
 
 import json
@@ -29,7 +34,7 @@ from app.services import product_names as pn
 from app.services.brands import canonical_brand
 
 TABLA = json.loads((Path(__file__).parent / "fixtures" / "nombres_comerciales_v2.json").read_text(encoding="utf-8"))
-PATRONES = {"inventado": 8, "restos": 12, "tipo": 16, "mayusculas": 4, "variante": 6, "ya_bien": 12, "analogica": 4}
+PATRONES = {"inventado": 8, "restos": 12, "tipo": 16, "mayusculas": 4, "variante": 6, "ya_bien": 12, "analogica": 4, "v4": 10}
 
 
 def _gen(row: dict) -> tuple[str | None, str | None]:
@@ -102,5 +107,24 @@ def test_dos_variantes_nunca_dan_el_mismo_nombre():
     assert len(names) == len(set(names)), [n for n in names if names.count(n) > 1]
 
 
+def test_validacion_final_del_modelo():
+    assert "modelo dudoso" in pn._check_line("Dome 2mpx/", "Camara logan dome 2MPX/ 1080P", None)
+    assert "dato técnico suelto" in pn._check_line("ISD-SMG1118L RJ45", "Detector de metal ISD-SMG1118L RJ45", None)
+    assert "dato técnico suelto" in pn._check_line("LX2 1080P", "Camara LX2 1080P", None)
+    assert "prefijo suelto" in pn._check_line("Tl WR941HP", "Router tl WR941HP", None)
+    assert "palabra sin origen" in pn._check_line("Archer ZZ9000", "Router archer AX10", None)
+    assert pn._check_line("TL-WR941HP", "Router tp link tl WR941HP", None) == []  # unido: el original lo permite
+    assert pn._check_line("Charge 5", "Parlante jbl charge 5", None) == []
+
+
+def test_lo_que_no_va_a_revision_pasa_la_validacion():
+    """ninguna fila propuesta sin motivo de revision trae un modelo dudoso ni un tipo que no sea el del nombre"""
+    for tabla in (TABLA, json.loads((Path(__file__).parent / "fixtures" / "nombres_comerciales.json").read_text(encoding="utf-8"))):
+        for r in tabla:
+            out, flag = pn.commercial_name(r["proveedor"], brand=r["marca"], model=r["modelo"], shown_type=r["tipo"], specs=r.get("ficha"))
+            if out and not flag:
+                assert not re.search(r"(?<![\w.(-])(rj\d\d|\d{3,4}p|\d+(?:\.\d+)?mm|\d+mpx?)(?![\w-])|/$", out.split(" · ")[0], re.I), out
+
+
 def test_la_regla_tiene_nombre_nuevo():
-    assert cd.GENERATORS["web_name"][0] == "nombre_v3"  # los lotes rechazados (nombre_v1, nombre_v2) se distinguen
+    assert cd.GENERATORS["web_name"][0] == "nombre_v4"  # los lotes rechazados (nombre_v1 a v3) se distinguen

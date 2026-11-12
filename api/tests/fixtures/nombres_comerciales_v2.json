@@ -164,7 +164,7 @@
   "marca": "EZVIZ",
   "modelo": null,
   "tipo": "Cámara WiFi",
-  "comercial": "Cámara WiFi EZVIZ CS-C6N-B · 2 MP",
+  "comercial": "Cámara EZVIZ CS-C6N-B · 2 MP",
   "revisar": null
  },
  {
@@ -218,7 +218,7 @@
   "marca": "Xiaomi",
   "modelo": null,
   "tipo": "Cámara WiFi",
-  "comercial": "Cámara WiFi Xiaomi C400 Pro",
+  "comercial": "Cámara Xiaomi C400 Pro",
   "revisar": null
  },
  {
@@ -246,7 +246,7 @@
   "modelo": null,
   "tipo": "Router",
   "comercial": "Router TP-Link Archer C54 · WiFi 5",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "patron": "tipo",
@@ -390,7 +390,7 @@
   "modelo": null,
   "tipo": "Dispositivos de Streaming",
   "comercial": "Dispositivo de streaming Amazon Fire TV Stick 4K Max",
-  "revisar": "tipo por categoría"
+  "revisar": "tipo por categoría, modelo dudoso, dato técnico suelto"
  },
  {
   "patron": "tipo",
@@ -516,7 +516,7 @@
   "modelo": null,
   "tipo": "Repetidores",
   "comercial": "Sistema WiFi mesh TP-Link Deco M4 · paquete de 3",
-  "revisar": null
+  "revisar": "modelo dudoso"
  },
  {
   "patron": "variante",
@@ -760,5 +760,167 @@
   "tipo": "Alarma",
   "comercial": "Sirena exterior Hikvision DS-PS1-E-WB",
   "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Router tp link tl WR940HP 2.4 GHz N450 high power puertos LAN / WAN",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router TP-Link TL-WR940HP",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Router cudy wr WR1300 1.0 AC1200 doble banda",
+  "marca": "Cudy",
+  "modelo": null,
+  "tipo": "Router",
+  "comercial": "Router Cudy Wr WR1300 · WiFi 5",
+  "revisar": "prefijo suelto"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Cámara de seguridad logan bullet 2MPX/ 1080P 3.6MM LX2BBNR",
+  "marca": "Logan",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara Logan LX2BBNR · 2 MP",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Cámara de seguridad logan dome X1/ 1080P",
+  "marca": "Logan",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara Logan",
+  "revisar": "sin modelo"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Cámara de seguridad Hikvision IP 4MP bullet DWDR IP67 DS-2CD1043G0-I(4mm)",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Cámara IP",
+  "comercial": "Cámara IP Hikvision DS-2CD1043G0-I(4mm) · 4 MP",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Detector de metal Hikvision ISD-SMG2118L RJ45",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Control de acceso",
+  "comercial": "Detector de metal Hikvision ISD-SMG2118L",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Regleta APC AP9570 8 tomas 3 m pdu básico 1U para rack",
+  "marca": "APC",
+  "modelo": null,
+  "tipo": "Gabinete",
+  "comercial": "Regleta APC AP9570",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Terminal Hikvision DS-K1T342MX reconocimiento facial",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Control de acceso",
+  "comercial": "Control de acceso Hikvision DS-K1T342MX",
+  "revisar": "tipo deducido, no es el del nombre"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Botón sin contacto Hikvision DS-K7P08(O-NEU) distancia de 5 a 15 cm",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Control de acceso",
+  "comercial": "Botón sin contacto Hikvision DS-K7P08",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Switch Nova FAA39215001C switch HDMI 3 puertos 4K 30HZ con control remoto",
+  "marca": "Nova",
+  "modelo": null,
+  "tipo": "Switch",
+  "comercial": "Switch HDMI Nova FAA39215001C · 3 puertos",
+  "revisar": "termina en código"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Módulo SFP Hikvision HK-SFP-1.25G-20-1550-DF 1 puerto lc duplex 1.25G",
+  "marca": "Hikvision",
+  "modelo": null,
+  "tipo": "Switches",
+  "comercial": "Módulo SFP Hikvision HK-SFP-1.25G-20-1550-DF",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Espumadera winning star ST-7563 silicona / nylon LS-1655-WST-38870",
+  "marca": "Winning Star",
+  "modelo": null,
+  "tipo": "Electrodomésticos",
+  "comercial": "Espumadera Winning Star ST-7563",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Parlante jbl go 3 4W bluetooth JBLGO3REDOAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Go 3 · 4 W · Bluetooth · rojo",
+  "revisar": "modelo dudoso"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "UPS smartbitt online 2KVA/1800W 120V SBOL2KT-1",
+  "marca": "Smartbitt",
+  "modelo": null,
+  "tipo": "UPS",
+  "comercial": "UPS Smartbitt SBOL2KT-1",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Power bank argom inalámbrico S15W 15000MAH aluminum black ARG-PB-1160BK",
+  "marca": "Argom",
+  "modelo": null,
+  "tipo": "Power banks",
+  "comercial": "Power bank inalámbrico Argom S15W · 15000 mAh",
+  "revisar": "color sin traducir"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Parlante jbl flip 7 bluetooth a prueba de agua JBLFLIP7SQUADAM",
+  "marca": "JBL",
+  "modelo": null,
+  "tipo": "Parlantes",
+  "comercial": "Parlante JBL Flip 7 · Bluetooth",
+  "revisar": "variante en el código"
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Micrófono maono inalámbrico 60HZ WM650 C3",
+  "marca": "Maono",
+  "modelo": null,
+  "tipo": "Micrófonos",
+  "comercial": "Micrófono inalámbrico Maono WM650 C3",
+  "revisar": null
+ },
+ {
+  "patron": "v4",
+  "proveedor": "Cámara tp link tapo C425 kit(us) 2K 4MP starlight con panel solar",
+  "marca": "TP-Link",
+  "modelo": null,
+  "tipo": "Cámara WiFi",
+  "comercial": "Cámara TP-Link Tapo C425 · 4 MP",
+  "revisar": "variante sin indicar (kit)"
  }
 ]

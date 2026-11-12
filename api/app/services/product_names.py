@@ -107,7 +107,7 @@ def tidy(name: str | None) -> str:
     return (out[:1].upper() + out[1:])[:200] if out else raw
 
 
-# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v3»)
+# ---------------------------------------------------------------- nombre comercial (O3-03, regla «nombre_v4»)
 # Regla: [Tipo] [Marca oficial] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color].
 # Solo con lo que ya dice el nombre original: el tipo es el sustantivo con que empieza, el modelo es el codigo real y
 # los datos, el color y el paquete se copian si estan escritos (el color tambien del codigo del fabricante: BLU, GRY).
@@ -155,6 +155,7 @@ _STOP = {
     "rojo", "roja", "gris", "verde", "rosado", "rosada", "morado", "amarillo", "camuflado", "dorado", "plateado", "vision", "nocturna",
     "colorvu", "acusense", "turbo", "varifocal", "pan", "tilt", "kit", "reconocimiento", "facial", "gigabit", "techo", "acero", "bolsa",
     "unidades", "pulgadas", "canales", "canal", "puertos", "camaras", "lite", "ir", "full", "smart", "inteligente", "multicolor", "rgb",
+    "dome", "online", "offline", "interactiva",
 }  # fmt: skip
 UNIT_WORDS = {"canales", "canal", "ch", "puertos", "pulgadas", "unidades", "camaras", "m", "metros", "w", "mp", "tb", "gb", "va", "kg", "a", "v", "mm", "horas", "h"}
 SUBLINE = re.compile(r"\b(tapo|deco|archer|unifi)\s+([a-z0-9-]*\d[a-z0-9-]*)", re.I)
@@ -206,7 +207,8 @@ V2_LEADS: tuple[tuple[str, str], ...] = (
     ("camara de seguridad wifi", "Cámara WiFi"), ("camara de seguridad ip", "Cámara IP"), ("camara de seguridad", "Cámara"),
     ("camara de vigilancia", "Cámara"), ("grabadora nvr", "Grabador NVR"), ("grabador nvr", "Grabador NVR"),
     ("grabadora dvr", "Grabador DVR"), ("grabador dvr", "Grabador DVR"), ("grabadora xvr", "Grabador XVR"), ("grabador xvr", "Grabador XVR"),
-    ("hd interno", "Disco duro"), ("hd externo", "Disco duro externo"),
+    ("hd interno", "Disco duro"), ("hd externo", "Disco duro externo"), ("modulo sfp", "Módulo SFP"), ("switch hdmi", "Switch HDMI"),
+    ("sistema wifi", "Sistema WiFi"),
 )  # fmt: skip
 # sustantivos que abren un nombre fuera de seguridad y redes (cocina, cuidado personal, energia, iluminacion...)
 NOUNS = {
@@ -218,8 +220,9 @@ NOUNS = {
     "supresor": "Supresor", "amplificador": "Amplificador", "barra": "Barra", "lampara": "Lámpara", "reflector": "Reflector",
     "estuche": "Estuche", "funda": "Funda", "carcasa": "Carcasa", "base": "Base", "control": "Control", "tarjeta": "Tarjeta",
     "impresora": "Impresora", "tableta": "Tableta", "reloj": "Reloj", "pulsera": "Pulsera", "antena": "Antena",
+    "regleta": "Regleta", "boton": "Botón", "modulo": "Módulo", "espumadera": "Espumadera", "pinza": "Pinza", "rallador": "Rallador",
 }  # fmt: skip
-_DE = {"de", "del"}
+_DE = {"de", "del", "sin"}  # «Detector de humo», «Botón sin contacto»
 _ADJ_END = ("ico", "ica", "icos", "icas", "ado", "ada", "ido", "ida", "ente", "ble", "al", "ivo", "iva", "era", "ero", "oso", "osa", "ante")
 _NOT_ADJ = {"recargable", "profesional", "original", "nuevo", "nueva", "portatil", "general", "digital", "total", "lateral"}
 _ADJ_PLACE = {"interior", "exterior"}  # «Monitor interior de videoportero»: sin ellos se lee como otro equipo
@@ -227,8 +230,8 @@ _ADJ_PLACE = {"interior", "exterior"}  # «Monitor interior de videoportero»: s
 _ADJ_AFTER_BRAND = ("ico", "ica", "icos", "icas", "ble", "ente")  # no «-ada»: «omada» es una linea
 # camara analogica: el prefijo del modelo (HiLook THC-, Hikvision DS-2CE) o el texto lo dice
 _ANALOG = re.compile(r"(?<![\w-])i?(?:thc-|ds-2ce)|\b4 en 1\b|\bhd-?tvi\b|\bturbo hd\b|\b(?:ahd|cvi|cvbs)\b|\banalog", re.I)
-# marcas de lote del proveedor pegadas al codigo: «(HILOOK std)», «(AM-STD)», «(Mul)»
-_LOT_V3 = re.compile(r"\((?:hilook|hik|ezviz)?[\s-]*(?:am-|o-)?std\)|\((?:hilook|mul)\)", re.I)
+# marcas de lote del proveedor pegadas al codigo: «(HILOOK std)», «(AM-STD)», «(Mul)», «(O-NEU)»
+_LOT_V3 = re.compile(r"\((?:hilook|hik|ezviz)?[\s-]*(?:am-|o-)?std\)|\((?:hilook|mul)\)|\(o-[a-z]{2,4}\)", re.I)
 _WIFI_TYPES = ("Router", "Punto de acceso", "Repetidor WiFi", "Sistema WiFi mesh", "Adaptador USB")
 _REDUNDANT_WIFI = {"inalambrico", "inalambrica", "wireless"}
 # lo que va detras de la marca y no es la linea ni el modelo: se salta (rasgos) o corta (region, bandas, codecs)
@@ -237,11 +240,21 @@ _REGION_SUFFIX = re.compile(r"(?:-(?:us|eu|un|au|la|uk)|\((?:us|eu|un|au|la|uk)\
 LINE_SKIP = {"led", "rgb", "rgbic", "rgbicww", "rgbww", "tws", "smart"}
 LINE_AFTER_CODE = {"pro", "max", "plus", "mini", "ultra", "nano", "select", "outdoor", "air", "x", "se", "neo", "go"}
 LINE_CASE = {"partybox": "PartyBox", "freepods": "FreePods", "powercore": "PowerCore", "smartshaver": "SmartShaver", "deathadder": "DeathAdder"}
-_UNIT = r"(?:w|mp|tb|gb|mb|mah|ah|va|v|vdc|vac|mm|cm|m|mts|p|k|ch|hz|ghz|mhz|mbps|gbps|kg|g|a|l|u|pulg)"
+_UNIT = r"(?:w|mp|mpx|tb|gb|mb|mah|ah|va|kva|v|vdc|vac|mm|cm|m|mts|p|k|ch|hz|ghz|mhz|mbps|gbps|kg|g|a|l|u|pulg)"
+# siglas tecnicas: si quedan sueltas en la linea o el modelo, el nombre va a revision (RJ45, IP, 1080P, 3.6MM, 2MPX)
+TECH = {"rj45", "rj11", "ip", "poe", "poe+", "usb", "hdmi", "lan", "wan", "wifi", "wi-fi", "led", "rgb", "rgbic", "hd", "fhd", "uhd", "ir",
+        "sfp", "utp", "ftp", "dwdr", "wdr", "lcd", "avr", "ac", "dc", "vac", "vdc", "sata", "nvr", "dvr", "xvr", "cmos", "gbe"}  # fmt: skip
+# prefijos de codigo que el proveedor separa del resto («tp link tl WR941HP» -> TL-WR941HP)
+CODE_PREFIX = {"tl": "TL", "ds": "DS", "cs": "CS", "hs": "HS"}
+# palabras cortas que si pueden ir antes de un codigo (no son un prefijo suelto)
+SHORT_OK = {"pro", "max", "mini", "air", "plus", "ax", "mi", "go", "x", "se", "neo", "lt"}
 _DATUM = re.compile(rf"\d+(?:[.,]\d+)?{_UNIT}")
-_CODE = re.compile(r"[A-Za-z0-9]+(?:[-/][A-Za-z0-9+]+)*(?:\([A-Za-z0-9.\-]+\))?")
+_CODE = re.compile(r"[A-Za-z0-9]+(?:[-/][A-Za-z0-9+]+(?:\.\d+[A-Za-z0-9]*)?)*(?:\([A-Za-z0-9.\-]+\))?")
 _PACK = re.compile(r"\(?\b(\d{1,2})\s*-?\s*pack\b\)?|\bpaquete de (\d{1,2})\b", re.I)
-_CODE_COLOR = re.compile(r"[A-Z]{2,}[A-Z0-9]*?(BLACK|BLUE|WHITE|BLK|BLU|WHT|GRY|RED|GRN|PNK|CAMO)(?:[A-Z]{2})?")
+_CODE_COLOR = re.compile(r"[A-Z]{2,}[A-Z0-9]*?(BLACK|BLUE|WHITE|BLK|BLU|WHT|GRY|RED|GRN|PNK|CAMO)(?:[A-Z]{2,3})?")
+# color o variante que el generador no traduce: si esta en el original y no en el nombre, va a revision
+COLORS_EN = {"black", "white", "blue", "red", "gray", "grey", "pink", "green", "purple", "silver", "gold", "orange", "yellow"}
+_CODE_VARIANT = re.compile(r"[A-Z]{2,}[A-Z0-9]*?(SQUAD|TEAL|PURPLE|ORANGE|SILVER|GOLD|PINK)(?:[A-Z]{2,3})?")
 CODE_COLORS = {"BLK": "negro", "BLACK": "negro", "BLU": "azul", "BLUE": "azul", "WHT": "blanco", "WHITE": "blanco", "GRY": "gris",
                "RED": "rojo", "GRN": "verde", "PNK": "rosado", "CAMO": "camuflado"}  # fmt: skip
 # datos que pueden venir de la ficha aprobada: solo con la clave exacta y del tipo que calza. Nunca color, PoE ni potencia.
@@ -363,6 +376,7 @@ def _nice_v2(tok: str, code: bool) -> str:
 def _line_v2(words: list[str], shouting_src: bool, limit: int = 3) -> list[str]:
     """la linea y el modelo que siguen a la marca, hasta el primer dato: «charge 5 40W» -> Charge 5,
     «archer VR400 2.4 GHz» -> Archer VR400, «LT500D-AU 2.0 5GHZ» -> LT500D, «C320WS eu» -> C320WS"""
+    words = list(words)
     out: list[str] = []
     has_code = False
     for i, w in enumerate(words):
@@ -377,8 +391,11 @@ def _line_v2(words: list[str], shouting_src: bool, limit: int = 3) -> list[str]:
         nxt = _fold(words[i + 1]).strip(",.;:()") if i + 1 < len(words) else ""
         if f in LINE_SKIP:
             continue
-        if f in REGIONS or f in _STOP:
+        if f in REGIONS or f in _STOP or f in TECH or re.fullmatch(r"ip[x\d]\d|rj\d\d", f):
             break
+        if f in CODE_PREFIX and i + 1 < len(words) and _is_code(words[i + 1].strip(",;:")) and not words[i + 1].startswith("-"):
+            words[i + 1] = f"{CODE_PREFIX[f]}-{words[i + 1]}"  # «tl WR941HP» -> TL-WR941HP (el original lo dice asi)
+            continue
         k_name = re.fullmatch(r"[2-8]k", f) and nxt.isalpha() and nxt not in _STOP  # «4K Select» es nombre; «2K interior», dato
         if not k_name and _datum(raw, nxt):
             break
@@ -403,7 +420,13 @@ def _first_code(words: list[str]) -> str | None:
             return None
         raw = _REGION_SUFFIX.sub("", raw) if len(raw) > 4 else raw
         nxt = _fold(words[i + 1]).strip(",.;:()") if i + 1 < len(words) else ""
-        if _is_code(raw) and not _datum(raw, nxt) and not re.fullmatch(r"\d+-?ch|[2-8]k", _fold(raw)):
+        f = _fold(raw)
+        if f in TECH or re.fullmatch(r"ip[x\d]\d|rj\d\d|\d+-?ch|[2-8]k", f):
+            continue
+        if _is_code(raw) and not _datum(raw, nxt):
+            tail = words[i + 1].strip(",.;:") if i + 1 < len(words) else ""
+            if _is_code(tail) and len(re.sub(r"[^A-Za-z0-9]", "", tail)) <= 3:
+                return f"{_nice_v2(raw, True)} {tail.upper()}"  # «WM600 C2»: el codigo corto pegado es parte del modelo
             return _nice_v2(raw, True)
     return None
 
@@ -440,7 +463,7 @@ def _attrs(family: str, text: str, tipo: str = "", specs: dict | None = None) ->
         "powerbank": (r"(?<![\d.])(\d{4,5})\s?mah\b", "{} mAh"),
     }
     if family == "camara":
-        find(r"(?<![\d.])(\d{1,2}(?:[.,]\d)?)\s?mp\b", "{} MP")
+        find(r"(?<![\d.])(\d{1,2}(?:[.,]\d)?)\s?mpx?\b", "{} MP")
         if not out and (m := re.search(r"\b([2-8])k\b", f)):
             out.append(f"{m.group(1)}K")
         for word, label in (("colorvu", "ColorVu"), ("acusense", "AcuSense"), ("full color", "Full Color"), (" ptz ", "PTZ"), (" poe ", "PoE"), ("wifi", "WiFi"), ("wi-fi", "WiFi")):
@@ -497,6 +520,47 @@ def _color(text: str) -> str | None:
     return None
 
 
+def _camera_evidence(disp: str, clean: str) -> bool:
+    """el tipo mostrado de camara se usa solo si el nombre lo dice"""
+    f = " " + _fold(clean) + " "
+    return {
+        "Cámara IP": bool(re.search(r"\bip\b|(?<![\w-])i?ds-2c[dv]|(?<![\w-])ipc-", f)),
+        "Cámara WiFi": bool(re.search(r"wi-?fi|inalambric", f)),
+        "Cámara PTZ": " ptz " in f,
+        "Cámara analógica": bool(_ANALOG.search(f) or " turbo " in f),
+    }.get(disp, False)
+
+
+def _alnum(s: str) -> int:
+    return len(re.sub(r"[^A-Za-z0-9]", "", s))
+
+
+def _check_line(line: str, name: str, model_s: str | None) -> list[str]:
+    """Validacion final de la linea y el modelo (lo unico del nombre que no sale de una tabla): lo dudoso va a revision.
+    - el modelo (el codigo mas largo o, sin codigo, la linea entera) tiene menos de 4 letras o numeros, o termina en «/»;
+    - queda un prefijo suelto de 1 a 3 letras pegado al codigo («Tl WR941HP»);
+    - queda una sigla o un dato tecnico suelto (RJ45, IP, 1080P, 3.6MM, 2MPX);
+    - una palabra no esta en el nombre original."""
+    if not line:
+        return []
+    out: list[str] = []
+    toks = line.split()
+    codes = [t for t in toks if _is_code(t)]
+    model_tok = max(codes, key=_alnum) if codes else line
+    if _alnum(model_tok) < 4 or any(t.endswith("/") for t in toks):
+        out.append("modelo dudoso")
+    src = re.sub(r"[^a-z0-9]", "", _fold(name))
+    for i, t in enumerate(toks):
+        f = _fold(t)
+        if f in TECH or _datum(t, "") or re.fullmatch(r"ip[x\d]\d|rj\d\d|\d+p", f):
+            out.append("dato técnico suelto")
+        if re.fullmatch(r"[a-z]{1,3}", f) and f not in SHORT_OK and i + 1 < len(toks) and _is_code(toks[i + 1]):
+            out.append("prefijo suelto")
+        if re.sub(r"[^a-z0-9]", "", f) not in src:
+            out.append("modelo sin origen en el nombre" if t == model_s or t in (model_s or "").split() else "palabra sin origen")
+    return list(dict.fromkeys(out))
+
+
 def _pack(text: str) -> str | None:
     m = _PACK.search(text)
     n = m and (m.group(1) or m.group(2))
@@ -514,7 +578,7 @@ def _singular_v2(label: str | None) -> str | None:
 def commercial_name(
     name: str, *, brand: str | None, model: str | None, shown_type: str | None, description: str | None = None, specs: dict | None = None
 ) -> tuple[str | None, str | None]:
-    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v3»:
+    """(nombre comercial o None, motivo para revisarlo o None). Regla «nombre_v4»:
     [Tipo] [Marca] [linea o modelo] · [1 o 2 datos de la familia] · [paquete] · [color]
     - Tipo: el sustantivo con que empieza el nombre (Grabadora -> Grabador, sin «de seguridad»); si no lo hay, el tipo
       mostrado de seguridad y redes; si tampoco, la categoria en singular y a revision («tipo por categoría»). Sin tipo
@@ -533,12 +597,15 @@ def commercial_name(
     tipo, short, rest = _type_v2(_PACK.sub(" ", clean), marca)
     disp = TYPE_FROM_DISPLAY.get(shown_type or "")
     from_name = tipo is not None
+    deduced = False
     if tipo is None:
-        tipo = disp
-    elif tipo == "Cámara" and disp and disp.startswith("Cámara"):
-        tipo = short = disp
+        tipo, deduced = disp, disp is not None
+    elif tipo == "Cámara" and disp and disp.startswith("Cámara") and _camera_evidence(disp, clean):
+        tipo = short = disp  # «Cámara IP» solo si el nombre lo sostiene (IP, DS-2CD...); 1080P o 3.6MM no dicen que sea IP
     if tipo in ("Cámara", "Cámara IP") and _ANALOG.search(clean):
         tipo = short = "Cámara analógica"  # THC-, DS-2CE, «4 en 1», HD-TVI, Turbo HD, AHD/CVI/CVBS
+    if tipo == "Switch" and re.search(r"\bhdmi\b", _fold(clean)):
+        tipo = short = "Switch HDMI"  # «Switch Nova ... switch HDMI 5 puertos»
     by_category = False
     if tipo is None:
         tipo = _singular_v2(shown_type)
@@ -572,6 +639,8 @@ def commercial_name(
         line = model_s or ""
     if by_category:
         flags.append("tipo por categoría")
+    if deduced:
+        flags.append("tipo deducido, no es el del nombre")
     if not marca:
         flags.append("sin marca")
     if not line:
@@ -595,6 +664,14 @@ def commercial_name(
     last = head.split()[-1]
     if "-" not in last and len(last) >= 8 and _is_code(last) and last != model_s:
         flags.append("termina en código")
+    flags += [r for r in _check_line(line, name, model_s) if r not in flags]
+    line_f = set(_fold(line).split())
+    if _color(name) is None and any(w in COLORS_EN and w not in line_f for w in _fold(name).replace("/", " ").split()):
+        flags.append("color sin traducir")  # «aluminum black»: el original trae color y el nombre no lo lleva
+    if any(_CODE_VARIANT.fullmatch(t.strip(",.;:()")) for t in name.split()):
+        flags.append("variante en el código")  # JBLCHARGE6SQUADAM
+    if re.search(r"\bkit\b", _fold(name)) and "kit" not in _fold(out):
+        flags.append("variante sin indicar (kit)")  # «Tapo C410 kit ... con panel solar» no es solo la camara
     return out[:120], (", ".join(flags) or None)
 
 
