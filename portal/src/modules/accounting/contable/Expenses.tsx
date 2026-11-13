@@ -11,6 +11,7 @@ import { Dropzone } from "../../../ui/MediaPicker";
 import { VerArchivo } from "../../../ui/VerArchivo";
 import { FYGARO, IVA_CONDITIONS } from "../hacienda";
 import { hoyCR } from "../../../lib/fechaCR";
+import { MarkPaidModal, PAY_METHODS, PAY_STATE, UnmarkModal, type PayItem } from "./MarcarPagada";
 
 type Named = { id: number; name: string };
 type Instrument = { id: number; kind: "chequera" | "tarjeta_debito"; name: string; last4: string | null; next_check: number | null; active: boolean };
@@ -21,13 +22,19 @@ export type Exp = {
   reference: string | null; status: string; attachment_url: string | null; notes: string | null; payment_method: string | null; purchase_type: string; due_date: string | null;
   origin: string; received_document_id: number | null; hacienda?: { tone: string; label: string; detail: string | null; clave?: string | null } | null; recurrence_id: number | null; bank_instrument_id: number | null; check_number: string | null; locked: boolean;
   from_commission?: boolean;
+  // pago (reunion con la contadora 10/11): pendiente | pagado | anterior (antes del corte con Fygaro) | anulado
+  pay_state: string; paid_date: string | null; payment_reference: string | null; xml_condition: string | null; pay_hint: string | null;
 };
 type Sum = { count: number; total_crc: string; tax_crc: string; credit_crc: string };
 type Res = { rows: (string | number)[][]; totals: { resultado: string } };
 const ORIGIN: Record<string, string> = { xml: "XML", recurrente: "Recurrente", banco: "Banco", planilla: "Planilla", manual: "Manual" };
 const PAY = [["", "—"], ["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["sinpe", "SINPE"], ["cheque", "Cheque"], ["otro", "Otro"]];
 const blank = { category_id: "", supplier_id: "", attachment_url: "", description: "", date: new Date().toISOString().slice(0, 10), currency: "CRC", fx_rate: "", subtotal: "", tax_rate: "13", iva_credit: "credito", tax_credit_amount: "", bank_account_id: "", bank_instrument_id: "", check_number: "", payment_method: "", purchase_type: "contado", due_date: "", notes: "", reference: "", status: "registrado" };
-type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null; from_commission?: boolean; hacienda?: Exp["hacienda"] };
+type Edit = typeof blank & { id?: number; locked?: boolean; received_document_id?: number | null; from_commission?: boolean; hacienda?: Exp["hacienda"]; src?: Exp };
+const METHOD: Record<string, string> = Object.fromEntries(PAY_METHODS);
+const payItem = (e: Exp): PayItem => ({ id: e.id, description: e.description, supplier_name: e.supplier_name, date: e.date, currency: e.currency, amount: e.total });
+// se marca pagado lo pendiente y lo anterior al corte (a mano); nunca una nota de credito (monto negativo)
+const payable = (e: Exp) => (e.pay_state === "pendiente" || e.pay_state === "anterior") && Number(e.total) > 0;
 const month = () => new Date().toISOString().slice(0, 7);
 // la tarjeta del mes solo lleva el resumen (el estado de resultados completo esta en Reportes)
 const RESUMEN = ["Ventas netas", "Gastos", "Utilidad neta (antes del impuesto sobre la renta)"];
@@ -41,8 +48,11 @@ export default function Expenses() {
   const [cats, setCats] = useState<Named[]>([]);
   const [sups, setSups] = useState<Named[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [f, setF] = useState({ month: month(), category_id: "", supplier_id: "", origin: "", currency: "", status: "", q: "" });
+  const [f, setF] = useState({ month: month(), category_id: "", supplier_id: "", origin: "", currency: "", status: "", pay_state: "", q: "" });
   const [edit, setEdit] = useState<Edit | null>(null);
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [marking, setMarking] = useState<PayItem[] | null>(null);
+  const [unmark, setUnmark] = useState<Exp | null>(null);
 
   const qs = () => {
     const p = new URLSearchParams({ limit: "500" });
@@ -50,10 +60,11 @@ export default function Expenses() {
       const [y, m] = f.month.split("-").map(Number);
       p.set("from", `${f.month}-01`); p.set("to", new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10));
     }
-    for (const k of ["category_id", "supplier_id", "origin", "currency", "status", "q"] as const) if (f[k]) p.set(k, f[k]);
+    for (const k of ["category_id", "supplier_id", "origin", "currency", "status", "pay_state", "q"] as const) if (f[k]) p.set(k, f[k]);
     return p.toString();
   };
   const load = () => {
+    setSel(new Set());
     api<Exp[]>(`/expenses?${qs()}`).then(setRows).catch((e) => toast(e.message, "bad"));
     api<Sum>(`/expenses/summary?${qs()}`).then(setSum).catch(() => setSum(null));
   };
@@ -72,15 +83,15 @@ export default function Expenses() {
   }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const open = (e: Exp) => setEdit({
-    id: e.id, locked: e.locked, from_commission: !!e.from_commission, received_document_id: e.received_document_id, hacienda: e.hacienda, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
+    src: e, id: e.id, locked: e.locked, from_commission: !!e.from_commission, received_document_id: e.received_document_id, hacienda: e.hacienda, category_id: String(e.category_id ?? ""), supplier_id: String(e.supplier_id ?? ""), attachment_url: e.attachment_url || "",
     description: e.description, date: e.date, currency: e.currency, fx_rate: String(Number(e.fx_rate)), subtotal: String(Number(e.subtotal)), tax_rate: String(Number(e.tax_rate)), iva_credit: e.iva_credit,
     tax_credit_amount: e.tax_credit_amount === null ? "" : String(Number(e.tax_credit_amount)), bank_account_id: String(e.bank_account_id ?? ""), bank_instrument_id: String(e.bank_instrument_id ?? ""),
     check_number: e.check_number || "", payment_method: e.payment_method || "", purchase_type: e.purchase_type || "contado", due_date: e.due_date || "", notes: e.notes || "", reference: e.reference || "", status: e.status,
   });
   const save = async () => {
     if (!edit) return;
-    const { id, locked, received_document_id, from_commission, hacienda, ...b } = edit;
-    void received_document_id; void from_commission; void hacienda;
+    const { id, locked, received_document_id, from_commission, hacienda, src, ...b } = edit;
+    void received_document_id; void from_commission; void hacienda; void src;
     const body = {
       ...b,
       category_id: b.category_id ? Number(b.category_id) : null, supplier_id: b.supplier_id ? Number(b.supplier_id) : null, bank_account_id: b.bank_account_id ? Number(b.bank_account_id) : null,
@@ -97,11 +108,27 @@ export default function Expenses() {
   const ins = acct?.instruments.find((i) => String(i.id) === edit?.bank_instrument_id);
   const sub = Number(edit?.subtotal || 0), iva = sub * Number(edit?.tax_rate || 0) / 100;
   const ro = !!edit?.locked || !!edit?.from_commission;
+  const canPay = allows("accounting.editar");
+  const selRows = (rows || []).filter((e) => sel.has(e.id));
+  const toggle = (id: number) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const acctName = (id: number | null) => accounts.find((a) => a.id === id)?.name;
+  const payCell = (e: Exp) => {
+    const st = PAY_STATE[e.pay_state] || { label: e.pay_state, tone: "muted" as const };
+    return (
+      <div style={{ display: "grid", gap: 4, justifyItems: "start" }}>
+        <span className={`badge badge--${st.tone}`}>{e.pay_state === "pagado" && e.paid_date ? `Pagada ${fmtDate(e.paid_date)}` : st.label}</span>
+        {e.pay_state === "pagado" && (e.payment_method || e.payment_reference) && <span className="meta" style={{ textTransform: "none" }}>{[e.payment_method && (METHOD[e.payment_method] || e.payment_method), acctName(e.bank_account_id), e.payment_reference && `ref. ${e.payment_reference}`].filter(Boolean).join(" · ")}</span>}
+        {e.pay_state === "pendiente" && e.pay_hint && <span className="meta" style={{ textTransform: "none" }} title="La condición del XML es solo una pista: el emisor a veces se equivoca. El pago se confirma con «Marcar pagada».">{e.pay_hint}</span>}
+        {e.pay_state === "pendiente" && e.due_date && <span className="meta" style={{ textTransform: "none" }}>Vence {fmtDate(e.due_date)}</span>}
+      </div>
+    );
+  };
 
   return (
     <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <AuthLink path="/reports/gastos?format=xlsx" download="gastos.xlsx"><Icon d={I.reports} />Excel</AuthLink>
+        {canPay && sel.size > 0 && <button className="btn btn--soft btn--sm" onClick={() => setMarking(selRows.map(payItem))}>Marcar pagadas ({sel.size})</button>}
         {allows("accounting.crear") && <button className="btn btn--crimson btn--sm" onClick={() => setEdit({ ...blank, date: hoyCR() })}><Icon d={I.plus} />Registrar gasto</button>}
       </div>
       <div className="kpi">
@@ -115,30 +142,36 @@ export default function Expenses() {
         <select className="select" style={{ maxWidth: 150 }} value={f.origin} onChange={(e) => setF({ ...f, origin: e.target.value })}><option value="">Todo origen</option>{Object.entries(ORIGIN).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         <select className="select" style={{ maxWidth: 110 }} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}><option value="">Divisa</option><option>CRC</option><option>USD</option></select>
         <select className="select" style={{ maxWidth: 140 }} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">Todo estado</option><option value="registrado">Registrado</option><option value="pagado">Pagado</option><option value="anulado">Anulado</option></select>
+        <select className="select" style={{ maxWidth: 190 }} value={f.pay_state} onChange={(e) => setF({ ...f, pay_state: e.target.value })} title="Pendientes: desde el corte con Fygaro (1/11/2026)"><option value="">Pagadas y pendientes</option><option value="pendiente">Pendientes de pago</option><option value="pagado">Pagadas</option><option value="anterior">Antes del corte</option></select>
         <input className="input" style={{ maxWidth: 220 }} placeholder="Buscar" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
       </div>
       <Card flush>
         {rows === null ? <Loading /> : rows.length === 0 ? <Empty hint="Registrá compras y gastos; los que vienen de una factura electrónica aceptada se crean solos." /> : (
           <div style={{ overflowX: "auto" }}>
-            <table className="table"><thead><tr><th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Categoría</th><th>Origen</th><th>Divisa</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">IVA acreditable</th><th className="num">Total</th><th className="num">Total ₡</th><th>Estado</th><th /></tr></thead>
+            <table className="table table--stack"><thead><tr><th>{canPay && <input type="checkbox" aria-label="Elegir todas las pendientes" checked={rows.some(payable) && rows.filter(payable).every((e) => sel.has(e.id))} onChange={(ev) => setSel(ev.target.checked ? new Set(rows.filter(payable).map((e) => e.id)) : new Set())} />}</th><th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Categoría</th><th>Origen</th><th>Divisa</th><th className="num">Subtotal</th><th className="num">IVA</th><th className="num">IVA acreditable</th><th className="num">Total</th><th className="num">Total ₡</th><th>Pago</th><th>Estado</th><th /></tr></thead>
               <tbody>{rows.map((e) => <tr key={e.id}>
-                <td className="muted">{fmtDate(e.date)}</td>
-                <td>{e.supplier_name || "—"}</td>
-                <td style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <VerArchivo url={e.attachment_url} caption={e.description} className="badge badge--info badge--btn">Adjunto</VerArchivo>}</td>
-                <td className="muted">{e.category || "—"}</td>
-                <td><span className={`badge ${e.origin === "xml" ? "badge--ok" : "badge--muted"}`}>{ORIGIN[e.origin] || e.origin}</span></td>
-                <td className="muted">{e.currency}</td>
-                <td className="num money">{fmtMoney(e.subtotal, e.currency)}</td>
-                <td className="num money">{fmtMoney(e.tax_amount, e.currency)}</td>
-                <td className="num money">{e.tax_credit_amount === null ? "prorrata" : fmtMoney(e.tax_credit_amount, e.currency)}</td>
-                <td className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td>
-                <td className="num money">{fmtMoney(e.total_crc)}</td>
-                <td><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} />
+                <td data-label="Elegir">{canPay && payable(e) && <input type="checkbox" aria-label={`Elegir ${e.description}`} checked={sel.has(e.id)} onChange={() => toggle(e.id)} />}</td>
+                <td data-label="Fecha" className="muted">{fmtDate(e.date)}</td>
+                <td data-label="Proveedor">{e.supplier_name || "—"}</td>
+                <td data-label="Descripción" className="stack-full" style={{ fontWeight: 600 }}>{e.description}{e.attachment_url && <VerArchivo url={e.attachment_url} caption={e.description} className="badge badge--info badge--btn">Adjunto</VerArchivo>}</td>
+                <td data-label="Categoría" className="muted">{e.category || "—"}</td>
+                <td data-label="Origen"><span className={`badge ${e.origin === "xml" ? "badge--ok" : "badge--muted"}`}>{ORIGIN[e.origin] || e.origin}</span></td>
+                <td data-label="Divisa" className="muted">{e.currency}</td>
+                <td data-label="Subtotal" className="num money">{fmtMoney(e.subtotal, e.currency)}</td>
+                <td data-label="IVA" className="num money">{fmtMoney(e.tax_amount, e.currency)}</td>
+                <td data-label="IVA acreditable" className="num money">{e.tax_credit_amount === null ? "prorrata" : fmtMoney(e.tax_credit_amount, e.currency)}</td>
+                <td data-label="Total" className="num money" style={{ fontWeight: 700 }}>{fmtMoney(e.total, e.currency)}</td>
+                <td data-label="Total ₡" className="num money">{fmtMoney(e.total_crc)}</td>
+                <td data-label="Pago">{payCell(e)}</td>
+                <td data-label="Estado"><Badge status={e.status === "registrado" ? "creado" : e.status === "pagado" ? "pagada" : "anulada"} />
                   {/* ante Hacienda: la factura del proveedor y su respuesta (de eso depende el credito de IVA) */}
                   {e.hacienda
                     ? <div title={e.hacienda.detail || undefined} style={{ marginTop: 4 }}><span className={`badge badge--${e.hacienda.tone}`} style={{ whiteSpace: "normal", textAlign: "left" }}>{e.hacienda.label}</span></div>
                     : <div className="meta" style={{ marginTop: 4, textTransform: "none" }} title="Gasto sin factura electrónica del proveedor: no tiene comprobante ante Hacienda ni crédito de IVA por XML">Sin factura electrónica</div>}</td>
-                <td className="num"><button className="btn btn--ghost btn--sm" onClick={() => open(e)}>Ver</button></td>
+                <td className="num stack-actions">
+                  {canPay && payable(e) && <button className="btn btn--soft btn--sm" onClick={() => setMarking([payItem(e)])}>Marcar pagada</button>}
+                  <button className="btn btn--ghost btn--sm" onClick={() => open(e)}>Ver</button>
+                </td>
               </tr>)}</tbody></table>
           </div>
         )}
@@ -186,9 +219,24 @@ export default function Expenses() {
             <Field label="Cuenta"><select className="select" value={edit.bank_account_id} onChange={(e) => setEdit({ ...edit, bank_account_id: e.target.value, bank_instrument_id: "" })}><option value="">—</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.currency}</option>)}</select></Field>
             {acct && acct.instruments.length > 0 && <Field label="Chequera o tarjeta"><select className="select" value={edit.bank_instrument_id} onChange={(e) => setEdit({ ...edit, bank_instrument_id: e.target.value })}><option value="">—</option>{acct.instruments.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.kind === "chequera" ? `Chequera ${i.name}` : `Tarjeta ${i.name} ····${i.last4}`}</option>)}</select></Field>}
             {ins?.kind === "chequera" && <Field label="Número de cheque" hint={ins.next_check ? `Siguiente: ${ins.next_check}` : undefined}><input className="input input--mono" value={edit.check_number} onChange={(e) => setEdit({ ...edit, check_number: e.target.value })} /></Field>}
-            <Field label="Estado"><select className="select" disabled={!!edit.from_commission} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="registrado">Registrado</option><option value="pagado">Pagado</option><option value="anulado">Anulado</option></select></Field>
+            {/* el pago se marca con «Marcar pagada» (fecha, medio, cuenta, referencia); "Pagado" a mano solo para lo que ya
+                estaba pagado o una nota de credito recibida (se compensa, no se paga) */}
+            <Field label="Estado"><select className="select" disabled={!!edit.from_commission || edit.src?.status === "pagado"} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="registrado">Registrado</option>{(edit.status === "pagado" || Number(edit.subtotal) < 0) && <option value="pagado">Pagado</option>}<option value="anulado">Anulado</option></select></Field>
             {!ro && <Field label="Referencia" hint="Factura del proveedor, clave…"><input className="input" value={edit.reference} onChange={(e) => setEdit({ ...edit, reference: e.target.value })} /></Field>}
           </div>
+          {edit.src && (
+            <div className="acc-warn" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
+              <div style={{ minWidth: 0 }}>
+                {edit.src.pay_state === "pagado"
+                  ? <>Pagada el <b>{fmtDate(edit.src.paid_date)}</b>{edit.src.payment_method && <> · {METHOD[edit.src.payment_method] || edit.src.payment_method}</>}{acctName(edit.src.bank_account_id) && <> · {acctName(edit.src.bank_account_id)}</>}{edit.src.payment_reference && <> · ref. <span className="mono">{edit.src.payment_reference}</span></>}</>
+                  : edit.src.pay_state === "pendiente" ? <>Pendiente de pago{edit.src.pay_hint && <span className="muted"> · {edit.src.pay_hint} (solo una pista)</span>}</>
+                  : edit.src.pay_state === "anterior" ? <>Anterior al corte con Fygaro (1/11/2026): no aparece como pendiente.</>
+                  : <>Anulado.</>}
+              </div>
+              {canPay && payable(edit.src) && <button className="btn btn--soft btn--sm" onClick={() => { const s = edit.src!; setEdit(null); setMarking([payItem(s)]); }}>Marcar pagada</button>}
+              {canPay && edit.src.pay_state === "pagado" && !edit.from_commission && <button className="btn btn--ghost btn--sm" onClick={() => { const s = edit.src!; setEdit(null); setUnmark(s); }}>Desmarcar pago</button>}
+            </div>
+          )}
           <Field label="Notas"><textarea className="textarea" value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
           <Field label="Comprobante adjunto" hint="Foto o PDF de la factura del proveedor.">
             {edit.attachment_url
@@ -197,6 +245,8 @@ export default function Expenses() {
           </Field>
         </Modal>
       )}
+      {marking && <MarkPaidModal items={marking} accounts={accounts} toast={toast} onClose={() => setMarking(null)} onDone={load} />}
+      {unmark && <UnmarkModal expenseId={unmark.id} label={unmark.description} toast={toast} onClose={() => setUnmark(null)} onDone={load} />}
     </>
   );
 }
