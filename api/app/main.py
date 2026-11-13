@@ -60,6 +60,7 @@ from .routers import (
     warranties,
     webhooks,
 )
+from .routers import bank_books as bank_books_router
 from .routers import bitacora as bitacora_router
 from .routers import cartera as cartera_router
 from .routers import fiscal_queue as fiscal_queue_router
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(public_quotes_router.router)  # aceptacion en linea (ventas etapa 3)
     app.include_router(payroll.router)
     app.include_router(banking.router)
+    app.include_router(bank_books_router.router)  # saldos, libro, estados de cuenta y conciliacion (contadora 10/11)
     app.include_router(events.router)
     app.include_router(events.pub)
     app.include_router(pos.router)

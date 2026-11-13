@@ -17,7 +17,9 @@ class BankAccount(TenantMixin, Base):
     number: Mapped[str | None] = mapped_column(String(60))  # IBAN / referencia
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     opening_balance: Mapped[float] = mapped_column(Numeric(16, 2), default=0)
-    opening_date: Mapped[date | None] = mapped_column(Date)
+    opening_date: Mapped[date | None] = mapped_column(Date)  # fecha de corte: el saldo inicial es el de ese dia
+    # banco | caja. La unica caja activa de una divisa recibe los cobros y pagos en efectivo sin cuenta asignada.
+    kind: Mapped[str] = mapped_column(String(8), default="banco", server_default="banco")
 
 
 class BankInstrument(TenantMixin, Base):

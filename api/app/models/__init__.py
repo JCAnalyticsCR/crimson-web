@@ -12,6 +12,7 @@ from .accounting import (
     expense_cat_role,
 )
 from .allies import AllyAgreement, AllyCompany, AllyCostRequest, AllyParticipation, AllyProductPrice, AllySharedNote, ScopeItem
+from .bank_books import BankMovement, BankStatementImport
 from .base import TenantMixin, TimestampMixin
 from .catalog import Category, CategorySlugAlias, Product, ProductPriceHistory, ProductTax, Supplier, Tax
 from .catalog_content import CatalogBatch, CatalogDraft
@@ -135,6 +136,8 @@ __all__ = [
     "InvoiceLine",
     "BankAccount",
     "BankInstrument",
+    "BankMovement",
+    "BankStatementImport",
     "FiscalProfile",
     "FiscalActivity",
     "FiscalCredential",
