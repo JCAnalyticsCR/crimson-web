@@ -1,5 +1,5 @@
 /* Contabilidad en tres partes (R9): Facturas (los papeles: lo que llega y lo que respondemos), Contable (el dinero:
-   gastos, recurrentes, categorias, proveedores, bancos) y Tributario (lo que se declara). Orden = el camino de un
+   gastos, recurrentes, categorias, proveedores, bancos, cuentas por pagar y resultados) y Tributario (lo que se declara). Orden = el camino de un
    comprobante. Cada parte tiene sus sub-pestanas y el contenido va en <Outlet />. */
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
@@ -9,7 +9,7 @@ import "./accounting.css";
 
 const PARTS = [
   { key: "facturas", to: "/contabilidad/facturas", label: "Facturas", hint: "Lo que llega de los proveedores y lo que respondemos a Hacienda" },
-  { key: "contable", to: "/contabilidad/contable", label: "Contable", hint: "El dinero: gastos, recurrentes, categorías, proveedores y bancos" },
+  { key: "contable", to: "/contabilidad/contable", label: "Contable", hint: "El dinero: gastos, categorías, proveedores, bancos y el resultado del mes" },
   { key: "tributario", to: "/contabilidad/tributario", label: "Tributario", hint: "Lo que se declara: IVA del mes, plazos, rechazos y reportes" },
   { key: "quickbooks", to: "/contabilidad/quickbooks", label: "QuickBooks", hint: "Asientos de diario listos para importar en QuickBooks Online" },
 ] as const;
@@ -28,6 +28,7 @@ const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
     { to: "/contabilidad/contable/proveedores", label: "Proveedores" },
     { to: "/contabilidad/contable/bancos", label: "Bancos" },
     { to: "/contabilidad/contable/cuentas-por-pagar", label: "Cuentas por pagar" },
+    { to: "/contabilidad/contable/resultados", label: "Resultados" },
   ],
   tributario: [{ to: "/contabilidad/tributario", label: "Panel del mes", end: true }],
   quickbooks: [{ to: "/contabilidad/quickbooks", label: "Asientos QBO", end: true }],
