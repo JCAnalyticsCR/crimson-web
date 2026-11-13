@@ -90,3 +90,28 @@ def test_requieren_accion_solo_con_demanda(client, auth, db_session):
     assert rows[a["id"]]["estado"] == "agotado" and rows[a["id"]]["alerta"] is False
     assert rows[b["id"]]["alerta"] is True
     assert [x["id"] for x in client.get("/store/inventory", params={"estado": "alertas"}).json()["items"]] == [b["id"]]
+
+
+def test_filtros_sin_categorias_vacias_y_marca_oficial(client, auth, db_session):
+    from app.models import Category
+
+    tid = auth["tenant"]["id"]
+    fam = Category(tenant_id=tid, name="Familia AUD")
+    db_session.add(fam)
+    db_session.flush()
+    sub = Category(tenant_id=tid, name="Sub AUD", parent_id=fam.id)
+    vacia = Category(tenant_id=tid, name="Vacia AUD")
+    db_session.add_all([sub, vacia])
+    db_session.flush()
+    a = _prod(client, "AUD-TPL1", price=1500)
+    b = _prod(client, "AUD-TPL2", price=1500)
+    for pid, br in ((a["id"], "Tp Link"), (b["id"], "TP-Link")):
+        pr = db_session.get(Product, pid)
+        pr.brand, pr.category_id = br, sub.id
+    db_session.commit()
+    f = client.get("/products/meta/filters").json()
+    names = [c["name"] for c in f["categories"]]
+    assert "Familia AUD › Sub AUD" in names and "Familia AUD" in names and "Vacia AUD" not in names
+    assert f["brands"].count("TP-Link") == 1 and "Tp Link" not in f["brands"]
+    got = {x["code"] for x in client.get("/products", params={"brand": "TP-Link", "limit": 50}).json()["items"]}
+    assert {"AUD-TPL1", "AUD-TPL2"} <= got

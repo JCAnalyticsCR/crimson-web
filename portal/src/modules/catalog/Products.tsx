@@ -278,8 +278,8 @@ export default function Products({ tabs }: { tabs?: ReactNode } = {}) {
         )}
         {itemsSt === null ? <Loading /> : items.length === 0 ? <><Empty hint="Nada con esos filtros. Pruebe limpiarlos o cree el producto." />{q.trim().length >= 3 && <div style={{ padding: "0 18px 18px" }}><EnProveedor q={q.trim()} onCreated={() => load()} /></div>}</> : (
           <>
-          {/* Telefono (pedido 21/10): tarjetas con la foto grande del producto en vez de la tabla ancha, donde la
-              miniatura de 36 px quedaba fuera de vista al deslizar. La tabla sigue igual en tablet y escritorio. */}
+          {/* Telefono y tablet (pedido 21/10; tablet desde la auditoria 10/11): tarjetas con la foto del producto en vez de la tabla ancha, donde la
+              miniatura de 36 px quedaba fuera de vista al deslizar. La tabla queda para escritorio. */}
           <ul className="prd-cards">{items.map((p) => (
             <li key={p.id} className="prd-card">
               {cotiza && <input type="checkbox" className="prd-card__sel" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} />}

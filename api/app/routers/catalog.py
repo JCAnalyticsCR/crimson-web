@@ -365,7 +365,11 @@ def products(
     if category_id:
         stmt = stmt.where(Product.category_id == category_id)
     if brand:
-        stmt = stmt.where(Product.brand == brand)
+        # el filtro ofrece la grafia oficial: incluye las otras formas de la misma marca («Tp Link» = «TP-Link»)
+        from ..services.brands import brand_key
+
+        raws = [x for x in db.scalars(select(Product.brand).where(Product.tenant_id == p.tenant.id, Product.brand.is_not(None)).distinct()) if brand_key(x) == brand_key(brand)]
+        stmt = stmt.where(Product.brand.in_(raws or [brand]))
     if supplier_id:
         stmt = stmt.where(Product.supplier_id == supplier_id)
     if web is not None:
@@ -407,12 +411,36 @@ def product_filters(p: Principal = Depends(require("catalog", "ver")), db: Sessi
         .select_from(Product)
         .where(Product.tenant_id == p.tenant.id, Product.active, or_(Product.cabys_code.is_(None), Product.cabys_code == ""))
     )
+    # auditoria de inventarios (10/11): el filtro ofrecia categorias vacias de la migracion (Redes junto a Redes y
+    # conectividad, Seguridad y acceso...), marcas con dos grafias y todos los proveedores de contabilidad. Ahora:
+    # - marcas en su grafia oficial, sin repetir;
+    # - categorias con productos activos (directos o en sus subcategorias), con la ruta «Familia › Subcategoria»;
+    # - proveedores con productos o con catalogo cargado (los de servicios siguen en Contabilidad, no se borra nada).
+    from ..services.brands import canonical_brand
+    from ..services.category_margin import categories as _cats
+    from ..services.category_margin import path_name
+
+    cats = _cats(db, p.tenant.id)
+    with_prods = set(
+        db.scalars(select(Product.category_id).where(Product.tenant_id == p.tenant.id, Product.active, Product.category_id.is_not(None)).distinct())
+    )
+    useful: set[int] = set()
+    for cid in with_prods:
+        seen = set()
+        while cid is not None and cid in cats and cid not in seen:
+            seen.add(cid)
+            useful.add(cid)
+            cid = cats[cid].parent_id
+    sup_ids = set(db.scalars(select(Product.supplier_id).where(Product.tenant_id == p.tenant.id, Product.supplier_id.is_not(None)).distinct())) | set(
+        db.scalars(select(SupplierItem.supplier_id).where(SupplierItem.tenant_id == p.tenant.id).distinct())
+    )
     return {
-        "brands": [b for b in marcas if b],
-        "categories": [{"id": c.id, "name": c.name} for c in db.scalars(select(Category).where(Category.tenant_id == p.tenant.id).order_by(Category.name))],
+        "brands": sorted({canonical_brand(b) for b in marcas if b} - {None}, key=str.lower),
+        "categories": sorted(({"id": cid, "name": path_name(cats, cid)} for cid in useful), key=lambda c: c["name"].lower()),
         "suppliers": [
             {"id": s.id, "name": s.name}
             for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id, Supplier.archived_at.is_(None), Supplier.trashed_at.is_(None)).order_by(Supplier.name))
+            if s.id in sup_ids
         ],
         "sin_cabys": sin_cabys,
         # la bodega de origen se muestra en el catalogo aunque el rol no tenga inventario.ver
