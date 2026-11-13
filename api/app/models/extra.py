@@ -144,10 +144,14 @@ class BankStatementLine(TenantMixin, Base):
     batch: Mapped[str] = mapped_column(String(40), index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)  # evita importar dos veces la misma linea
     status: Mapped[str] = mapped_column(String(12), default="pendiente")  # pendiente | conciliado | ignorado
-    matched_type: Mapped[str | None] = mapped_column(String(20))  # payment | expense | supplier_payment
+    matched_type: Mapped[str | None] = mapped_column(String(20))  # payment | expense | supplier_payment | movement
     matched_id: Mapped[int | None] = mapped_column(Integer)
     matched_by: Mapped[str | None] = mapped_column(String(10))  # auto | manual
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    balance: Mapped[float | None] = mapped_column(Numeric(16, 2))  # saldo que reporta el banco despues de la linea
+    import_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bank_statement_import.id", ondelete="SET NULL", name="fk_bank_statement_line_import"), index=True
+    )
 
 
 # ---------- Eventos y entradas con QR ----------
