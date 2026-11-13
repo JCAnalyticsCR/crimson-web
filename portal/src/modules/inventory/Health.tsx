@@ -84,16 +84,16 @@ export default function Health() {
               {KIND_ORDER.filter((k) => (data.counts[k] ?? 0) > 0).map((k) => <span key={k} className="badge badge--warn">{KIND_LABEL[k]} · {data.counts[k]}</span>)}
             </div>
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="table table--stack">
                 <thead><tr><th>Documento</th><th>Producto</th><th>Qué pasa</th><th /></tr></thead>
                 <tbody>{sorted.map((iss, i) => (
                   <tr key={i}>
-                    <td className="mono" style={{ whiteSpace: "nowrap" }}>{iss.doc}</td>
-                    <td>{iss.product}</td>
-                    <td>{iss.detail}</td>
-                    <td className="num" style={{ whiteSpace: "nowrap" }}>
+                    <td className="mono" data-label="Documento" style={{ whiteSpace: "nowrap" }}>{iss.doc}</td>
+                    <td data-label="Producto">{iss.product}</td>
+                    <td className="stack-full" data-label="Qué pasa">{iss.detail}</td>
+                    <td className="num stack-actions" style={{ whiteSpace: "nowrap" }}>
                       {iss.action === "vincular"
-                        ? <Link className="btn btn--soft btn--sm" to="/inventario?tab=proveedores" title={iss.code ? `Buscá ${iss.code} en el catálogo del proveedor y vinculalo` : undefined}>Vincular</Link>
+                        ? <Link className="btn btn--soft btn--sm" to="/proveedores" title={iss.code ? `Buscá ${iss.code} en el catálogo del proveedor y vinculalo` : undefined}>Vincular</Link>
                         : iss.fixable && allows("inventory.editar")
                         ? <button className="btn btn--soft btn--sm" disabled={busy === iss.ref_id} onClick={() => fix(iss)} title={iss.kind === "negativo" ? "Ajuste documentado que deja la bodega en cero (pide el motivo)" : undefined}>{busy === iss.ref_id ? "Corrigiendo…" : iss.kind === "negativo" ? "Ajustar a cero" : iss.kind === "pedido_adelantado" ? "Devolver salida" : "Corregir"}</button>
                         : <span className="muted" style={{ fontSize: 12.5 }}>{iss.kind === "negativo" ? "Revisá con un conteo o un ajuste" : iss.kind === "pedido_sin_decidir" ? "Decidí en el pedido si volvió" : iss.kind === "garantia_vieja" ? "Dale seguimiento en Garantías" : null}</span>}

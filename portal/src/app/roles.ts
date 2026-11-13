@@ -38,7 +38,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Cotiza y factura con el precio de venta. Ve solo sus oportunidades, cotizaciones, facturas y comisiones; nunca el costo.",
     can: ["Cobrar en el punto de venta y crear ahí el cliente, que queda en su cartera", "Sus oportunidades y cotizaciones (el consecutivo es el de la empresa)", "Facturar y buscar sus facturas", "Ver en resumen los levantamientos de sus oportunidades y pedir uno nuevo", "Productos y servicios con el precio de venta", "Existencias y ajustes de inventario (entradas, salidas y ajustes)", "Pedidos de la tienda", "Ver en tiempo real cuánto lleva ganado en comisiones"],
     cannot: ["Ver el costo del proveedor, el margen o la utilidad", "Ver lo que venden los demás o el total de la empresa", "Llenar o editar levantamientos", "Descontar más del límite sin aprobación", "Anular facturas", "Marcar facturas emitidas en Fygaro (lo hace contabilidad)"],
-    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/pos", "/levantamientos", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    menu: ["/", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/pos", "/levantamientos", "/clientes", "/proveedores", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
     // 26/10: vende desde el celular. Lo de todos los días arriba y en la barra inferior: vender, sus comisiones y sus clientes
     top: ["/pos", "/comisiones"],
     tabs: ["/", "/pos", "/cotizaciones", "/comisiones"],
@@ -48,7 +48,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Todo el dinero de la empresa: facturas de proveedores ante Hacienda, gastos, bancos, el panel tributario, planillas, comisiones y reportes.",
     can: ["Facturas de proveedores: recibir, aceptar o rechazar ante Hacienda", "Gastos, recurrentes, categorías y bancos", "Panel tributario del mes", "Facturas y cobros de toda la empresa", "Enviar facturas, crear enlaces de pago y registrar cobros", "Emitir a Hacienda o marcar lo emitido en Fygaro (lista «Por emitir»)", "Planillas, colillas y comisiones", "Aprobaciones de planillas y comisiones", "Aprobar y marcar pagadas las comisiones y los pagos a aliados", "La mensualidad de las empresas aliadas", "Los reportes de la empresa con Excel", "Importar el histórico de recepciones de Fygaro"],
     cannot: ["Crear o editar ventas (cotizaciones y facturas) ni enviar cotizaciones", "Ver costos de productos ni márgenes (salvo que el administrador lo habilite)", "Configurar la empresa o los usuarios", "Cargar las credenciales de Hacienda ni activar producción"],
-    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/planillas", "/vehiculos", "/reportes", "/importar", "/archivo", "/ajustes"],
+    menu: ["/", "/aprobaciones", "/facturas", "/pagos", "/recurrencias", "/clientes", "/proveedores", "/productos", "/inventario", "/compras", "/comisiones", "/aliados", "/contabilidad", "/planillas", "/vehiculos", "/reportes", "/importar", "/archivo", "/ajustes"],
   },
   tecnico: {
     label: "Técnico instalador", tone: "#b45309", glyph: "T",
@@ -75,7 +75,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Manda el campo: revisa levantamientos, asigna órdenes de trabajo, proyectos y materiales. El costeo es del administrador.",
     can: ["Asignar y programar órdenes de trabajo", "Revisar y aprobar levantamientos antes del costeo", "Bandeja de Aprobaciones: levantamientos por revisar y reservas de material", "Proyectos, activos del cliente y solicitudes de compra", "Toda la mesa de soporte y los mantenimientos", "Movimientos de inventario"],
     cannot: ["Ver costos o márgenes (salvo que el administrador lo habilite)", "Facturar o cobrar", "Ver planillas, gastos ni conciliación", "Configurar la empresa"],
-    menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/aprobaciones", "/tickets", "/garantias", "/mantenimientos", "/activos", "/clientes", "/accesos-clientes", "/productos", "/inventario", "/compras", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
+    menu: ["/", "/oportunidades", "/proyectos", "/ordenes-trabajo", "/levantamientos", "/aprobaciones", "/tickets", "/garantias", "/mantenimientos", "/activos", "/clientes", "/accesos-clientes", "/proveedores", "/productos", "/inventario", "/compras", "/vehiculos", "/reportes", "/archivo", "/ajustes"],
   },
   caja: {
     label: "Caja", tone: "#0e9f6e", glyph: "C",
@@ -102,7 +102,7 @@ export const ROLES: Record<string, RoleMeta> = {
     summary: "Dirige al equipo de ventas: ve las oportunidades, cotizaciones, facturas y cobros de todos, aprueba descuentos y cotizaciones grandes hasta sus topes y reparte la cartera. Nunca ve el costo ni el margen.",
     can: ["Ver lo que vende todo el equipo y el embudo del equipo", "Aprobar descuentos y montos hasta sus topes (Ajustes → Ventas)", "Cambiar el vendedor de la cuenta de un cliente", "Traspasar la cartera de un vendedor a otro", "Asignar ventas por asignar, si el administrador lo habilita"],
     cannot: ["Ver el costo, el margen o la utilidad", "Aprobar lo que pase de sus topes, el margen bajo el mínimo o sus propias cotizaciones", "Anular facturas", "Configurar la empresa o los usuarios"],
-    menu: ["/", "/aprobaciones", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/metas", "/clientes", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
+    menu: ["/", "/aprobaciones", "/oportunidades", "/cotizaciones", "/facturas", "/pagos", "/metas", "/clientes", "/proveedores", "/productos", "/inventario", "/ordenes", "/comisiones", "/archivo", "/ajustes"],
   },
   // Roles de cliente: no entran al panel interno, tienen su propio portal (modules/cliente)
   cliente_admin: {

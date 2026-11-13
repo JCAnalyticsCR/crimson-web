@@ -1,4 +1,4 @@
-/* Inventarios -> Proveedores. El catálogo de cada proveedor (Eurocomp, …) aparte de lo que Crimson tiene en bodega:
+/* Catalogos de proveedores. El catálogo de cada proveedor (Eurocomp, …) aparte de lo que Crimson tiene en bodega:
    Andrés pidió verlo "de una manera categorizada diferente para no mezclarlos con lo que nosotros tenemos localmente".
    Entra por la API de Eurocomp (SiReTT: catálogo cada semana, existencias de lo vinculado cada 6 horas) o por la
    lista en Excel, que nunca pisa ni inactiva lo que la API confirma con dato vigente. */
@@ -153,7 +153,7 @@ export default function SupplierCatalog() {
     <>
       <div className="prv-banner" role="note">
         <span className="prv-banner__tag">Catálogo del proveedor</span>
-        <span>Esto <b>no es inventario propio</b>: es lo que cada proveedor tiene para vendernos (bajo pedido), con sus códigos y sus categorías. Las existencias en bodega están en <b>Existencias</b>. Un ítem del proveedor solo pasa al catálogo cuando se vincula o se agrega.</span>
+        <span>Esto <b>no es inventario propio</b>: es lo que cada proveedor tiene para vendernos (bajo pedido), con sus códigos y sus categorías. Las existencias en bodega están en <b>Bodegas y existencias</b>. Un ítem del proveedor solo pasa al catálogo cuando se vincula o se agrega.</span>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

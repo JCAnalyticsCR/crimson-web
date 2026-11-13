@@ -5,7 +5,7 @@
 import { I } from "../ui/components";
 
 /* badge: numero junto a la entrada ("approvals": pendientes de Aprobaciones; "recepcion": comprobantes por revisar;
-   "completar": articulos que no estan a la venta por falta de datos, Inventarios -> Por completar) */
+   "completar": articulos del proveedor pendientes de incorporar, Catalogos de proveedores -> Pendientes) */
 export type NavItem = { to: string; label: string; icon: string; end?: boolean; need?: string; badge?: "approvals" | "recepcion" | "completar" };
 export type NavGroup = { group: string; items: NavItem[] };
 
@@ -38,11 +38,15 @@ export const NAV: NavGroup[] = [
   { group: "Catálogo", items: [
     { to: "/clientes", label: "Clientes", icon: I.customers, need: "crm.ver" },
     { to: "/accesos-clientes", label: "Accesos de clientes", icon: I.shield, need: "portal_clientes.ver" },
-    { to: "/productos", label: "Productos & Servicios", icon: I.products, need: "catalog.ver" },
-    { to: "/inventario", label: "Inventarios", icon: I.inventory, need: "inventory.ver", badge: "completar" },
     { to: "/cupones", label: "Cupones", icon: I.wallet, need: "catalog.editar" },
     { to: "/mi-tienda", label: "Mi Tienda", icon: I.store, need: "settings.configurar" },
     { to: "/ordenes", label: "Pedidos de la tienda", icon: I.box, need: "sales.ver" },
+  ]},
+  // auditoria de inventarios (10/11): tres areas en el orden en que un articulo llega a ser existencia vendible
+  { group: "Productos e inventario", items: [
+    { to: "/proveedores", label: "Catálogos de proveedores", icon: I.upload, need: "catalog.ver", badge: "completar" },
+    { to: "/productos", label: "Mis productos", icon: I.products, need: "catalog.ver" },
+    { to: "/inventario", label: "Bodegas y existencias", icon: I.inventory, need: "inventory.ver" },
   ]},
   { group: "Administración", items: [
     { to: "/compras", label: "Compras", icon: I.upload, need: "purchases.ver" },

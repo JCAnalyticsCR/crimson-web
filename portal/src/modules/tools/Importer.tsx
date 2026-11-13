@@ -23,7 +23,7 @@ const KINDS: { id: ImportKind; label: string; desc: string; route: string; need:
   { id: "products", label: "Productos y servicios", desc: "Código, nombre, precio, CABYS, impuesto. Carga inicial: columna «Cantidad inicial» (y «Bodega») crea la entrada en el kardex; solo si el producto no tiene movimientos en esa bodega.", route: "/productos", need: "catalog.crear" },
   { id: "suppliers", label: "Proveedores", desc: "Nombre, cédula, contacto y condiciones de pago.", route: "/contabilidad/contable/proveedores", need: "catalog.crear" },
   { id: "invoices", label: "Facturas históricas", desc: "Documentos previos como referencia (no se reenvían a Hacienda).", route: "/facturas", need: "sales.crear" },
-  { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Inventarios → Proveedores.", route: "/productos", need: "catalog.costos" },
+  { id: "catalogo", label: "Lista de precios de proveedor", desc: "Crea productos propios directo desde la lista: el costo entra tal cual y el precio sale del margen. Para tener el catálogo del proveedor aparte y vincular solo lo que vendés, usá Catálogos de proveedores.", route: "/productos", need: "catalog.costos" },
   { id: "recepciones", label: "Recepciones de Fygaro", desc: "El zip de «Download All» de Fygaro (comprobantes, respuestas, mensajes y PDF) o un CSV/Excel. Quedan como históricas: no se envían a Hacienda ni se responden de nuevo.", route: "/contabilidad/facturas/recibidas", need: "accounting.crear" },
 ];
 

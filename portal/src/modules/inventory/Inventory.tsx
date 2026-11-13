@@ -1,22 +1,20 @@
-/* Inventarios por ubicacion: existencias (calculadas del ledger), movimientos, transferencias y alertas de stock minimo.
-   Reservas formales (AC25: ver existencia no es retirar) y unidades con numero de serie.
-   Existencias abre en "Disponibilidad" (funcion unica del API: propio + proveedor con su fecha); "Por ubicación" es
-   el kardex por bodega. Los totales nunca suman las bodegas de garantías (revisión y distribuidor). */
+/* Productos e inventario → 3. Bodegas y existencias (auditoría de inventarios, 10/11): qué tiene Crimson, dónde y
+   cuánto puede entregar. Existencias por ubicación (del ledger), movimientos, reservas (AC25: ver existencia no es
+   retirar), seriales y controles de conciliación. Los totales nunca suman las bodegas de garantías ni los productos
+   archivados. Lo que antes vivía aquí y no es existencia propia se mudó:
+   - Proveedores y Por completar → /proveedores (Catálogos de proveedores)
+   - Disponibilidad e Inventario web → /productos (Mis productos: vistas Disponibilidad y Publicación en la tienda)
+   Los enlaces viejos (?tab=proveedores|completar|web, ?vista=disponibilidad) redirigen solos. */
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
 import { Card, Empty, Field, I, Icon, Modal, Loading } from "../../ui/components";
 import { Dropzone } from "../../ui/MediaPicker";
 import { Lookup, type LookupItem } from "../../ui/Lookup";
-import Disponibilidad from "./Disponibilidad";
 import AuthLink from "../../ui/AuthLink";
-import WebInventory from "./WebInventory";
-import SupplierCatalog from "./SupplierCatalog";
 import Kardex, { type KardexProduct } from "./Kardex";
 import Health from "./Health";
-import PorCompletar from "./PorCompletar";
-import { useCompletarCount } from "./useCompletarCount";
 
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean; kind?: "venta" | "revision" | "proveedor" };
 /* revisión y distribuidor: equipos de clientes en garantía; nunca se venden ni cuentan para el mínimo */
@@ -68,13 +66,12 @@ export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
   const [filter, setFilter] = useState<number | "">("");
-  const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(null);
+  // Mis productos → Disponibilidad abre el kardex de un producto con ?tab=movimientos&pid=&pcode=&pname=
+  const [kardexProduct, setKardexProduct] = useState<KardexProduct | null>(params.get("pid") ? { id: Number(params.get("pid")), code: params.get("pcode") || "", name: params.get("pname") || params.get("pcode") || "" } : null);
   const [modal, setModal] = useState<"move" | "transfer" | "wh" | null>(null);
   const [healthCount, setHealthCount] = useState(0);
-  const completar = useCompletarCount(); // articulos que no estan a la venta por falta de datos
-  const [completarN, setCompletarN] = useState<number | null>(null);
-  const nCompletar = completarN ?? completar;
-  const [vista, setVista] = useState<"disponibilidad" | "ubicacion">(params.get("vista") === "ubicacion" || params.get("stock") === "bajo" ? "ubicacion" : "disponibilidad");
+  // direcciones viejas -> su lugar nuevo (enlaces guardados, otros modulos, la Mi Tienda)
+  const mudado = tab === "proveedores" ? "/proveedores" : tab === "completar" ? "/proveedores?tab=incorporar" : tab === "web" ? "/productos?vista=publicacion" : tab === "existencias" && params.get("vista") === "disponibilidad" ? "/productos?vista=disponibilidad" : null;
   const [mvLabel, setMvLabel] = useState("");
   const [trLabel, setTrLabel] = useState("");
   const emptyMv = { product_id: "", warehouse_id: "", kind: "entrada", quantity: "1", reference: "", note: "", movement_type: "", project_id: "", serial: "", location: "", custodian: "", owner: "", voucher_media: "" };
@@ -120,12 +117,14 @@ export default function Inventory() {
   const comprometido = activos.filter(isSale).reduce((a, l) => a + n(l.committed), 0);
   const setTab = (k: string) => { const p = new URLSearchParams(params); if (k === "existencias") p.delete("tab"); else p.set("tab", k); setParams(p); };
 
+  if (mudado) return <Navigate to={mudado} replace />;
   return (
     <>
       <div className="page-head">
-        <div><div className="meta">06 · Inventarios</div><h1 className="h1">Inventarios</h1></div>
-        {/* auditoria 10/11: Ubicación, Transferir y Ajuste solo donde se trabaja con existencias (no en Proveedores, Web ni Por completar) */}
+        <div><div className="meta">Productos e inventario · 3</div><h1 className="h1">Bodegas y existencias</h1></div>
+        {/* auditoria 10/11: Ubicación, Transferir y Ajuste solo donde se trabaja con existencias (no en Controles) */}
         {["existencias", "movimientos", "reservas", "seriales"].includes(tab) && <div className="page-head__actions">
+          {allows("purchases.ver") && <Link className="btn btn--soft btn--sm" to="/compras" title="Compras pedidas al proveedor: «Recibí el material» registra lo que llegó, en qué bodega y con qué costo">Recibir compra</Link>}
           {allows("inventory.crear") && <button className="btn btn--ghost btn--sm" onClick={() => setModal("wh")}><Icon d={I.plus} />Ubicación</button>}
           {allows("inventory.crear") && <button className="btn btn--soft btn--sm" onClick={() => setModal("transfer")}><Icon d={I.arrow} />Transferir</button>}
           {/* entradas, salidas y ajustes manuales: solo vendedores y administrador (Andrés, 19/10) */}
@@ -134,17 +133,10 @@ export default function Inventory() {
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.editar") ? [["completar", nCompletar ? `Por incorporar del proveedor · ${nCompletar}` : "Por incorporar del proveedor"]] : []), ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias por ubicación"], ["movimientos", "Movimientos"], ["reservas", "Reservas"], ["seriales", "Seriales"], ["salud", healthCount > 0 ? `Controles · ${healthCount}` : "Controles"]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
-        <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist" aria-label="Vista de existencias">
-          <button role="tab" aria-selected={vista === "disponibilidad"} className={vista === "disponibilidad" ? "is-active" : ""} onClick={() => setVista("disponibilidad")}>Disponibilidad</button>
-          <button role="tab" aria-selected={vista === "ubicacion"} className={vista === "ubicacion" ? "is-active" : ""} onClick={() => setVista("ubicacion")}>Por ubicación (kardex)</button>
-        </div>
-      </>}
-      {tab === "existencias" && vista === "disponibilidad" && <Disponibilidad onKardex={(p) => { setKardexProduct(p); setTab("movimientos"); }} />}
-      {tab === "existencias" && vista === "ubicacion" && <>
         <div className="pending">
           {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{activos.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.kind && w.kind !== "venta" ? ` · ${WH_KIND[w.kind]} (no se vende)` : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
           <div><b>{total}</b><span>Unidades {filter ? "en la ubicación" : "en bodegas de venta"}</span></div>
@@ -163,8 +155,8 @@ export default function Inventory() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card title={onlyLow ? "Existencias de los productos bajo mínimo" : "Existencias por ubicación"} flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
             {levelsSt === null ? <Loading /> : shown.length === 0 ? <Empty hint={onlyLow ? "Ningún producto bajo mínimo tiene existencias registradas en bodega." : "Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada."} /> : (
-              <table className="table"><thead><tr><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num" title="Reservas confirmadas y vigentes">Comprometido</th><th className="num">Disponible</th><th className="num">Mínimo</th><th /></tr></thead>
-                <tbody>{shown.map((l, i) => <tr key={i}><td><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}{l.active === false && <span className="badge badge--warn" style={{ marginLeft: 6 }} title="Inactivo o archivado: no se vende ni cuenta en los totales">Archivado</span>}<div className="meta mono">{l.code}</div></td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted">{l.min_stock}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => { setKardexProduct({ id: l.product_id, code: l.code, name: l.name }); setTab("movimientos"); }}>Movimientos</button></td></tr>)}</tbody></table>
+              <table className="table table--stack"><thead><tr><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num" title="Reservas confirmadas y vigentes">Comprometido</th><th className="num">Disponible</th><th className="num">Mínimo</th><th /></tr></thead>
+                <tbody>{shown.map((l, i) => <tr key={i}><td className="stack-full" data-label="Producto"><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}{l.active === false && <span className="badge badge--warn" style={{ marginLeft: 6 }} title="Inactivo o archivado: no se vende ni cuenta en los totales">Archivado</span>}<div className="meta mono">{l.code}</div></td><td className="muted" data-label="Ubicación">{l.warehouse}</td><td className="num mono" data-label="Cantidad" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" data-label="Comprometido" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" data-label="Disponible" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted" data-label="Mínimo">{l.min_stock}</td><td className="num stack-actions"><button className="btn btn--ghost btn--sm" onClick={() => { setKardexProduct({ id: l.product_id, code: l.code, name: l.name }); setTab("movimientos"); }}>Movimientos</button></td></tr>)}</tbody></table>
             )}
           </Card>
           <Card title="Alertas de stock mínimo" flush>
@@ -180,10 +172,6 @@ export default function Inventory() {
       {tab === "salud" && <Health />}
       {tab === "reservas" && <Reservations products={products} whs={whs} projects={projects} onChange={load} />}
       {tab === "seriales" && <Units products={products} whs={whs} projects={projects} onChange={load} />}
-      {/* la tienda es precio: el tecnico (inventory.ver sin precios) no tiene esta pestaña */}
-      {tab === "completar" && allows("catalog.editar") && <PorCompletar onCount={setCompletarN} />}
-      {tab === "web" && allows("catalog.precios") && <WebInventory />}
-      {tab === "proveedores" && allows("catalog.ver") && <SupplierCatalog />}
 
       {modal === "move" && (
         <Modal title="Movimiento de inventario" onClose={() => setModal(null)} foot={<><button className="btn btn--ghost" onClick={() => setModal(null)}>Cancelar</button><button className="btn btn--crimson" disabled={!mv.product_id || !mv.warehouse_id} onClick={submit}>Registrar</button></>}>
