@@ -250,3 +250,13 @@ def test_permisos_y_costo_de_inventario_solo_para_quien_ve_costos(client, auth, 
     assert client.get(URL, params={"from": "2026-11", "to": "2026-09"}).status_code == 422
     assert client.get(URL, params={"from": "2024-01", "to": "2026-11"}).status_code == 422
     assert client.get(URL, params={"from": "2026-13"}).status_code == 422
+
+
+def test_margen_sin_sentido_con_ventas_casi_nulas_sale_vacio(client, auth, db_session):
+    """₡100 de venta contra ₡863 000 de gasto daba un margen de -863 253 %: fuera de ±1000 % se muestra «—»."""
+    tid = auth["tenant"]["id"]
+    sv = _prod(db_session, tid, "ER-MIN", "servicio")
+    _inv(client, [{"product_id": sv, "name": "Prueba", "quantity": 1, "unit_price": 100, "tax_rate": 13}], NOV)
+    _exp(client, _cat(client, "Alquiler"), 863000, NOV)
+    x = _get(client)
+    assert x["margins"]["neto_pct"][2] is None and x["margins"]["neto_pct"][3] is None

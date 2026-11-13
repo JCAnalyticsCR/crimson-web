@@ -11,7 +11,7 @@ const PARTS = [
   { key: "facturas", to: "/contabilidad/facturas", label: "Facturas", hint: "Lo que llega de los proveedores y lo que respondemos a Hacienda" },
   { key: "contable", to: "/contabilidad/contable", label: "Contable", hint: "El dinero: gastos, categorías, proveedores, bancos y el resultado del mes" },
   { key: "tributario", to: "/contabilidad/tributario", label: "Tributario", hint: "Lo que se declara: IVA del mes, plazos, rechazos y reportes" },
-  { key: "quickbooks", to: "/contabilidad/quickbooks", label: "QuickBooks", hint: "Asientos de diario listos para importar en QuickBooks Online" },
+  { key: "quickbooks", to: "/contabilidad/quickbooks", label: "QuickBooks", hint: "Paquete mensual para la contadora: facturas, gastos e IVA listos para importar en QuickBooks" },
 ] as const;
 
 const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
@@ -31,7 +31,7 @@ const SUBS: Record<string, { to: string; label: string; end?: boolean }[]> = {
     { to: "/contabilidad/contable/resultados", label: "Resultados" },
   ],
   tributario: [{ to: "/contabilidad/tributario", label: "Panel del mes", end: true }],
-  quickbooks: [{ to: "/contabilidad/quickbooks", label: "Asientos QBO", end: true }],
+  quickbooks: [{ to: "/contabilidad/quickbooks", label: "Paquete mensual", end: true }],
 };
 
 export default function AccountingHub() {

@@ -264,7 +264,10 @@ def build(db: Session, tid: int, first: date, last: date, sees_costs: bool) -> d
         for m in [*months, None]:
             v = ingresos.total() if m is None else ingresos.values.get(m, ZERO)
             p = part.total() if m is None else part.values.get(m, ZERO)
-            out.append(str((p / v * 100).quantize(Decimal("0.1"))) if v else None)
+            pct = (p / v * 100) if v else None
+            # con ventas casi nulas el margen no dice nada (₡100 de venta contra ₡863 000 de gasto daba -863 253 %):
+            # fuera de ±1000 % se muestra «—»
+            out.append(str(pct.quantize(Decimal("0.1"))) if pct is not None and abs(pct) <= 1000 else None)
         return out
 
     kardex = _kardex_cost(db, tid, a, b) if sees_costs else None
