@@ -9,7 +9,7 @@ Un asiento por documento, número estable JE-<tipo>-<id>, idempotente: regenerar
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.db import Base
@@ -139,8 +139,10 @@ class AccountingPeriod(TenantMixin, Base):
     """Un mes contable y su estado.
 
     abierto   → se pueden agregar y regenerar asientos.
+    revisado  → una persona revisó el mes (Excel de control) y se puede generar el paquete
+                para la contadora (services/qb_package.py). Sigue abierto para los asientos.
     exportado → mes cerrado; documentos nuevos o cambiados generan un AJUSTE
-                en el primer mes abierto.
+                en el primer mes abierto (y salen en el paquete siguiente).
     """
 
     __tablename__ = "accounting_period"
@@ -148,13 +150,16 @@ class AccountingPeriod(TenantMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     month: Mapped[str] = mapped_column(String(7), index=True)  # "2026-10"
-    # abierto | exportado
+    # abierto | revisado | exportado
     status: Mapped[str] = mapped_column(String(12), default="abierto")
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exported_by: Mapped[int | None] = mapped_column(Integer)
     reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reopened_by: Mapped[int | None] = mapped_column(Integer)
     reopen_reason: Mapped[str | None] = mapped_column(String(300))
+    # verificación humana antes del paquete mensual (quién marcó "revisado" y cuándo)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[int | None] = mapped_column(Integer)
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +183,11 @@ class AccountingExport(TenantMixin, TimestampMixin, Base):
     is_reexport: Mapped[bool] = mapped_column(Boolean, default=False)
     reexport_reason: Mapped[str | None] = mapped_column(String(300))
     notes: Mapped[str | None] = mapped_column(Text)
+    # asientos (CSV de asientos de diario, "avanzado") | paquete (paquete mensual para la contadora)
+    kind: Mapped[str] = mapped_column(String(12), default="asientos", server_default="asientos")
+    # paquete: qué documentos y contactos salieron y con qué huella {"invoice": {"12": [huella, total, etiqueta]}, ...}.
+    # El paquete siguiente lo compara: lo que cambió después sale como ajuste y nada se manda dos veces.
+    manifest: Mapped[dict | None] = mapped_column(JSON)
 
 
 # ---------------------------------------------------------------------------

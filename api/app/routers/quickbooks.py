@@ -1,11 +1,18 @@
-"""QuickBooks Online: importar plan de cuentas, mapear roles, revisar mes, exportar.
+"""QuickBooks Online: importar plan de cuentas, mapear roles, revisar mes y generar el paquete para la contadora.
+
+Crimson nunca escribe en QuickBooks: entrega archivos que la contadora revisa e importa ella misma.
+  - Paquete mensual (services/qb_package.py): clientes, proveedores, facturas de venta y de proveedor en el formato de
+    "Importar datos" de QBO, Excel de control (IVA por tarifa, cobros, pagos, D-104) y los XML/PDF de respaldo.
+  - Asientos (avanzado): el CSV de asientos de diario de siempre (/qb/{mes}/export).
 
 Permisos:
-  GET  /qb/*          → accounting.ver
-  POST /qb/accounts   → accounting.crear
-  PUT  /qb/mapping    → accounting.editar
-  POST /qb/*/export   → accounting.exportar
-  POST /qb/*/reopen   → admin (reabrir mes cerrado)
+  GET  /qb/*                         → accounting.ver
+  POST /qb/accounts                  → accounting.crear
+  PUT  /qb/mapping                   → accounting.editar
+  POST /qb/paquete/*/revisado        → accounting.editar (verificación humana del mes)
+  POST /qb/paquete/*/generar         → accounting.exportar (el mes tiene que estar revisado)
+  POST /qb/*/export                  → accounting.exportar
+  POST /qb/*/reopen                  → admin (reabrir mes cerrado)
 """
 
 from __future__ import annotations
@@ -13,6 +20,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import unicodedata
 import uuid
 import zipfile
 from datetime import UTC, date, datetime
@@ -38,10 +46,13 @@ from ..models import (
     JournalEntry,
     QboAccount,
     Tenant,
+    User,
     bank_role,
     expense_cat_role,
 )
 from ..services import journal as js
+from ..services import qb_package as qp
+from ..services.documents import audit
 
 # Formatos de fecha soportados para la importación en QBO
 QBO_DATE_FORMATS = {
@@ -61,48 +72,125 @@ QBO_ROWS_PER_FILE = 1000
 # Importar plan de cuentas
 # ---------------------------------------------------------------------------
 
+def _norm_header(h: object) -> str:
+    """Cabecera comparable: sin tildes, minúsculas, espacios simples, sin signos y cada palabra en singular
+    ("Tipo de detalles" = "tipo de detalle", "Número" = "numero", "N.º de cuenta" = "n de cuenta")."""
+    s = unicodedata.normalize("NFKD", str(h or "")).encode("ascii", "ignore").decode().lower()
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    words = []
+    for w in s.split():
+        if w in ("de", "del", "la", "las", "el", "los", "of", "the"):
+            continue  # "Nombre de las cuentas" = "Nombre de la cuenta" = "Nombre cuenta"
+        if len(w) > 3 and w.endswith("es") and w[:-2].endswith(("on", "or", "al")):
+            w = w[:-2]  # descripciones, monedas no: solo los plurales en -es de palabras que terminan en consonante
+        elif len(w) > 3 and w.endswith("s"):
+            w = w[:-1]
+        words.append(w)
+    return " ".join(words)
+
+
+# Cabeceras de la "Lista de cuentas" de QBO (español e inglés, con y sin plural). Las demás columnas
+# (Saldo de QuickBooks, Saldo bancario, Impuesto...) se ignoran.
+_ACCOUNT_HEADERS: dict[str, str] = {
+    _norm_header(k): v
+    for k, v in {
+        # nombre
+        "Nombre de la cuenta": "full_name", "Nombre de cuenta": "full_name", "Nombre": "full_name", "Cuenta": "full_name",
+        "Account": "full_name", "Account name": "full_name", "Name": "full_name", "Full name": "full_name",
+        # número
+        "Número": "number", "Número de cuenta": "number", "N.º de cuenta": "number", "No. de cuenta": "number",
+        "Number": "number", "Account number": "number",
+        # tipo y tipo de detalle
+        "Tipo": "account_type", "Tipo de cuenta": "account_type", "Type": "account_type", "Account type": "account_type",
+        "Tipo de detalle": "detail_type", "Tipo de detalles": "detail_type", "Detail type": "detail_type",
+        # descripción y moneda
+        "Descripción": "description", "Description": "description",
+        "Moneda": "currency", "Currency": "currency",
+    }.items()
+}
+
+
+def _rows_from_file(content: bytes, filename: str) -> list[list[str]]:
+    """Filas crudas de un CSV (coma, punto y coma o tabulador; UTF-8 o Latin-1) o de un XLSX."""
+    is_xlsx = (filename or "").lower().endswith((".xlsx", ".xlsm")) or content[:2] == b"PK"
+    if is_xlsx:
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            try:
+                ws = wb.active
+                return [["" if c is None else str(c) for c in row] for row in ws.iter_rows(values_only=True)]
+            finally:
+                wb.close()
+        except Exception as exc:  # noqa: BLE001 - archivo dañado o que no es Excel: mensaje claro
+            raise HTTPException(422, "No se pudo leer el Excel: guardalo de nuevo como .xlsx o exportalo como CSV") from exc
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")  # CSV guardado por Excel en Windows
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+        delim = dialect.delimiter
+    except csv.Error:
+        delim = max((",", ";", "\t"), key=sample.count)
+    return [row for row in csv.reader(io.StringIO(text), delimiter=delim)]
+
+
+def _currency_code(raw: str | None) -> str:
+    s = _norm_header(raw)
+    if not s:
+        return "CRC"
+    if re.fullmatch(r"[a-z]{3}", s):
+        return s.upper()
+    if "usd" in s or "dolar" in s or "dollar" in s:
+        return "USD"
+    if "eur" in s:
+        return "EUR"
+    return "CRC"
+
+
 def _parse_accounts(content: bytes, filename: str) -> list[dict]:
-    """Parsea el Excel/CSV de QBO 'Lista de cuentas'.
+    """Parsea la 'Lista de cuentas' (Plan de cuentas) exportada de QBO, en CSV o XLSX.
 
-    Columnas esperadas (en español o inglés, tolera cabeceras extra y filas de totales):
-      Número / Number, Cuenta / Account, Tipo / Type, Tipo de detalle / Detail type,
-      Descripción / Description, Moneda / Currency
+    Reconoce las cabeceras en español e inglés sin importar tildes, mayúsculas ni plural (p. ej. el CSV real de
+    QBO en español: «Nombre de la cuenta, Tipo de cuenta, Tipo de detalles, Moneda, Saldo de QuickBooks, Saldo
+    bancario»). Ignora columnas extra, las filas de título antes de la cabecera, las de totales y las vacías.
     """
-    text = content.decode("utf-8-sig", errors="replace")
-    dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
-    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    raw_rows = _rows_from_file(content, filename)
 
-    # Normalizar nombres de columnas
-    HEADERS: dict[str, str] = {
-        # español
-        "cuenta": "full_name", "número": "number", "numero": "number",
-        "tipo": "account_type", "tipo de detalle": "detail_type",
-        "descripción": "description", "descripcion": "description",
-        "moneda": "currency",
-        # inglés
-        "account": "full_name", "number": "number",
-        "type": "account_type", "detail type": "detail_type",
-        "description": "description", "currency": "currency",
-        # variantes
-        "account number": "number", "account type": "account_type",
-        "account name": "full_name", "nombre": "full_name",
-    }
+    # La cabecera es la primera fila (de las 15 primeras) con la columna del nombre y al menos otra conocida:
+    # los informes de QBO traen antes el título, el nombre de la empresa y una línea en blanco.
+    header_idx = None
+    cols: dict[int, str] = {}
+    for i, row in enumerate(raw_rows[:15]):
+        found = {j: _ACCOUNT_HEADERS[n] for j, c in enumerate(row) if (n := _norm_header(c)) in _ACCOUNT_HEADERS}
+        if "full_name" in found.values() and len(found) >= 2:
+            header_idx, cols = i, found
+            break
+    if header_idx is None:
+        return []
+    # si dos columnas caen en el mismo campo ("Cuenta" y "Nombre de la cuenta"), gana la primera
+    seen_fields: set[str] = set()
+    cols = {j: f for j, f in sorted(cols.items()) if not (f in seen_fields or seen_fields.add(f))}
+    has_type = "account_type" in cols.values()
 
     rows = []
-    for raw in reader:
+    for raw in raw_rows[header_idx + 1 :]:
         row: dict[str, str] = {}
-        for key, val in raw.items():
-            if key is None:
-                continue
-            norm = key.strip().lower()
-            mapped = HEADERS.get(norm)
-            if mapped and val and str(val).strip():
-                row[mapped] = str(val).strip()
+        for j, field_name in cols.items():
+            val = raw[j].strip() if j < len(raw) and raw[j] is not None else ""
+            if val:
+                row[field_name] = val
         if not row.get("full_name"):
             continue
-        # Filtrar filas de totales (contienen "Total" en la cuenta)
-        if re.match(r"^total", row["full_name"], re.IGNORECASE):
+        # filas de totales y pies de informe ("TOTAL", la fecha de generación): sin tipo de cuenta no es una cuenta
+        if re.match(r"^total\b", row["full_name"], re.IGNORECASE):
             continue
+        if has_type and not row.get("account_type"):
+            continue
+        row["currency"] = _currency_code(row.get("currency"))
         rows.append(row)
     return rows
 
@@ -122,24 +210,10 @@ async def import_accounts(
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(413, "Archivo demasiado grande (máx 5 MB)")
 
-    # Soporte XLSX: convertir a CSV plano
-    if file.filename and file.filename.lower().endswith(".xlsx"):
-        try:
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-            ws = wb.active
-            buf = io.StringIO()
-            w = csv.writer(buf)
-            for row in ws.iter_rows(values_only=True):
-                w.writerow([str(c) if c is not None else "" for c in row])
-            content = buf.getvalue().encode("utf-8")
-        except Exception as exc:
-            raise HTTPException(422, f"No se pudo leer el XLSX: {exc}") from exc
-
-    rows = _parse_accounts(content, file.filename or "")
+    rows = _parse_accounts(content, file.filename or "")  # CSV o XLSX
     if not rows:
-        raise HTTPException(422, "No se encontraron cuentas en el archivo. "
-                            "Verifique que sea el reporte 'Lista de cuentas' de QBO.")
+        raise HTTPException(422, "No se encontraron cuentas en el archivo. Exportá la «Lista de cuentas» de QuickBooks "
+                            "(con la columna «Nombre de la cuenta» o «Cuenta») en CSV o Excel.")
 
     batch = str(uuid.uuid4())[:8]
     tid = p.tenant.id
@@ -325,7 +399,8 @@ def list_periods(p: Principal = Depends(require("accounting", "ver")), db: Sessi
     ).all()
     return [
         {"month": r.month, "status": r.status,
-         "exported_at": r.exported_at.isoformat() if r.exported_at else None}
+         "exported_at": r.exported_at.isoformat() if r.exported_at else None,
+         "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None}
         for r in rows
     ]
 
@@ -707,12 +782,188 @@ def list_exports(p: Principal = Depends(require("accounting", "ver")), db: Sessi
         select(AccountingExport).where(AccountingExport.tenant_id == p.tenant.id)
         .order_by(AccountingExport.created_at.desc())
     ).all()
+    users = {u.id: u.full_name for u in db.scalars(select(User).where(User.id.in_({r.exported_by for r in rows})))} if rows else {}
     return [
         {"id": r.id, "month": r.month, "entry_count": r.entry_count,
-         "line_count": r.line_count, "is_reexport": r.is_reexport,
+         "line_count": r.line_count, "is_reexport": r.is_reexport, "kind": r.kind or "asientos",
+         "reexport_reason": r.reexport_reason, "exported_by": users.get(r.exported_by),
          "created_at": r.created_at.isoformat() if r.created_at else None}
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Paquete mensual para la contadora (services/qb_package.py)
+# ---------------------------------------------------------------------------
+# Flujo con verificación humana: Revisar (Excel de control en borrador) → Marcar revisado → Generar paquete.
+# Generar cierra el mes (exportado) y deja el registro (accounting_export kind=paquete: quién, cuándo, qué salió).
+# Lo que cambie después sale en el paquete siguiente como ajuste.
+
+def _check_month(month: str) -> None:
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        raise HTTPException(422, "Mes inválido (AAAA-MM)")
+
+
+def _date_format(db: Session, tenant_id: int) -> tuple[str, str]:
+    t = db.get(Tenant, tenant_id)
+    key = ((t.settings or {}) if t else {}).get("qbo_date_format", _DEFAULT_DATE_FMT)
+    if key not in QBO_DATE_FORMATS:
+        key = _DEFAULT_DATE_FMT
+    return key, QBO_DATE_FORMATS[key]
+
+
+def _user_name(db: Session, uid: int | None) -> str | None:
+    if not uid:
+        return None
+    u = db.get(User, uid)
+    return u.full_name if u else None
+
+
+def _period_of(db: Session, tenant_id: int, month: str) -> AccountingPeriod | None:
+    return db.scalar(select(AccountingPeriod).where(AccountingPeriod.tenant_id == tenant_id, AccountingPeriod.month == month))
+
+
+@router.get("/paquete/{month}")
+def package_review(month: str, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    """Qué saldría en el paquete del mes, los avisos y el estado (no escribe nada)."""
+    _check_month(month)
+    pkg = qp.collect(db, p.tenant.id, month)
+    period = _period_of(db, p.tenant.id, month)
+    status = period.status if period else "abierto"
+    errors = [i for i in pkg.issues if i["severity"] == "error"]
+    last = db.scalar(
+        select(AccountingExport)
+        .where(AccountingExport.tenant_id == p.tenant.id, AccountingExport.month == month, AccountingExport.kind == "paquete")
+        .order_by(AccountingExport.created_at.desc(), AccountingExport.id.desc())
+        .limit(1)
+    )
+    return {
+        "month": month,
+        "status": status,
+        "reviewed_at": period.reviewed_at.isoformat() if period and period.reviewed_at else None,
+        "reviewed_by": _user_name(db, period.reviewed_by) if period else None,
+        "counts": {
+            "invoices": len(pkg.invoices), "expenses": len(pkg.expenses), "payments": len(pkg.payments),
+            "supplier_payments": len(pkg.supplier_payments), "credit_notes": len(pkg.credit_notes),
+            "customers_new": len(pkg.customers_new), "customers_changed": len(pkg.customers_changed),
+            "suppliers_new": len(pkg.suppliers_new), "suppliers_changed": len(pkg.suppliers_changed),
+            "late": len(pkg.late), "changes": len(pkg.changes),
+        },
+        "issues": pkg.issues,
+        "can_mark_reviewed": status == "abierto" and not errors,
+        "can_generate": status in ("revisado", "exportado") and not errors,
+        "last_package": {
+            "created_at": last.created_at.isoformat() if last.created_at else None,
+            "by": _user_name(db, last.exported_by), "documents": last.entry_count, "is_reexport": last.is_reexport,
+        } if last else None,
+    }
+
+
+@router.get("/paquete/{month}/control")
+def package_control_draft(month: str, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
+    """Excel de control en BORRADOR para revisar antes de marcar el mes (no cierra ni registra nada)."""
+    _check_month(month)
+    pkg = qp.collect(db, p.tenant.id, month)
+    key, _fmt = _date_format(db, p.tenant.id)
+    data = qp.build_control_xlsx(db, pkg, tenant_name=p.tenant.name, generated_by=p.user.full_name, fmt_date=key, draft=True)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=control_{month}_borrador.xlsx"},
+    )
+
+
+@router.post("/paquete/{month}/revisado")
+def package_mark_reviewed(month: str, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """Una persona revisó el mes: queda quién y cuándo. Con errores pendientes no se puede marcar."""
+    _check_month(month)
+    period = _get_or_create_period(db, p.tenant.id, month)
+    if period.status == "exportado":
+        raise HTTPException(409, "El mes ya tiene paquete (está cerrado). Para cambiarlo, un administrador lo reabre.")
+    pkg = qp.collect(db, p.tenant.id, month)
+    errors = [i["message"] for i in pkg.issues if i["severity"] == "error"]
+    if errors:
+        raise HTTPException(409, "Corregí esto antes de marcar el mes como revisado: " + "; ".join(errors[:3]))
+    period.status = "revisado"
+    period.reviewed_at = datetime.now(UTC)
+    period.reviewed_by = p.user.id
+    audit(db, p.tenant.id, p.user.id, "revisado", "accounting_period", period.id, {"month": month, "documentos": pkg.count()}, p.ip)
+    db.commit()
+    return {"month": month, "status": "revisado", "reviewed_at": period.reviewed_at.isoformat(), "reviewed_by": p.user.full_name}
+
+
+@router.post("/paquete/{month}/quitar-revisado")
+def package_unmark_reviewed(month: str, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """Vuelve el mes a abierto (antes de generar el paquete), p. ej. si falta corregir algo."""
+    _check_month(month)
+    period = _period_of(db, p.tenant.id, month)
+    if period is None or period.status != "revisado":
+        raise HTTPException(409, "El mes no está marcado como revisado")
+    period.status = "abierto"
+    period.reviewed_at = None
+    period.reviewed_by = None
+    audit(db, p.tenant.id, p.user.id, "quitar_revisado", "accounting_period", period.id, {"month": month}, p.ip)
+    db.commit()
+    return {"month": month, "status": "abierto"}
+
+
+class PackageIn(BaseModel):
+    reexport_reason: str | None = None
+
+
+@router.post("/paquete/{month}/generar")
+def package_generate(
+    month: str,
+    data: PackageIn,
+    p: Principal = Depends(require("accounting", "exportar")),
+    db: Session = Depends(get_db),
+):
+    """Genera el ZIP del paquete. El mes tiene que estar revisado; al generarlo queda cerrado (exportado) y registrado.
+    Volver a generar un mes cerrado: solo el administrador y con motivo (arma el mismo paquete otra vez)."""
+    _check_month(month)
+    tid = p.tenant.id
+    period = _get_or_create_period(db, tid, month)
+    is_reexport = period.status == "exportado"
+    if period.status == "abierto":
+        raise HTTPException(409, "Primero revisá el mes y marcalo como revisado: el paquete sale solo de un mes revisado")
+    if is_reexport:
+        if not p.can("settings", "configurar"):
+            raise HTTPException(403, "Solo el administrador puede volver a generar el paquete de un mes cerrado")
+        if not (data.reexport_reason or "").strip():
+            raise HTTPException(422, "Indicá el motivo para volver a generar el paquete")
+    pkg = qp.collect(db, tid, month)
+    errors = [i["message"] for i in pkg.issues if i["severity"] == "error"]
+    if errors:
+        raise HTTPException(409, "No se puede generar el paquete: " + "; ".join(errors[:3]))
+
+    key, fmt = _date_format(db, tid)
+    zip_file, rows = qp.build_zip(db, pkg, tenant_name=p.tenant.name, generated_by=p.user.full_name, fmt_key=key, fmt=fmt)
+
+    export = AccountingExport(
+        tenant_id=tid, month=month, period_id=period.id, exported_by=p.user.id, kind="paquete",
+        entry_count=pkg.count(), line_count=rows, is_reexport=is_reexport,
+        reexport_reason=(data.reexport_reason or "").strip()[:300] or None, manifest=pkg.manifest,
+    )
+    db.add(export)
+    period.status = "exportado"
+    period.exported_at = datetime.now(UTC)
+    period.exported_by = p.user.id
+    db.flush()
+    audit(db, tid, p.user.id, "paquete_generado", "accounting_period", period.id,
+          {"month": month, "documentos": pkg.count(), "ajustes": len(pkg.changes), "export_id": export.id, "reexport": is_reexport}, p.ip)
+    db.commit()
+
+    def _stream():
+        try:
+            while chunk := zip_file.read(64 * 1024):
+                yield chunk
+        finally:
+            zip_file.close()
+
+    return StreamingResponse(
+        _stream(), media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=paquete_quickbooks_{month}.zip"},
+    )
 
 
 # ---------------------------------------------------------------------------
