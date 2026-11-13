@@ -280,6 +280,9 @@ def stock(warehouse_id: int | None = None, p: Principal = Depends(require("inven
                 "name": prods[lv["product_id"]].name,
                 "min_stock": prods[lv["product_id"]].min_stock,
                 "serialized": bool(prods[lv["product_id"]].serialized),
+                # auditoria 10/11: un producto inactivo o archivado (los de demostracion) no es existencia vendible; el
+                # portal lo muestra aparte y no lo suma en los totales ni en los minimos
+                "active": bool(prods[lv["product_id"]].active and prods[lv["product_id"]].archived_at is None),
                 "warehouse": whs.get(lv["warehouse_id"]),
                 "warehouse_kind": kinds.get(lv["warehouse_id"]) or "venta",
                 "committed": comp.get((lv["product_id"], lv["warehouse_id"]), Decimal(0)),

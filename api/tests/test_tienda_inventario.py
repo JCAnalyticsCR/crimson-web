@@ -373,8 +373,9 @@ def test_panel_inventario_web_y_publicacion(client, auth, db_session):
     inv = client.get("/store/inventory").json()
     rows = {x["id"]: x for x in inv["items"]}
     assert [D(str(rows[a["id"]][k])) for k in ("propio", "reservado_pedidos", "libre")] == [4, 1, 3]
-    assert rows[b["id"]]["estado"] == "agotado" and rows[b["id"]]["alerta"] is True
-    assert inv["summary"]["alertas"] >= 1 and D(str(inv["summary"]["reservado_pedidos"])) >= 1
+    # auditoria 10/11: un agotado sin demanda (sin clientes esperando, pedidos ni destacado) ya no es "alerta"
+    assert rows[b["id"]]["estado"] == "agotado" and rows[b["id"]]["alerta"] is False
+    assert D(str(inv["summary"]["reservado_pedidos"])) >= 1
     assert any(h["product_id"] == a["id"] and h["order"] for h in inv["holds"])
     assert all(x["alerta"] for x in client.get("/store/inventory", params={"estado": "alertas"}).json()["items"])
     assert [x["id"] for x in client.get("/store/inventory", params={"estado": "reservado"}).json()["items"]] == [a["id"]]

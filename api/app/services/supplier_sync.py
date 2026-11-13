@@ -163,6 +163,43 @@ def _save_state(t: Tenant, **vals) -> None:
     t.settings = st
 
 
+SYNC_WEEKDAY, SYNC_HOUR, SYNC_MINUTE = 0, 3, 17  # lunes 03:17 hora de Costa Rica (worker/celery_app.py, crontab)
+
+
+def next_run_at(now: datetime | None = None) -> datetime:
+    """Proxima consulta semanal programada (lunes 03:17 en Costa Rica), en UTC."""
+    now = (now or datetime.now(UTC)).astimezone(CR)
+    cand = now.replace(hour=SYNC_HOUR, minute=SYNC_MINUTE, second=0, microsecond=0) + timedelta(days=(SYNC_WEEKDAY - now.weekday()) % 7)
+    if cand <= now:
+        cand += timedelta(days=7)
+    return cand.astimezone(UTC)
+
+
+def freshness(t: Tenant, now: datetime | None = None) -> dict:
+    """Auditoria 10/11: lo que necesita la pantalla para no anunciar "se actualiza los lunes" con datos de dos semanas:
+    ultima consulta buena, proximo intento, vigencia permitida y si el dato ya esta vencido."""
+    from .availability import max_age_hours, settings_of
+
+    s = _state(t)
+    now = now or datetime.now(UTC)
+    max_h = max_age_hours(settings_of(t))
+    oks = [x for x in (s.get("last_ok_at"), s.get("last_stock_at")) if x]
+    last_ok = max(oks) if oks else None
+    age_h = None
+    if last_ok:
+        try:
+            age_h = round((now - datetime.fromisoformat(last_ok)).total_seconds() / 3600, 1)
+        except ValueError:
+            age_h = None
+    return {
+        "last_success_at": last_ok,
+        "next_run_at": next_run_at(now).isoformat(),
+        "max_age_hours": max_h,
+        "age_hours": age_h,
+        "stale": age_h is None or age_h > max_h,
+    }
+
+
 def status(t: Tenant, supplier: Supplier | None) -> dict:
     """Lo que ve el catalogo de proveedores en lugar de "API pendiente". Trae las dos horas: el catalogo semanal
     (last_ok_at) y las existencias de lo vinculado cada 6 h (last_stock_at), y el ultimo error de cualquiera de las dos."""
@@ -171,7 +208,7 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
         return {"status": "no_aplica", "label": None}
     if client is None:
         return {"status": "pendiente", "label": "Conexión por API: pendiente de credenciales (SiReTT)"}
-    s = _state(t)
+    s = {**_state(t), **freshness(t)}
     if s.get("last_code") in BLOCKED_CODES:
         return {
             "status": "bloqueado",

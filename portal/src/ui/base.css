@@ -72,7 +72,7 @@ img { max-width: 100%; display: block; }
 .content { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-head .meta { margin-bottom: 6px; }
-.page-head__actions { display: flex; gap: 8px; align-items: center; }
+.page-head__actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }  /* tablet: que ningun boton quede fuera (Mis productos tiene 5) */
 
 /* ---------- Componentes ---------- */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 10px; border: 1px solid transparent; background: var(--ink); color: #fff; font-weight: 600; cursor: pointer; transition: transform .15s var(--ease), background .2s, box-shadow .2s; white-space: nowrap; }

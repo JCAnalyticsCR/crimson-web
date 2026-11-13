@@ -98,9 +98,11 @@ export default function Purchases() {
             <tbody>{open.lines.map((l, i) => (
               <tr key={l.id ?? i}>
                 <td style={{ fontWeight: 600 }}>{l.name}</td><td className="num mono">{Number(l.quantity)}</td>
-                {verCostos && <><td className="num money">{fmtMoney(l.unit_cost)}</td><td className="num money">{fmtMoney(Number(l.unit_cost) * Number(l.quantity))}</td></>}
+                {verCostos && <><td className="num money">{fmtMoney(l.unit_cost, open.currency)}</td><td className="num money">{fmtMoney(Number(l.unit_cost) * Number(l.quantity), open.currency)}</td></>}
               </tr>
             ))}</tbody>
+            {/* auditoria 10/11: el detalle usaba colones aunque la solicitud fuera en dolares (la lista si decia USD) */}
+            {verCostos && <tfoot><tr><td colSpan={3} style={{ textAlign: "right" }}><b>Total ({open.currency})</b></td><td className="num money"><b>{fmtMoney(open.total_cost, open.currency)}</b></td></tr></tfoot>}
           </table>
           {open.notes && <p className="muted" style={{ fontSize: 13 }}>{open.notes}</p>}
         </Modal>

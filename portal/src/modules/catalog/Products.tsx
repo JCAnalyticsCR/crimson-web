@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtMoney, parseTs, type Product } from "../../lib/api";
 import { useSession } from "../../app/session";
@@ -81,7 +81,7 @@ type Edit = typeof blank & { id?: number };
 
 const TABS = [["general", "General"], ["imagenes", "Imágenes"], ["variantes", "Variantes"]] as const;
 
-export default function Products() {
+export default function Products({ tabs }: { tabs?: ReactNode } = {}) {
   const { toast, allows } = useSession();
   const [params, setParams] = useSearchParams();
   const [itemsSt, setItems] = useState<Row[] | null>(null); // null = cargando
@@ -248,9 +248,10 @@ export default function Products() {
   return (
     <>
       <div className="page-head">
-        <div><div className="meta">05 · Catálogo</div><h1 className="h1">Productos & Servicios</h1></div>
+        <div><div className="meta">Productos e inventario · 2</div><h1 className="h1">Mis productos</h1></div>
         <div className="page-head__actions">{allows("catalog.editar") && !!opts?.sin_cabys && <Link className="btn btn--soft" to="/productos/cabys" title="Sugerencias de CABYS para confirmar en bloque">Completar CABYS ({opts.sin_cabys})</Link>}{allows("catalog.editar") && <Link className="btn btn--soft" to="/productos/contenido" title="Nombres, especificaciones y descripciones de la tienda que esperan su aprobación">Contenido por aprobar</Link>}{verCostos && <Link className="btn btn--soft" to="/productos/margenes" title="Margen sobre la venta por categoría, con vista previa de precios">Márgenes</Link>}{verCostos && allows("catalog.editar") && <button className="btn btn--soft" onClick={() => setAjuste(true)} title="Subir o bajar precios de lo filtrado o marcado, con vista previa">Ajustar precios</button>}{allows("catalog.crear") && <button className="btn btn--crimson" onClick={() => { setEdit({ ...blank, tax_ids: taxes[0] ? [taxes[0].id] : [] }); setVariants([]); setTab("general"); }}><Icon d={I.plus} />Crear producto</button>}</div>
       </div>
+      {tabs}
       <Card flush>
         <div className="list-head" style={{ flexWrap: "wrap" }}>
           <div className="search" style={{ maxWidth: 340 }}><Icon d={I.search} size={16} /><input placeholder="Nombre, código, CABYS o modelo…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
@@ -261,8 +262,8 @@ export default function Products() {
           {!!opts?.brands.length && <select className="select select--sm" value={f.brand} onChange={(e) => setF({ ...f, brand: e.target.value })}><option value="">Toda marca</option>{opts.brands.map((b) => <option key={b} value={b}>{b}</option>)}</select>}
           <select className="select select--sm" value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">Todo proveedor</option>{(opts?.suppliers || suppliers).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           {publica && <select className="select select--sm" value={f.web} onChange={(e) => setF({ ...f, web: e.target.value })}><option value="">En la tienda: todos</option><option value="true">Publicados</option><option value="false">Ocultos</option></select>}
-          {!!opts?.warehouses?.length && <select className="select select--sm" value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })} title="Bodega o inventario de origen"><option value="">Toda bodega</option>{opts.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
-          <select className="select select--sm" value={f.proveedor} onChange={(e) => setF({ ...f, proveedor: e.target.value })} title="Vinculado a la lista de un proveedor (Inventarios → Proveedores) o con proveedor asignado"><option value="">Con y sin proveedor</option><option value="con">Con proveedor</option><option value="sin">Sin proveedor</option><option value="vinculado">Vinculado a la lista del proveedor</option><option value="sin_vincular">Con proveedor sin vincular (su existencia no cuenta)</option></select>
+          {!!opts?.warehouses?.length && <select className="select select--sm" value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })} title="Bodega predeterminada de salida (no es dónde están las unidades)"><option value="">Toda bodega predet.</option>{opts.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>}
+          <select className="select select--sm" value={f.proveedor} onChange={(e) => setF({ ...f, proveedor: e.target.value })} title="Vinculado a la lista de un proveedor (Catálogos de proveedores) o con proveedor asignado"><option value="">Con y sin proveedor</option><option value="con">Con proveedor</option><option value="sin">Sin proveedor</option><option value="vinculado">Vinculado a la lista del proveedor</option><option value="sin_vincular">Con proveedor sin vincular (su existencia no cuenta)</option></select>
           {!!opts?.sin_cabys && <button className={`btn btn--sm ${f.sin_cabys ? "btn--crimson" : "btn--ghost"}`} onClick={() => setF({ ...f, sin_cabys: !f.sin_cabys })} title="Sin CABYS no se puede facturar">Sin CABYS ({opts.sin_cabys})</button>}
           </div>
           {(q || f.item_type || f.category_id || f.brand || f.supplier_id || f.web || f.sin_cabys || f.warehouse_id || f.proveedor) && <button className="btn btn--ghost btn--sm" onClick={() => { setQ(""); setF({ item_type: "", category_id: "", brand: "", supplier_id: "", web: "", sin_cabys: false, warehouse_id: "", proveedor: "" }); }}><Icon d={I.x} size={14} />Limpiar</button>}
@@ -303,7 +304,7 @@ export default function Products() {
           ))}</ul>
           <div className={`prd-tabla${verCostos ? " prd-dense" : ""}`} style={{ overflowX: "auto" }}>
           <table className="table">
-            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th>Bodega</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se consultó al proveedor y cuándo cambió de verdad su existencia o su costo">Proveedor consultado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
+            <thead><tr>{cotiza && <th style={{ width: 32 }} title="Marcá para agregar a una cotización" />}<th style={{ width: 48 }} /><th>Código</th><th>Nombre</th><th>Tipo</th><th>CABYS</th><th title="Bodega de la que sale por defecto. Las unidades reales por ubicación están en Inventarios.">Bodega predet.</th><th className="num" title="Libre en bodegas de venta (sin las de garantías) menos lo reservado">Propio</th><th className="num" title="Existencia del proveedor vinculado (Eurocomp)">Proveedor</th><th title="Cuándo se consultó al proveedor y cuándo cambió de verdad su existencia o su costo">Proveedor consultado</th>{verCostos && <th className="num" title="Costo sin IVA: del proveedor vinculado (con la fecha de su lista) o propio">Costo</th>}{verPrecios && <th className="num" title="Sin IVA">Precio de venta</th>}{verCostos && <th className="num" title="Margen sobre la venta: (precio − costo) ÷ precio">Margen</th>}{verCostos && <th className="num" title="Precio general para aliados, sin IVA (recargo sobre el costo o precio fijo)">Precio aliado</th>}<th>IVA</th>{publica && <th>Web</th>}<th /></tr></thead>
             <tbody>{items.map((p) => (
               <tr key={p.id}>
                 {cotiza && <td><input type="checkbox" aria-label={`Agregar ${p.name} a una cotización`} checked={sel.has(p.id)} onChange={() => marcar(p.id)} /></td>}
@@ -337,7 +338,7 @@ export default function Products() {
               <Field label="Impuesto"><select className="select" value={edit.tax_ids[0] ?? ""} onChange={(e) => setEdit({ ...edit, tax_ids: e.target.value ? [Number(e.target.value)] : [] })}><option value="">Sin impuesto</option>{taxes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></Field>
               <Field label="Buscar CABYS" hint="Por descripción (ej. cámara de video): trae el código y el impuesto sugerido."><Lookup value={edit.cabys_description} placeholder="Buscar en el catálogo de Hacienda…" fetcher={searchCabys} disabled={!canEdit} onSelect={(it, text) => { if (it) pickCabys(it); else setEdit({ ...edit, cabys_description: text }); }} /></Field>
               <Field label="Código CABYS" hint="13 dígitos (Hacienda)."><input className="input input--mono" style={{ textAlign: "left" }} maxLength={13} value={edit.cabys_code} onChange={(e) => setEdit({ ...edit, cabys_code: e.target.value.replace(/\D/g, "") })} /></Field>
-              <Field label="Bodega de origen" hint="De qué inventario sale este producto."><select className="select" value={edit.warehouse_id} onChange={(e) => setEdit({ ...edit, warehouse_id: e.target.value })}><option value="">—</option>{(opts?.warehouses || []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
+              <Field label="Bodega predeterminada de salida" hint="De dónde sale por defecto al vender o despachar. No agrega unidades: las existencias reales por bodega están en Inventarios."><select className="select" value={edit.warehouse_id} onChange={(e) => setEdit({ ...edit, warehouse_id: e.target.value })}><option value="">—</option>{(opts?.warehouses || []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
               <Field label="Unidad"><input className="input" value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} /></Field>
               <Field label="Stock mínimo"><input className="input input--mono" type="number" value={edit.min_stock} onChange={(e) => setEdit({ ...edit, min_stock: Number(e.target.value) })} /></Field>
               <Field label="Categoría">
@@ -364,8 +365,10 @@ export default function Products() {
               <div className="muted" style={{ fontSize: 12.5, marginTop: 8, display: "grid", gap: 4 }}>
                 <span><AvailBadge a={avail} /> {availText(avail)}{avail.supplier_updated_at && ` (${parseTs(avail.supplier_updated_at).toLocaleString("es-CR", { timeZone: "America/Costa_Rica", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })})`}</span>
                 {!!avail.bodegas?.length && <span>Por bodega de venta: {avail.bodegas.map((b) => `${b.nombre} ${qty(b.disponible)}`).join(" · ")}</span>}
-                {avail.supplier_unlinked_qty ? <span style={{ color: "var(--warn)" }}>Tiene proveedor pero ningún ítem de su lista vinculado: su existencia no cuenta. Vinculalo en <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link>.</span> : null}
+                {avail.supplier_unlinked_qty ? <span style={{ color: "var(--warn)" }}>Tiene proveedor pero ningún ítem de su lista vinculado: su existencia no cuenta. Vinculalo en <Link to="/proveedores">Catálogos de proveedores</Link>.</span> : null}
                 {avail.label_publico && <span>Lo que ve el cliente en la tienda: <b>{avail.label_publico}</b></span>}
+                {/* auditoria 10/11: la ficha lleva a los documentos del producto sin recorrer pestañas */}
+                {allows("inventory.ver") && edit.id && <span><Link to={`/inventario?tab=movimientos&pid=${edit.id}&pcode=${encodeURIComponent(edit.code)}&pname=${encodeURIComponent(edit.name)}`}>Movimientos y existencias por bodega</Link>{allows("purchases.ver") && <> · <Link to="/compras">Compras</Link></>}</span>}
               </div>
             )}
           </>}
@@ -433,7 +436,7 @@ function MarginCell({ p }: { p: Row }) {
   return <span className="mono" style={{ fontWeight: 700, color: marginTone(m) }}>{m.toFixed(1)} %{hold}</span>;
 }
 
-/* Ficha: las ofertas de proveedores vinculadas (Inventarios → Proveedores). La mejor alimenta costo y "Bajo pedido". */
+/* Ficha: las ofertas de proveedores vinculadas (Catálogos de proveedores). La mejor alimenta costo y "Bajo pedido". */
 function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostInfo | null }) {
   return (
     <div style={{ marginTop: 14 }}>
@@ -448,7 +451,7 @@ function SupplierOffers({ offers, info }: { offers: Offer[] | null; info: CostIn
         </p>
       )}
       {offers === null ? <p className="meta">Cargando…</p> : offers.length === 0 ? (
-        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/inventario?tab=proveedores">Inventarios → Proveedores</Link> puede vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
+        <p className="muted" style={{ fontSize: 12.5, margin: "6px 0 0" }}>Sin ofertas vinculadas. En <Link to="/proveedores">Catálogos de proveedores</Link> puede vincular este producto con el ítem de la lista del proveedor: el costo y la existencia del proveedor se actualizan solos con cada lista.</p>
       ) : (
         <table className="table" style={{ marginTop: 6 }}>
           <thead><tr><th>Proveedor</th><th>Código</th><th className="num">Existencia</th><th className="num">Costo</th><th className="num">Costo ₡</th><th>Lista</th></tr></thead>

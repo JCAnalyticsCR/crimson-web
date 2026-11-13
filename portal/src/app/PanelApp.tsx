@@ -13,7 +13,8 @@ const DocList = lazy(() => import("../modules/sales/DocList"));
 const DocEditor = lazy(() => import("../modules/sales/DocEditor"));
 const InvoiceDetail = lazy(() => import("../modules/sales/InvoiceDetail"));
 const Customers = lazy(() => import("../modules/crm/Customers"));
-const Products = lazy(() => import("../modules/catalog/Products"));
+const Products = lazy(() => import("../modules/catalog/ProductsHub"));
+const SupplierCatalogs = lazy(() => import("../modules/inventory/Suppliers"));
 const CabysBulk = lazy(() => import("../modules/catalog/CabysBulk"));
 const Margins = lazy(() => import("../modules/catalog/Margins"));
 const ContentReview = lazy(() => import("../modules/catalog/ContentReview"));
@@ -216,6 +217,7 @@ function App() {
         <Route path="/aliados" element={g("aliados.ver", <Allies />)} />
         <Route path="/aliados/:id" element={g("aliados.ver", <AllyDetail />)} />
         <Route path="/productos" element={g("catalog.ver", <Products />)} />
+        <Route path="/proveedores" element={g("catalog.ver", <SupplierCatalogs />)} />
         <Route path="/productos/cabys" element={g("catalog.editar", <CabysBulk />)} />
         <Route path="/productos/margenes" element={g("catalog.costos", <Margins />)} />
         <Route path="/productos/contenido" element={g("catalog.editar", <ContentReview />)} />

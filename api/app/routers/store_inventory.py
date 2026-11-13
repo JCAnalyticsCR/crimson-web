@@ -120,12 +120,16 @@ def web_inventory(
     items = []
     # el tecnico (y el aliado) tienen inventory.ver para las cantidades, pero nunca ven precios (13/10, 22:07)
     precios = p.sees_prices
-    summary = {"publicados": 0, "en_bodega": 0, "bajo_pedido": 0, "consultar": 0, "agotado": 0, "alertas": 0, "reservado_pedidos": Decimal(0), "avisos": 0}
+    summary = {"publicados": 0, "en_bodega": 0, "bajo_pedido": 0, "consultar": 0, "agotado": 0, "alertas": 0, "reservado_pedidos": Decimal(0), "avisos": 0, "ocultos": 0}
     if estado == "disponible":  # nombre viejo del estado
         estado = "en_bodega"
     for x in prods:
         a = av.get(x.id) or {}
-        alerta = bool(x.show_on_web and a.get("estado") in ("agotado", "consultar"))
+        # auditoria 10/11: alerta = algo que pide accion, no cualquier agotado. Publicado que no se puede comprar Y con
+        # demanda o vitrina: clientes esperando aviso, pedidos web que lo reservan, o destacado en la portada. Un agotado
+        # sin demanda sigue en el filtro "Agotados" (es informacion comercial, no una tarea).
+        sin_venta = bool(x.show_on_web and a.get("estado") in ("agotado", "consultar"))
+        alerta = sin_venta and bool(waiting.get(x.id, 0) or (a.get("reservado_web") or 0) or x.web_featured)
         row = {
             "id": x.id,
             "code": x.code,
@@ -158,6 +162,7 @@ def web_inventory(
             summary["publicados"] += 1
             summary[a.get("estado")] = summary.get(a.get("estado"), 0) + 1
             summary["alertas"] += int(alerta)
+            summary["ocultos"] += int(bool(a.get("ocultar")))
         summary["reservado_pedidos"] += Decimal(str(a.get("reservado_web") or 0))
         summary["avisos"] += waiting.get(x.id, 0)
         if estado == "alertas" and not alerta:
