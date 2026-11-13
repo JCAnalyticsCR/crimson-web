@@ -18,6 +18,7 @@ from ..models import Customer, Expense, ExpenseCategory, Invoice, Quote, Recurre
 from ..schemas.sales import DocumentIn
 from ..services import documents as docsvc
 from ..services import einvoice as esvc
+from ..services import expense_payment as xpay
 from ..services import inventory as inv
 from ..services import reports as rp
 from ..services.ally_access import PLAN_ORDER  # marca de las facturas de mensualidad (plan 1.4)
@@ -666,6 +667,12 @@ def _exp_out(e: Expense, db: Session, bank_ids: set[int] | None = None, hmap: di
         # sin XML no hay comprobante ante Hacienda (ni credito de IVA por factura electronica)
         "hacienda": (hmap or {}).get(e.received_document_id) if e.received_document_id else None,
         "from_commission": _from_commission(e),  # lo registro Comisiones al marcarla pagada: se ajusta desde alli
+        # pago (reunion con la contadora 10/11): pendiente | pagado | anterior (antes del corte con Fygaro) | anulado
+        "pay_state": xpay.pay_state(e),
+        "paid_date": e.paid_date,
+        "payment_reference": e.payment_reference,
+        "xml_condition": e.xml_condition,
+        "pay_hint": xpay.hint(e),  # «Contado según XML»: pista, no decide si esta pagado
     }
 
 
@@ -675,8 +682,10 @@ def _from_commission(e: Expense) -> bool:
     return is_commission_ref(e.reference) and not e.received_document_id
 
 
-def _expense_query(p: Principal, from_, to, category_id, supplier_id, currency, status, q):
+def _expense_query(p: Principal, from_, to, category_id, supplier_id, currency, status, q, pay_state=None):
     query = select(Expense).where(Expense.tenant_id == p.tenant.id)
+    if pay_state:
+        query = query.where(xpay.pay_state_where(pay_state))
     if from_:
         query = query.where(Expense.date >= from_)
     if to:
@@ -711,11 +720,12 @@ def expenses(
     currency: str | None = None,
     status: str | None = None,
     q: str | None = None,
+    pay_state: str | None = Query(None, pattern="^(pendiente|pagado|anterior|anulado)$"),
     p: Principal = Depends(require("accounting", "ver")),
     db: Session = Depends(get_db),
 ):
     bank_ids = _bank_created(db, p.tenant.id)
-    query = _expense_query(p, from_, to, category_id, supplier_id, currency, status, q).order_by(Expense.date.desc(), Expense.id.desc())
+    query = _expense_query(p, from_, to, category_id, supplier_id, currency, status, q, pay_state).order_by(Expense.date.desc(), Expense.id.desc())
     if origin:
         rows = _origin_filter(db.scalars(query).all(), origin, bank_ids)[offset : offset + limit]
     else:
@@ -734,11 +744,12 @@ def expenses_summary(
     currency: str | None = None,
     status: str | None = None,
     q: str | None = None,
+    pay_state: str | None = Query(None, pattern="^(pendiente|pagado|anterior|anulado)$"),
     p: Principal = Depends(require("accounting", "ver")),
     db: Session = Depends(get_db),
 ):
     bank_ids = _bank_created(db, p.tenant.id)
-    rows = _origin_filter(db.scalars(_expense_query(p, from_, to, category_id, supplier_id, currency, status, q)).all(), origin, bank_ids)
+    rows = _origin_filter(db.scalars(_expense_query(p, from_, to, category_id, supplier_id, currency, status, q, pay_state)).all(), origin, bank_ids)
     live = [e for e in rows if e.status != "anulado"]
     q2 = Decimal("0.01")
     return {
@@ -848,6 +859,9 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
 
     antes = snapshot(e)
     warnings: list[str] = []
+    if data.status != e.status and "pagado" in (data.status, e.status) and xpay.has_active_payment(db, e.id):
+        # el pago vive en Cuentas por pagar (asiento DR CxP / CR banco): se corrige con «Desmarcar», que pide el motivo
+        raise HTTPException(409, "Este gasto tiene un pago registrado: usá «Desmarcar pago» (pide el motivo) en lugar de cambiar el estado")
     if _from_commission(e):
         # reunion 2, pedido 2: el gasto de una comision pagada cuadra con el libro de comisiones. Monto, fecha, estado
         # y referencia solo cambian desde Comisiones (pagar / deshacer el pago); aqui, categoria, notas y pago.
@@ -891,6 +905,9 @@ def expense_update(eid: int, data: ExpenseIn, p: Principal = Depends(require("ac
             warnings.append("El gasto quedó anulado; el crédito de IVA sale del comprobante, no del gasto")
     else:
         warnings = _apply_expense(e, data, db)
+    if e.status != "pagado" and antes.get("status") == "pagado":
+        e.paid_date = None  # pagado "a mano" (sin pago en Cuentas por pagar) que se corrige desde el formulario
+        e.payment_reference = None
     _check_instrument(db, p, e)
     _audit_expense(db, p, e, antes, "update", data.reason)
     db.commit()

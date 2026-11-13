@@ -1,18 +1,23 @@
-"""Cuentas por pagar: pagos a proveedor, antigüedad, estado de cuenta, próximos vencimientos."""
+"""Cuentas por pagar: facturas pendientes de pago, «Marcar pagada», pagos a proveedor, antigüedad, estado de cuenta.
+
+Pendiente = gasto registrado desde el corte con Fygaro (services/expense_payment.CORTE), con monto positivo y saldo,
+sea de contado o de credito: la condicion del XML no decide si esta pagado (reunion con la contadora 10/11)."""
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
 from ..core.deps import Principal, require
+from ..core.timeutil import cr_today
 from ..models import BankAccount, Expense, Supplier, SupplierPayment, SupplierPaymentApplication
+from ..services import expense_payment as xp
 from ..services.bitacora import audit_change, snapshot
 from ..services.documents import audit
 from ..services.fx import FxMissing, for_date
@@ -28,25 +33,8 @@ def _d(v) -> Decimal:
     return Decimal(str(v or 0))
 
 
-def _applied_map(db: Session, expense_ids: list[int]) -> dict[int, Decimal]:
-    """Monto aplicado (suma de aplicaciones de pagos no anulados) por expense_id."""
-    if not expense_ids:
-        return {}
-    rows = db.execute(
-        select(SupplierPaymentApplication.expense_id, func.sum(SupplierPaymentApplication.amount))
-        .join(SupplierPayment, SupplierPayment.id == SupplierPaymentApplication.payment_id)
-        .where(
-            SupplierPaymentApplication.expense_id.in_(expense_ids),
-            SupplierPayment.status == "registrado",
-        )
-        .group_by(SupplierPaymentApplication.expense_id)
-    ).all()
-    return {r[0]: _d(r[1]) for r in rows}
-
-
-def _expense_balance(e: Expense, applied_map: dict[int, Decimal]) -> Decimal:
-    """Saldo del gasto en su propia moneda (total − aplicado)."""
-    return max(Decimal(0), _d(e.total) - applied_map.get(e.id, Decimal(0)))
+_applied_map = xp.applied_map  # monto aplicado (pagos no anulados) por gasto
+_expense_balance = xp.balance  # saldo del gasto en su moneda (total − aplicado)
 
 
 def _supplier(db: Session, sid: int, tid: int) -> Supplier:
@@ -64,12 +52,8 @@ def _payment(db: Session, pid: int, tid: int) -> SupplierPayment:
 
 
 def _open_expenses(db: Session, tid: int, supplier_id: int | None = None) -> list[Expense]:
-    """Gastos de crédito con saldo > 0 (no anulados, no completamente pagados)."""
-    q = select(Expense).where(
-        Expense.tenant_id == tid,
-        Expense.purchase_type == "credito",
-        Expense.status != "anulado",
-    )
+    """Facturas pendientes de pago con saldo > 0 (contado o crédito, desde el corte; ver services/expense_payment)."""
+    q = xp.pending_query(tid)
     if supplier_id is not None:
         q = q.where(Expense.supplier_id == supplier_id)
     rows = list(db.scalars(q.order_by(Expense.due_date.nullsfirst(), Expense.date)))
@@ -80,7 +64,7 @@ def _open_expenses(db: Session, tid: int, supplier_id: int | None = None) -> lis
 
 
 def _payment_out(pay: SupplierPayment, db: Session) -> dict:
-    sup = db.get(Supplier, pay.supplier_id)
+    sup = db.get(Supplier, pay.supplier_id) if pay.supplier_id else None
     return {
         "id": pay.id,
         "supplier_id": pay.supplier_id,
@@ -193,10 +177,13 @@ def create_payment(data: PaymentIn, p: Principal = Depends(require("accounting",
             e = expenses_map.get(app.expense_id)
             if not e:
                 raise HTTPException(404, f"Gasto {app.expense_id} no encontrado")
-            if e.purchase_type != "credito":
-                raise HTTPException(422, f"El gasto {app.expense_id} es de contado; sólo se pueden pagar gastos de crédito")
+            # contado o credito: la condicion del XML no decide si esta pagado (reunion con la contadora 10/11)
             if e.status == "anulado":
                 raise HTTPException(422, f"El gasto {app.expense_id} está anulado")
+            if e.status == "pagado":
+                raise HTTPException(422, f"El gasto {app.expense_id} ya está pagado")
+            if e.supplier_id and e.supplier_id != data.supplier_id:
+                raise HTTPException(422, f"El gasto {app.expense_id} es de otro proveedor")
             saldo = _expense_balance(e, am)
             if _d(app.amount) > saldo + Decimal("0.005"):  # tolerancia de centavo para FP
                 raise HTTPException(422, f"Sobrepago en gasto {app.expense_id}: saldo {saldo}, aplicado {app.amount}")
@@ -230,6 +217,11 @@ def create_payment(data: PaymentIn, p: Principal = Depends(require("accounting",
             e = expenses_map[app.expense_id]
             if _expense_balance(e, am_post) <= Decimal("0.005"):
                 e.status = "pagado"
+                # copia del pago en el gasto (la lista de gastos y la conciliacion leen paid_date)
+                e.paid_date = data.date
+                e.payment_method = data.method
+                e.bank_account_id = data.bank_account_id
+                e.payment_reference = data.reference
 
     audit(db, p.tenant.id, p.user.id, "create", "supplier_payment", pay.id, {"supplier": sup.name, "amount": float(data.amount), "method": data.method}, ip=p.ip)
     db.commit()
@@ -253,7 +245,7 @@ def void_payment(pid: int, data: VoidIn, p: Principal = Depends(require("account
     eids = [a.expense_id for a in pay.applications]
     if eids:
         for e in db.scalars(select(Expense).where(Expense.id.in_(eids))):
-            if e.status == "pagado" and e.purchase_type == "credito":
+            if e.status == "pagado":
                 # verificar si todavía tiene saldo > 0 después de anular
                 am = _applied_map(db, [e.id])  # aún incluye este pago porque no se ha flusheado
                 # el pago que se anula aporta sus aplicaciones; las restamos manualmente
@@ -261,6 +253,8 @@ def void_payment(pid: int, data: VoidIn, p: Principal = Depends(require("account
                 saldo_sin_este = _d(e.total) - (am.get(e.id, Decimal(0)) - _d(anulado_amount))
                 if saldo_sin_este > Decimal("0.005"):
                     e.status = "registrado"
+                    e.paid_date = None
+                    e.payment_reference = None
 
     audit_change(db, p, "update", "supplier_payment", pay.id, antes, snapshot(pay), reason=data.reason)
     db.commit()
@@ -274,8 +268,6 @@ def expense_balance(eid: int, p: Principal = Depends(require("accounting", "ver"
     e = db.get(Expense, eid)
     if not e or e.tenant_id != p.tenant.id:
         raise HTTPException(404, "Gasto no encontrado")
-    if e.purchase_type != "credito":
-        return {"expense_id": eid, "purchase_type": e.purchase_type, "balance": 0, "total": e.total, "applied": 0}
     am = _applied_map(db, [eid])
     applied = am.get(eid, Decimal(0))
     balance = max(Decimal(0), _d(e.total) - applied)
@@ -324,11 +316,12 @@ def _aging_buckets(today: date, e: Expense, balance: Decimal) -> dict:
 
 @router.get("/aging")
 def aging(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    """Antigüedad de saldos por proveedor (corriente, 1-30, 31-60, 61-90, >90 días)."""
-    today = date.today()
+    """Antigüedad de saldos por proveedor (corriente, 1-30, 31-60, 61-90, >90 días). `totals` mezcla monedas (se
+    conserva por compatibilidad); `by_currency` separa colones y dólares."""
+    today = cr_today()
     open_exps = _open_expenses(db, p.tenant.id)
     if not open_exps:
-        return {"rows": [], "totals": {"total": 0, "vencido": 0, "corriente": 0, "d1_30": 0, "d31_60": 0, "d61_90": 0, "d90_mas": 0}}
+        return {"rows": [], "totals": {"total": 0, "vencido": 0, "corriente": 0, "d1_30": 0, "d31_60": 0, "d61_90": 0, "d90_mas": 0}, "by_currency": {}}
 
     am = _applied_map(db, [e.id for e in open_exps])
     sups = {s.id: s for s in db.scalars(select(Supplier).where(Supplier.tenant_id == p.tenant.id))}
@@ -389,7 +382,12 @@ def aging(p: Principal = Depends(require("accounting", "ver")), db: Session = De
         "d61_90": sum(r["d61_90"] for r in out),
         "d90_mas": sum(r["d90_mas"] for r in out),
     }
-    return {"rows": out, "totals": totals}
+    by_currency: dict[str, dict] = {}
+    for r in out:
+        t = by_currency.setdefault(r["currency"], {k: 0.0 for k in ("corriente", "d1_30", "d31_60", "d61_90", "d90_mas", "vencido", "total")})
+        for k in t:
+            t[k] += r[k]
+    return {"rows": out, "totals": totals, "by_currency": by_currency}
 
 
 # ---------- Resumen ejecutivo ----------
@@ -399,18 +397,20 @@ def summary(p: Principal = Depends(require("accounting", "ver")), db: Session = 
     """Total por pagar, vencido y vence en los próximos 7 días (en CRC)."""
     from ..services.fx import doc_rate
 
-    today = date.today()
+    today = cr_today()
     week = date.fromordinal(today.toordinal() + 7)
     open_exps = _open_expenses(db, p.tenant.id)
     if not open_exps:
-        return {"total_crc": 0, "vencido_crc": 0, "semana_crc": 0, "count": 0}
+        return {"total_crc": 0, "vencido_crc": 0, "semana_crc": 0, "count": 0, "by_currency": {}}
 
     am = _applied_map(db, [e.id for e in open_exps])
     total_crc = vencido_crc = semana_crc = Decimal(0)
+    by_currency: dict[str, Decimal] = {}
     for e in open_exps:
         bal = _expense_balance(e, am)
         if bal <= 0:
             continue
+        by_currency[e.currency] = by_currency.get(e.currency, Decimal(0)) + bal
         try:
             rate = doc_rate(db, e.currency, e.fx_rate, e.date)
         except FxMissing:
@@ -428,6 +428,7 @@ def summary(p: Principal = Depends(require("accounting", "ver")), db: Session = 
         "vencido_crc": float(vencido_crc),
         "semana_crc": float(semana_crc),
         "count": len(open_exps),
+        "by_currency": {k: float(v) for k, v in sorted(by_currency.items())},
     }
 
 
@@ -435,14 +436,9 @@ def summary(p: Principal = Depends(require("accounting", "ver")), db: Session = 
 
 @router.get("/upcoming")
 def upcoming(p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
-    today = date.today()
+    today = cr_today()
     week = date.fromordinal(today.toordinal() + 7)
-    q = select(Expense).where(
-        Expense.tenant_id == p.tenant.id,
-        Expense.purchase_type == "credito",
-        Expense.status != "anulado",
-    ).order_by(Expense.due_date.nullsfirst(), Expense.date)
-    rows = list(db.scalars(q))
+    rows = _open_expenses(db, p.tenant.id)
     if not rows:
         return []
     am = _applied_map(db, [e.id for e in rows])
@@ -473,15 +469,16 @@ def upcoming(p: Principal = Depends(require("accounting", "ver")), db: Session =
 @router.get("/suppliers/{sid}/statement")
 def supplier_statement(sid: int, p: Principal = Depends(require("accounting", "ver")), db: Session = Depends(get_db)):
     sup = _supplier(db, sid, p.tenant.id)
-    today = date.today()
+    today = cr_today()
 
-    # gastos de crédito
+    # facturas desde el corte (contado o crédito); lo anterior quedó en Fygaro
     expenses = list(db.scalars(
         select(Expense).where(
             Expense.tenant_id == p.tenant.id,
             Expense.supplier_id == sid,
-            Expense.purchase_type == "credito",
             Expense.status != "anulado",
+            Expense.date >= xp.CORTE,
+            Expense.total > 0,
         ).order_by(Expense.date)
     ))
     am = _applied_map(db, [e.id for e in expenses]) if expenses else {}
@@ -500,7 +497,8 @@ def supplier_statement(sid: int, p: Principal = Depends(require("accounting", "v
             "applied": float(am.get(e.id, Decimal(0))),
             "balance": float(bal),
             "status": e.status,
-            "overdue": due < today and bal > 0,
+            "paid_date": e.paid_date,
+            "overdue": due < today and bal > 0 and e.status != "pagado",
         })
 
     # pagos
@@ -544,3 +542,71 @@ def supplier_open_expenses(sid: int, p: Principal = Depends(require("accounting"
         }
         for e in open_exps
     ]
+
+
+# ---------- Facturas pendientes de pago y «Marcar pagada» (reunión con la contadora 10/11) ----------
+
+@router.get("/pending")
+def pending(
+    as_of: date | None = None,
+    supplier_id: int | None = None,
+    currency: str | None = Query(None, pattern="^[A-Z]{3}$"),
+    p: Principal = Depends(require("accounting", "ver")),
+    db: Session = Depends(get_db),
+):
+    """Facturas de proveedor pendientes de pago (desde el corte con Fygaro): vencimiento, antigüedad (al día, 1-30,
+    31-60, 61-90, +90) y totales por moneda. La condición del XML va como pista, no decide."""
+    ref = as_of or cr_today()
+    rows = xp.pending_rows(db, p.tenant.id, ref, supplier_id, currency)
+    return {"as_of": ref, "cutoff": xp.CORTE, "rows": rows, "totals": xp.totals_by_currency(rows)}
+
+
+class MarkPaidIn(BaseModel):
+    expense_ids: list[int] = Field(min_length=1, max_length=200)
+    paid_date: date
+    method: str
+    bank_account_id: int | None = None
+    bank_instrument_id: int | None = None
+    check_number: str | None = Field(None, max_length=20)
+    reference: str | None = Field(None, max_length=120)
+    note: str | None = Field(None, max_length=2000)
+    before_invoice_ok: bool = False  # la fecha de pago es anterior a la factura (adelanto): confirmado por quien marca
+
+
+@router.post("/mark-paid")
+def mark_paid(data: MarkPaidIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """Marca pagadas una o varias facturas con el mismo pago. Todo o nada."""
+    from .ops import _exp_out
+
+    exps, warnings = xp.mark_paid(
+        db,
+        p,
+        data.expense_ids,
+        paid_date=data.paid_date,
+        method=data.method,
+        bank_account_id=data.bank_account_id,
+        bank_instrument_id=data.bank_instrument_id,
+        check_number=data.check_number,
+        reference=data.reference,
+        note=data.note,
+        before_invoice_ok=data.before_invoice_ok,
+    )
+    db.commit()
+    return {"paid": [_exp_out(e, db) for e in exps], "warnings": warnings}
+
+
+class UnmarkIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+@router.post("/expenses/{eid}/unmark")
+def unmark_paid(eid: int, data: UnmarkIn, p: Principal = Depends(require("accounting", "editar")), db: Session = Depends(get_db)):
+    """Desmarca el pago de una factura (corrección): anula el pago y el motivo queda en la bitácora."""
+    from .ops import _exp_out
+
+    e = db.get(Expense, eid)
+    if not e or e.tenant_id != p.tenant.id:
+        raise HTTPException(404, "Gasto no encontrado")
+    xp.unmark_paid(db, p, e, data.reason.strip())
+    db.commit()
+    return _exp_out(e, db)

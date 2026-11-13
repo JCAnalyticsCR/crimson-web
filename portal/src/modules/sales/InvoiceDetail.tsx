@@ -11,6 +11,8 @@ import { HaciendaMensaje } from "../../ui/HaciendaMensaje";
 import { hoyCR } from "../../lib/fechaCR";
 
 const METHODS = [["efectivo", "Efectivo"], ["sinpe", "SINPE Móvil"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["onvo", "ONVO (en línea)"], ["paypal", "PayPal"]];
+// cobros que entran a una cuenta: la referencia y la cuenta son las que la conciliacion cruza con el estado de cuenta
+const CON_CUENTA = ["sinpe", "transferencia"];
 const KINDS = [["captura", "Captura (recibido)"], ["autorizacion", "Autorización"], ["devolucion", "Devolución"], ["reembolso", "Reembolso"], ["reautorizacion", "Re-autorización"]];
 type XmlDoc = {
   id: number; doc_type: string; consecutive: string; clave: string | null; status: string; message: string | null; provider: string; has_document: boolean; has_response: boolean;
@@ -43,14 +45,23 @@ export default function InvoiceDetail() {
   const loadXml = () => api(`/invoices/${id}/xml`).then((r) => setXmls(r as never)).catch((e) => toast(e.message, "bad"));
   const sendNc = async () => { if (!nc) return; try { const r = await api<{ status: string }>(`/invoices/${id}/credit-note`, { method: "POST", json: { reason: nc } }); toast(r.status === "aceptada" ? "Nota de crédito aceptada; factura anulada" : "Nota de crédito enviada a Hacienda: la factura se anula cuando Hacienda la acepte"); setNc(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
   const sendMail = async () => { if (!mail) return; try { const r = await api<{ status: string; sent: boolean; note: string | null }>(`/invoices/${id}/email`, { method: "POST", json: { to: mail.to || null, message: mail.message || null } }); toast(r.note || `Correo ${r.status}`, r.sent ? undefined : "bad"); setMail(null); reload(); } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); } };
-  const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: hoyCR(), notify_customer: true });
+  const [form, setForm] = useState({ method: "sinpe", kind: "captura", amount: "", external_ref: "", paid_at: hoyCR(), bank_account_id: "", notify_customer: true });
+  const [cuentas, setCuentas] = useState<{ id: number; name: string; currency: string }[]>([]);
   const reload = () => { api<Invoice>(`/invoices/${id}`).then(setInv); api<XmlDoc[]>(`/invoices/${id}/xml`).then(setDocs).catch(() => setDocs([])); };
   useEffect(() => { reload(); }, [id]);
   useEffect(() => { api<{ mode: string; production_since?: string | null }>("/fiscal/mode").then((r) => { setFmode(r.mode); setSince(r.production_since ?? null); }).catch(() => setFmode(null)); }, []);
   useEffect(() => { if (inv) setForm((f) => ({ ...f, amount: f.amount || inv.balance })); }, [inv]);
+  // cuentas bancarias: solo quien ve contabilidad (el vendedor registra "por confirmar" y la cuenta la pone quien confirma)
+  useEffect(() => { if (pay && allows("accounting.ver")) api<{ id: number; name: string; currency: string }[]>("/banking/accounts").then(setCuentas).catch(() => setCuentas([])); }, [pay]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitPay = async () => {
-    try { setInv(await api<Invoice>(`/invoices/${id}/payments`, { method: "POST", json: { ...form, amount: form.amount } })); setPay(false); toast("Pago registrado"); }
+    const pideRef = CON_CUENTA.includes(form.method) && form.kind === "captura";
+    if (!form.paid_at) { toast("Indicá la fecha del cobro", "bad"); return; }
+    if (form.paid_at > hoyCR()) { toast("La fecha del cobro no puede ser futura", "bad"); return; }
+    if (pideRef && !form.external_ref.trim()) { toast("Indicá la referencia (comprobante SINPE o número de transferencia)", "bad"); return; }
+    if (pideRef && cuentas.length > 0 && !form.bank_account_id) { toast("Indicá la cuenta bancaria donde entró el pago", "bad"); return; }
+    const json = { ...form, amount: form.amount, external_ref: form.external_ref.trim() || null, bank_account_id: form.bank_account_id ? Number(form.bank_account_id) : null };
+    try { setInv(await api<Invoice>(`/invoices/${id}/payments`, { method: "POST", json })); setPay(false); toast("Pago registrado"); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   const undoMark = async () => {
@@ -151,8 +162,16 @@ export default function InvoiceDetail() {
             <Field label="Monto"><input className="input input--mono" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
             <Field label="Método"><select className="select" value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
             <Field label="Tipo"><select className="select" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
-            <Field label="Referencia externa" hint="Comprobante SINPE, número de transferencia…"><input className="input" value={form.external_ref} onChange={(e) => setForm({ ...form, external_ref: e.target.value })} /></Field>
-            <Field label="Fecha"><input className="input" type="date" value={form.paid_at} onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></Field>
+            <Field label={CON_CUENTA.includes(form.method) ? "Referencia" : "Referencia (opcional)"} hint="Comprobante SINPE, número de transferencia…: tal como sale en el estado de cuenta."><input className="input input--mono" value={form.external_ref} onChange={(e) => setForm({ ...form, external_ref: e.target.value })} /></Field>
+            <Field label="Fecha del cobro"><input className="input" type="date" max={hoyCR()} value={form.paid_at} onChange={(e) => setForm({ ...form, paid_at: e.target.value })} /></Field>
+            {cuentas.length > 0 && (
+              <Field label={CON_CUENTA.includes(form.method) ? "Cuenta donde entró" : "Cuenta (opcional)"}>
+                <select className="select" value={form.bank_account_id} onChange={(e) => setForm({ ...form, bank_account_id: e.target.value })}>
+                  <option value="">—</option>
+                  {cuentas.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.currency}</option>)}
+                </select>
+              </Field>
+            )}
           </div>
           <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}><input type="checkbox" checked={form.notify_customer} onChange={(e) => setForm({ ...form, notify_customer: e.target.checked })} />Enviar confirmación de pago al cliente</label>
         </Modal>

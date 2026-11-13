@@ -474,6 +474,9 @@ def build_expense_entry(db: Session, expense: Expense) -> _Entry | None:
     # Contrapartida
     if expense.purchase_type == "credito":
         contra_role = _cxp_role(currency)
+    elif _paid_through_cxp(db, expense.id):
+        # «Marcar pagada» (cuentas por pagar): el pago es su propio asiento DR CxP / CR banco; el gasto va a CxP
+        contra_role = _cxp_role(currency)
     elif expense.bank_account_id:
         contra_role = bank_role(expense.bank_account_id)
     else:
@@ -499,6 +502,34 @@ def build_expense_entry(db: Session, expense: Expense) -> _Entry | None:
         currency=currency,
         lines=lines,
     )
+
+
+def _paid_through_cxp(db: Session, expense_id: int) -> bool:
+    """El gasto tiene (o tuvo) un pago a proveedor aplicado: su contrapartida es CxP, nunca el banco directo."""
+    from ..models import SupplierPaymentApplication
+
+    return db.scalar(select(SupplierPaymentApplication.id).where(SupplierPaymentApplication.expense_id == expense_id).limit(1)) is not None
+
+
+def _drop_unexported(db: Session, tenant_id: int, source_type: str, source_id: int) -> bool:
+    """Documento anulado cuyo asiento normal nunca se exporto: se borra (no hay nada que revertir en QuickBooks).
+    True si no queda nada por revertir; False si ya se exporto (el reverso va como ajuste via upsert_entry)."""
+    je = db.scalar(
+        select(JournalEntry).where(
+            JournalEntry.tenant_id == tenant_id,
+            JournalEntry.source_type == source_type,
+            JournalEntry.source_id == source_id,
+            JournalEntry.kind == "normal",
+        )
+    )
+    if je is not None and je.export_id:
+        return False
+    if je is not None:
+        for jl in list(je.lines):
+            db.delete(jl)
+        db.delete(je)
+        db.flush()
+    return True
 
 
 def supplier_payment_lines(
@@ -1074,6 +1105,10 @@ def regenerate_all(db: Session, tenant_id: int, month: str) -> dict:
             SupplierPayment.date <= b,
         )
     ):
+        # anulado sin exportar (p. ej. «Desmarcar pago» en el mismo mes): sin asiento; exportado: reverso como ajuste
+        if sp.status == "anulado" and _drop_unexported(db, tenant_id, "supplier_payment", sp.id):
+            skipped += 1
+            continue
         _try(build_supplier_payment_entry, sp)
 
     # Planillas

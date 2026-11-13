@@ -156,22 +156,27 @@ def test_pago_usd_con_fx(client, auth, db_session):
     assert bal["balance"] == pytest.approx(100, rel=1e-2)
 
 
-# ---------- 5. Gasto de contado no es aplicable ----------
+# ---------- 5. Gasto de contado: tambien se paga (reunion con la contadora 10/11) ----------
 
-def test_gasto_contado_no_aplicable(client, auth):
+def test_gasto_contado_tambien_se_paga(client, auth):
+    """La condicion contado/credito no decide si esta pagado: un gasto de contado pendiente acepta el pago; uno ya
+    pagado o anulado no."""
     sid = _mk_supplier(client)
     exp = _mk_expense(client, supplier_id=sid, total=5_000, purchase_type="contado")
     eid = exp["id"]
-
-    r = client.post("/cxp/payments", json={
+    body = {
         "supplier_id": sid,
         "date": date.today().isoformat(),
         "amount": 5_000,
         "currency": "CRC",
         "method": "efectivo",
         "applications": [{"expense_id": eid, "amount": 5_000}],
-    })
-    assert r.status_code == 422
+    }
+    r = client.post("/cxp/payments", json=body)
+    assert r.status_code == 201, r.text
+    g = next(e for e in client.get("/expenses").json() if e["id"] == eid)
+    assert g["status"] == "pagado" and g["paid_date"] == date.today().isoformat() and g["pay_state"] == "pagado"
+    assert client.post("/cxp/payments", json=body).status_code == 422  # ya pagado
 
 
 # ---------- 6. Antigüedad ----------

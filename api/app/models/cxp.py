@@ -15,7 +15,8 @@ class SupplierPayment(TenantMixin, TimestampMixin, Base):
     __tablename__ = "supplier_payment"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    supplier_id: Mapped[int] = mapped_column(ForeignKey("supplier.id"), index=True)
+    # sin proveedor: «Marcar pagada» de un gasto que no tiene proveedor (servicios publicos, caja chica)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("supplier.id"), index=True)
     date: Mapped[date] = mapped_column(Date, index=True)
     amount: Mapped[float] = mapped_column(Numeric(16, 5))
     currency: Mapped[str] = mapped_column(String(3), default="CRC")

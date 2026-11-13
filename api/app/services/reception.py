@@ -174,6 +174,10 @@ def create_expense_from_document(
         purchase_type="contado",
         **amounts,
     )
+    # queda pendiente de pago hasta que alguien lo confirme; la condicion del XML solo es pista y vencimiento
+    from .expense_payment import apply_xml_terms
+
+    apply_xml_terms(e, doc)
     db.add(e)
     db.flush()
     doc.expense_id = e.id
