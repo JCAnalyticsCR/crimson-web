@@ -62,6 +62,7 @@ from .routers import (
 )
 from .routers import bitacora as bitacora_router
 from .routers import cartera as cartera_router
+from .routers import expense_tax as expense_tax_router
 from .routers import fiscal_queue as fiscal_queue_router
 from .routers import invoice_proofs as invoice_proofs_router
 from .routers import public_quotes as public_quotes_router
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(store_seo.seo)
     app.include_router(reception.router)
     app.include_router(accounting.router)
+    app.include_router(expense_tax_router.router)  # IVA por tarifa y categoria automatica de gastos (10/11)
     app.include_router(quickbooks.router)  # asientos QBO (conta-asientos)
     app.include_router(public_api.admin)
     app.include_router(public_api.v1)

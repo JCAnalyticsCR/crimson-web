@@ -30,6 +30,7 @@ from .core import (
 )
 from .crm import Customer
 from .cxp import SupplierPayment, SupplierPaymentApplication
+from .expense_tax import ExpenseTaxLine, SupplierCategoryRule
 from .extra import (
     BankStatementLine,
     CustomerContact,
@@ -152,6 +153,8 @@ __all__ = [
     "StockLock",
     "ExpenseCategory",
     "Expense",
+    "ExpenseTaxLine",
+    "SupplierCategoryRule",
     "Recurrence",
     "EInvoiceDocument",
     "EmailOutbox",

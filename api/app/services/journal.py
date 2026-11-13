@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     AccountingPeriod,
+    AccountingRoleMapping,
     Commission,
     Customer,
     EInvoiceDocument,
@@ -396,13 +397,45 @@ def build_payment_entry(db: Session, payment: Payment) -> _Entry | None:
     )
 
 
+def _mapped_rate_roles(db: Session, tenant_id: int) -> set[str]:
+    """Roles de IVA por tarifa (opcionales) que la empresa ya mapeo a una cuenta de QBO."""
+    from .expense_tax import RATE_ROLES
+
+    keys = [k for k, _ in RATE_ROLES]
+    return set(
+        db.scalars(
+            select(AccountingRoleMapping.role_key).where(
+                AccountingRoleMapping.tenant_id == tenant_id,
+                AccountingRoleMapping.role_key.in_(keys),
+                AccountingRoleMapping.qbo_account_id.is_not(None),
+            )
+        )
+    )
+
+
+def _signed(role_key: str, amount: Decimal, *, currency: str, fx: Decimal | None, description: str, position: int, debit: bool = True) -> _Line | None:
+    """Linea con el lado segun el signo (una nota de credito del proveedor invierte el asiento)."""
+    amt = D(amount)
+    if amt == 0:
+        return None
+    side = "debe" if (amt > 0) == debit else "haber"
+    return _Line(role_key=role_key, side=side, amount=abs(amt), currency=currency, fx=fx, description=description, position=position)
+
+
 def build_expense_entry(db: Session, expense: Expense) -> _Entry | None:
-    """Gasto / factura de proveedor.
+    """Gasto / factura de proveedor, con el IVA por tarifa (services/expense_tax.tax_breakdown).
 
     purchase_type='credito'  → DR gasto+IVA / CR CxP
     purchase_type='contado'  → DR gasto+IVA / CR banco (o CxP si sin banco)
     status='anulado'         → None
+
+    Por cada tarifa del desglose: DR gasto (base + IVA no acreditable, que ES gasto) y DR IVA acreditable. Si la
+    empresa mapeo la cuenta de la tarifa (iva_acreditable_13, iva_no_acreditable_4...) la linea va a esa cuenta; si
+    no, al IVA acreditable general y el no acreditable queda en el gasto. Una NC del proveedor (montos negativos)
+    invierte los lados. Siempre cuadra: la contrapartida es el total y las partes suman el total.
     """
+    from .expense_tax import credit_role, no_credit_role, tax_breakdown
+
     if expense.status == "anulado":
         return None
 
@@ -410,48 +443,33 @@ def build_expense_entry(db: Session, expense: Expense) -> _Entry | None:
     currency = expense.currency.upper()
     fx = D(expense.fx_rate) if currency == "USD" and D(expense.fx_rate) > 1 else None
 
-    # IVA acreditable / no acreditable
-    if expense.tax_credit_amount is not None:
-        iva_cred = D(expense.tax_credit_amount)
-    else:
-        iva_cred = Decimal(0)
-    iva_no_cred = D(expense.tax_amount) - iva_cred
-    if iva_no_cred < 0:
-        iva_no_cred = Decimal(0)
-
     # Cuenta del gasto (por categoría o genérica)
     if expense.category_id:
         gasto_role = expense_cat_role(expense.category_id)
     else:
         gasto_role = "otros_ingresos"  # sin categoría → mapear manualmente
 
-    subtotal = D(expense.subtotal)
-    total_gasto = subtotal + iva_no_cred  # lo que va al gasto (IVA no acreditable ES gasto)
+    parts = tax_breakdown(db, expense)
+    mapped = _mapped_rate_roles(db, expense.tenant_id) if any(p.is_iva for p in parts) else set()
+    solo = len(parts) == 1
+    desc = expense.description[:200]
 
-    pos = 0
-    if total_gasto > 0:
-        lines.append(_Line(
-            role_key=gasto_role,
-            side="debe",
-            amount=total_gasto,
-            currency=currency,
-            fx=fx,
-            description=expense.description[:200],
-            position=pos,
-        ))
-        pos += 1
+    def add(ln: _Line | None) -> None:
+        if ln is not None:
+            ln.position = len(lines)
+            lines.append(ln)
 
-    if iva_cred > 0:
-        lines.append(_Line(
-            role_key="iva_acreditable",
-            side="debe",
-            amount=iva_cred,
-            currency=currency,
-            fx=fx,
-            description=f"IVA acreditable – {expense.description[:100]}",
-            position=pos,
-        ))
-        pos += 1
+    for part in parts:
+        label = part.label
+        no_cred_role = no_credit_role(part.rate) if part.is_iva else None
+        own_no_cred = no_cred_role in mapped and part.no_acreditable != 0
+        gasto = part.base + (Decimal(0) if own_no_cred else part.no_acreditable)
+        add(_signed(gasto_role, gasto, currency=currency, fx=fx, position=0, description=desc if solo else f"{desc[:150]} · {label}"))
+        if own_no_cred:
+            add(_signed(no_cred_role, part.no_acreditable, currency=currency, fx=fx, position=0, description=f"IVA no acreditable {label} – {desc[:100]}"))
+        if part.acreditable != 0:
+            role = credit_role(part.rate) if credit_role(part.rate) in mapped else "iva_acreditable"
+            add(_signed(role, part.acreditable, currency=currency, fx=fx, position=0, description=f"IVA acreditable {label} – {desc[:100]}"))
 
     # Contrapartida
     if expense.purchase_type == "credito":
@@ -461,15 +479,9 @@ def build_expense_entry(db: Session, expense: Expense) -> _Entry | None:
     else:
         contra_role = _cxp_role(currency)
 
-    lines.append(_Line(
-        role_key=contra_role,
-        side="haber",
-        amount=D(expense.total),
-        currency=currency,
-        fx=fx,
-        description=expense.description[:200],
-        position=pos,
-    ))
+    add(_signed(contra_role, D(expense.total), currency=currency, fx=fx, position=0, description=desc, debit=False))
+    if not lines:  # gasto en cero: el asiento existe igual (como antes), con la contrapartida en cero
+        lines.append(_Line(role_key=contra_role, side="haber", amount=Decimal(0), currency=currency, fx=fx, description=desc))
 
     _add_rounding(lines)
 

@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint
+from sqlalchemy import false as sa_false
 from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -197,6 +198,9 @@ class Expense(TenantMixin, TimestampMixin, Base):
     recurrence_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     bank_instrument_id: Mapped[int | None] = mapped_column(ForeignKey("bank_instrument.id", name="fk_expense_bank_instrument"))
     check_number: Mapped[str | None] = mapped_column(String(20))
+    # la categoria la puso la regla del proveedor (services/expense_category): se ve como «automática» hasta que una
+    # persona la confirme o la cambie (y la regla aprende de esa correccion)
+    category_auto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
     __table_args__ = (UniqueConstraint("tenant_id", "recurrence_id", "recurrence_date", name="uq_expense_recurrence_date"),)
 

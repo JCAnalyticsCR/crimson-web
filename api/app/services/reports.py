@@ -194,13 +194,36 @@ def _expense_credit(e) -> Decimal | None:
     return Decimal(str(e.tax_amount or 0)) if e.iva_credit in ("credito", "bienes_capital") else Decimal(0)
 
 
+def _add_tarifas(acc: dict, parts, currency: str, fx) -> None:
+    """Suma las partes por tarifa (services/expense_tax) en colones: la base del D-104 por tarifa (10/11)."""
+    for p in parts:
+        row = acc.setdefault(
+            (p.kind, p.rate),
+            {"kind": p.kind, "label": p.label, "rate": p.rate, "base_crc": Decimal(0), "iva_crc": Decimal(0), "acreditable_crc": Decimal(0), "prorrata_crc": Decimal(0)},
+        )
+        row["base_crc"] += _to_crc(p.base, currency, fx)
+        row["iva_crc"] += _to_crc(p.tax, currency, fx)
+        row["acreditable_crc"] += _to_crc(p.acreditable, currency, fx)
+        if p.prorrata:
+            row["prorrata_crc"] += _to_crc(p.tax, currency, fx)
+
+
+def _tarifas_out(acc: dict) -> list[dict]:
+    from .expense_tax import KIND_ORDER
+
+    rows = sorted(acc.values(), key=lambda r: (KIND_ORDER.get(r["kind"], 9), -r["rate"]))
+    return [{**r, **{k: _q2(r[k]) for k in ("base_crc", "iva_crc", "acreditable_crc", "prorrata_crc")}} for r in rows]
+
+
 def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) -> dict:
     """D13: el credito de IVA sale de las recepciones respondidas (el mensaje receptor es el respaldo legal), no de los
     gastos. Los gastos ligados a una recepcion no aportan credito propio (sin doble conteo); los gastos manuales sin
     comprobante van en su propia linea con aviso (art. 11). Todo en colones."""
     from ..models import EInvoiceDocument, ReceivedDocument
+    from . import expense_tax
     from .documents import local_date
 
+    tarifas: dict = {}  # compras por tarifa (lo que cuenta en el credito o en la prorrata), en colones
     # ---- debito: facturas del periodo (las anuladas por NC siguen en su mes; la NC resta en el suyo)
     deb = Decimal(0)
     nc_inv = {
@@ -256,12 +279,14 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         if credit is None:  # proporcional
             if d.supplier_hacienda_status != "rechazado":
                 prop += _sign(d) * _to_crc(d.iva_total if d.iva_total is not None else d.tax_total, d.currency, fx)
+                _add_tarifas(tarifas, expense_tax.document_parts(d, None), d.currency, fx)
             continue
         amount = _sign(d) * _to_crc(credit, d.currency, fx)
         if d.supplier_hacienda_status == "rechazado":
             sin_respaldo += amount  # Hacienda se lo rechazo al proveedor: sin validez, no entra al "a pagar"
             continue
         xml_c += amount
+        _add_tarifas(tarifas, expense_tax.document_parts(d, credit), d.currency, fx)
         # confirmado = las DOS cosas: la factura aceptada al proveedor Y su respuesta en Produccion aceptada (o el
         # historico de Fygaro). Solo cambia la etiqueta "por confirmar", no el total acreditado (lo valida el contador)
         acuse_ok = d.supplier_hacienda_status == "aceptado"
@@ -294,6 +319,7 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
             prop += _to_crc(e.tax_amount, e.currency, _orate(db, e))
         else:
             manual += _to_crc(c, e.currency, _orate(db, e))
+        _add_tarifas(tarifas, expense_tax.tax_breakdown(db, e), e.currency, _orate(db, e))
     pct = Decimal(str(prorrata_pct)) if prorrata_pct not in (None, "") else None
     cred_prorrata = (prop * pct / Decimal(100)) if pct is not None else Decimal(0)
     credito = xml_c + manual
@@ -317,6 +343,8 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         "credito_prorrata_crc": _q2(cred_prorrata),
         "a_pagar_crc": _q2(deb - credito - cred_prorrata),
         "sin_confirmar": sin_confirmar[:50],
+        # 10/11 (contadora): compras por tarifa (13 %, 4 %, 2 %, 1 %, exento, exonerado...) con su base, IVA y credito
+        "compras_por_tarifa": _tarifas_out(tarifas),
     }
 
 
@@ -340,6 +368,10 @@ def iva(db: Session, tid: int, a: date, b: date) -> Report:
         [f"Crédito por prorrata ({x['prorrata_pct']} %)" if x["prorrata_pct"] is not None else "Crédito por prorrata (sin porcentaje)", x["credito_prorrata_crc"]],
         ["IVA a pagar (débito − crédito)", x["a_pagar_crc"]],
     ]
+    for t in x["compras_por_tarifa"]:
+        rows.append([f"Compras {t['label']} · base", t["base_crc"]])
+        rows.append([f"Compras {t['label']} · IVA", t["iva_crc"]])
+        rows.append([f"Compras {t['label']} · IVA acreditable", t["acreditable_crc"]])
     return Report("iva", "IVA · borrador D-104 (en colones)", ["Concepto", "Monto ₡"], rows, {"a_pagar": x["a_pagar_crc"]})
 
 

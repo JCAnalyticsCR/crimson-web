@@ -22,6 +22,7 @@ from ..models import Expense, ExpenseCategory, ReceivedDocument, ReceptionRespon
 from ..providers.einvoice import cr_now
 from ..providers.hacienda import xml44
 from ..providers.hacienda.provider import InvalidXml, SimulatedHacienda
+from . import expense_tax
 from . import hacienda_config as hc
 from .bitacora import audit_change, snapshot
 from .documents import audit
@@ -177,6 +178,7 @@ def create_expense_from_document(
     db.flush()
     doc.expense_id = e.id
     audit(db, tenant_id, user_id, "create", "expense", e.id, {"origen": "recepción", "clave": doc.clave}, ip=ip)
+    expense_tax.sync_quietly(db, e)  # IVA por tarifa desde las lineas del XML (10/11)
     return e
 
 
@@ -210,6 +212,7 @@ def _update_linked_expense(db: Session, p: Principal, doc: ReceivedDocument, amo
         # lo anulo el rechazo anterior (doc.action todavia es la respuesta previa): la nueva lo acepta y vuelve a contar
         e.status = "registrado"
     audit_change(db, p, "update", "expense", e.id, antes, snapshot(e), reason=f"Nueva respuesta al comprobante {doc.clave}: {action}")
+    expense_tax.sync_quietly(db, e)
 
 
 def link_expense(db: Session, p: Principal, doc: ReceivedDocument, expense_id: int, amounts: dict) -> Expense:
@@ -232,6 +235,7 @@ def link_expense(db: Session, p: Principal, doc: ReceivedDocument, expense_id: i
         setattr(e, k, v)
     doc.expense_id = e.id
     audit_change(db, p, "update", "expense", e.id, antes, snapshot(e), reason=f"Vinculado al comprobante {doc.clave}")
+    expense_tax.sync_quietly(db, e)
     return e
 
 
@@ -457,6 +461,9 @@ def respond(db: Session, p: Principal, rid: int, data: RespondIn) -> tuple[Recei
     doc.status = "respondido"
     doc.responded_by, doc.responded_at = p.user.id, datetime.now(UTC)
     doc.hacienda_status = r.status
+    if doc.expense_id and data.action != "rechazada":
+        # otra vez con la respuesta ya guardada: una aceptacion parcial escala las tarifas a lo aceptado
+        expense_tax.sync_quietly(db, db.get(Expense, doc.expense_id))
     audit(
         db,
         tenant.id,
