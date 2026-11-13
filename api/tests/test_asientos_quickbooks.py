@@ -265,6 +265,43 @@ def test_factura_iva_por_tarifa(db_session):
     assert "iva_por_pagar_4" in roles
 
 
+def test_factura_descuento_global_sin_redondeo(db_session):
+    """Descuento global de 10 000 sobre 150 000: las líneas ya traen el subtotal neto (totals.compute_line). La venta
+    va bruta (150 000), el descuento se carga una vez (10 000) y no aparece una línea de redondeo por el descuento."""
+    tid = _tid(db_session)
+    cust = _customer(db_session, tid)
+    factor = Decimal(140000) / Decimal(150000)
+    s1, s2 = Decimal(100000) * factor, Decimal(50000) * factor
+    t1, t2 = s1 * Decimal("0.13"), s2 * Decimal("0.04")
+    inv = Invoice(
+        tenant_id=tid, number="FEC-000011", customer_id=cust.id,
+        currency="CRC", fx_sell=1, fx_buy=1, issue_date=HOY,
+        subtotal=150000, discount_total=10000, tax_total=t1 + t2, total=140000 + t1 + t2,
+        status="creado", einvoice_status="sin_emitir",
+        sale_condition="01", payment_method="01", balance=0,
+    )
+    db_session.add(inv)
+    db_session.flush()
+    db_session.add(InvoiceLine(invoice_id=inv.id, name="Servicio 13%", position=0, quantity=1,
+                               unit_price=100000, subtotal=s1, tax_rate=13, tax_code="01",
+                               tax_rate_code="08", tax_amount=t1, total=s1 + t1))
+    db_session.add(InvoiceLine(invoice_id=inv.id, name="Servicio 4%", position=1, quantity=1,
+                               unit_price=50000, subtotal=s2, tax_rate=4, tax_code="01",
+                               tax_rate_code="02", tax_amount=t2, total=s2 + t2))
+    db_session.commit()
+    inv = db_session.get(Invoice, inv.id)
+
+    je = js.upsert_entry(db_session, js.build_invoice_entry(db_session, inv))
+    assert _balanced(je)
+    by_role: dict[str, Decimal] = {}
+    for jl in je.lines:
+        by_role[jl.role_key] = by_role.get(jl.role_key, Decimal(0)) + Decimal(str(jl.amount))
+    assert by_role.get("descuentos") == Decimal("10000.00")
+    venta = sum((v for k, v in by_role.items() if k.startswith("ventas_")), Decimal(0))
+    assert venta == Decimal("150000.00")
+    assert by_role.get("redondeo", Decimal(0)) <= Decimal("0.02")
+
+
 # ---------------------------------------------------------------------------
 # 2. Nota de crédito
 # ---------------------------------------------------------------------------

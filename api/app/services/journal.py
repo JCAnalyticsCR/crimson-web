@@ -213,6 +213,21 @@ def build_invoice_entry(db: Session, invoice: Invoice) -> _Entry | None:
         revenue[(role, rate)] = revenue.get((role, rate), Decimal(0)) + D(ln.subtotal)
         iva[rate] = iva.get(rate, Decimal(0)) + D(ln.tax_amount)
 
+    # Descuento global: el subtotal de cada línea YA viene neto del descuento global (services/totals.compute_line lo
+    # multiplica por el factor). Para que el descuento quede visible en su cuenta, la venta se registra bruta (cada grupo
+    # recupera su parte del descuento, proporcional a su monto neto; el residuo de redondeo va al último grupo) y el
+    # descuento se carga una sola vez abajo. Antes se cargaba el descuento sobre la venta ya neta y el asiento se
+    # "cuadraba" con una línea de redondeo por el monto entero del descuento.
+    disc = D(invoice.discount_total)
+    net_total = sum((a for a in revenue.values() if a > 0), Decimal(0))
+    if disc > 0 and net_total > 0:
+        keys = [k for k, a in revenue.items() if a > 0]
+        repartido = Decimal(0)
+        for i, k in enumerate(keys):
+            share = disc - repartido if i == len(keys) - 1 else D(disc * revenue[k] / net_total)
+            revenue[k] += share
+            repartido += share
+
     pos = 1
     for (role, _rate), amt in revenue.items():
         if amt == 0:
@@ -228,9 +243,8 @@ def build_invoice_entry(db: Session, invoice: Invoice) -> _Entry | None:
         ))
         pos += 1
 
-    # Descuento en cabecera (si aplica)
-    disc = D(invoice.discount_total)
-    if disc > 0:
+    # Descuento en cabecera (si aplica); `disc` se calculó arriba al bruto-ar la venta
+    if disc > 0 and net_total > 0:
         lines.append(_Line(
             role_key="descuentos",
             side="debe",

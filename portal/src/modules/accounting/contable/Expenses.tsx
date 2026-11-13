@@ -11,6 +11,7 @@ import { Dropzone } from "../../../ui/MediaPicker";
 import { VerArchivo } from "../../../ui/VerArchivo";
 import { FYGARO, IVA_CONDITIONS } from "../hacienda";
 import { hoyCR } from "../../../lib/fechaCR";
+import ExpenseTaxBreakdown from "./ExpenseTaxBreakdown";
 import { MarkPaidModal, PAY_METHODS, PAY_STATE, UnmarkModal, type PayItem } from "./MarcarPagada";
 
 type Named = { id: number; name: string };
@@ -237,6 +238,7 @@ export default function Expenses() {
               {canPay && edit.src.pay_state === "pagado" && !edit.from_commission && <button className="btn btn--ghost btn--sm" onClick={() => { const s = edit.src!; setEdit(null); setUnmark(s); }}>Desmarcar pago</button>}
             </div>
           )}
+          {edit.id && <ExpenseTaxBreakdown expenseId={edit.id} />}
           <Field label="Notas"><textarea className="textarea" value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
           <Field label="Comprobante adjunto" hint="Foto o PDF de la factura del proveedor.">
             {edit.attachment_url
