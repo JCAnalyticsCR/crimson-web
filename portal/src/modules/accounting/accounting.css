@@ -74,4 +74,6 @@
   .res-table tr.res-section { background: var(--bg-2); padding: 8px 16px; }
   .res-table tr.res-result { background: var(--crimson-soft); }
   .res-table tr.res-subtotal, .res-table tr.res-result { border-top: 1px solid var(--hair-2); }
+  /* en tarjeta la banda y la raya van en la fila, no en cada celda */
+  .res-table .res-subtotal td, .res-table .res-result td { border-top: 0; background: none; }
 }
