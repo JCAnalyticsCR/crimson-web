@@ -21,7 +21,7 @@ import { useCompletarCount } from "./useCompletarCount";
 type Wh = { id: number; name: string; location: string | null; is_default: boolean; active: boolean; kind?: "venta" | "revision" | "proveedor" };
 /* revisión y distribuidor: equipos de clientes en garantía; nunca se venden ni cuentan para el mínimo */
 const WH_KIND: Record<string, string> = { venta: "Venta", revision: "Revisión de garantías", proveedor: "En el distribuidor" };
-type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; warehouse_kind?: string; committed?: string; available?: string; serialized?: boolean };
+type Level = { product_id: number; warehouse_id: number; quantity: string; code: string; name: string; min_stock: number; warehouse: string; warehouse_kind?: string; committed?: string; available?: string; serialized?: boolean; active?: boolean };
 type Low = { product_id: number; code: string; name: string; quantity: string; min_stock: number };
 type ProjectLite = { id: number; number: string; name: string };
 export type Reservation = {
@@ -85,7 +85,12 @@ export default function Inventory() {
   // ?stock=bajo llega desde "Productos con stock bajo" del inicio: la tabla muestra solo esos productos
   const onlyLow = params.get("stock") === "bajo";
   const lowIds = new Set(low.map((l) => l.product_id));
-  const shown = onlyLow ? levels.filter((l) => lowIds.has(l.product_id)) : levels;
+  /* auditoria 10/11: los productos inactivos o archivados (los de demostracion) no son existencia vendible: no suman
+     en los totales y solo se listan al final, marcados, si todavia tienen unidades (para contarlas y ajustarlas) */
+  const activos = levels.filter((l) => l.active !== false);
+  const archivados = levels.filter((l) => l.active === false && Number(l.quantity) !== 0);
+  const enArchivados = archivados.filter(isSale).reduce((a, l) => a + Number(l.quantity), 0);
+  const shown = onlyLow ? activos.filter((l) => lowIds.has(l.product_id)) : [...activos, ...archivados];
 
   const load = () => {
     api<Wh[]>("/warehouses").then(setWhs);
@@ -111,24 +116,25 @@ export default function Inventory() {
     } catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
   };
   // solo bodegas de venta: lo que esta en revision o en el distribuidor (garantias) no es existencia de Crimson
-  const total = levels.filter(isSale).reduce((a, l) => a + Number(l.quantity), 0);
-  const comprometido = levels.filter(isSale).reduce((a, l) => a + n(l.committed), 0);
+  const total = activos.filter(isSale).reduce((a, l) => a + Number(l.quantity), 0);
+  const comprometido = activos.filter(isSale).reduce((a, l) => a + n(l.committed), 0);
   const setTab = (k: string) => { const p = new URLSearchParams(params); if (k === "existencias") p.delete("tab"); else p.set("tab", k); setParams(p); };
 
   return (
     <>
       <div className="page-head">
         <div><div className="meta">06 · Inventarios</div><h1 className="h1">Inventarios</h1></div>
-        <div className="page-head__actions">
+        {/* auditoria 10/11: Ubicación, Transferir y Ajuste solo donde se trabaja con existencias (no en Proveedores, Web ni Por completar) */}
+        {["existencias", "movimientos", "reservas", "seriales"].includes(tab) && <div className="page-head__actions">
           {allows("inventory.crear") && <button className="btn btn--ghost btn--sm" onClick={() => setModal("wh")}><Icon d={I.plus} />Ubicación</button>}
           {allows("inventory.crear") && <button className="btn btn--soft btn--sm" onClick={() => setModal("transfer")}><Icon d={I.arrow} />Transferir</button>}
           {/* entradas, salidas y ajustes manuales: solo vendedores y administrador (Andrés, 19/10) */}
           {allows("inventory.ajustar") && <button className="btn btn--crimson" onClick={() => setModal("move")}><Icon d={I.plus} />Ajuste de inventario</button>}
-        </div>
+        </div>}
       </div>
 
       <div className="tabs" style={{ alignSelf: "flex-start" }} role="tablist">
-        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.editar") ? [["completar", nCompletar ? `Por completar · ${nCompletar}` : "Por completar"]] : []), ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {[["existencias", "Existencias"], ["movimientos", "Movimientos"], ["salud", healthCount > 0 ? `Salud · ${healthCount}` : "Salud"], ["reservas", "Reservas"], ["seriales", "Seriales"], ...(allows("catalog.editar") ? [["completar", nCompletar ? `Por incorporar del proveedor · ${nCompletar}` : "Por incorporar del proveedor"]] : []), ...(allows("catalog.precios") ? [["web", "Inventario web"]] : []), ...(allows("catalog.ver") ? [["proveedores", "Proveedores"]] : [])].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "is-active" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </div>
 
       {tab === "existencias" && <>
@@ -140,10 +146,11 @@ export default function Inventory() {
       {tab === "existencias" && vista === "disponibilidad" && <Disponibilidad onKardex={(p) => { setKardexProduct(p); setTab("movimientos"); }} />}
       {tab === "existencias" && vista === "ubicacion" && <>
         <div className="pending">
-          {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{levels.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.kind && w.kind !== "venta" ? ` · ${WH_KIND[w.kind]} (no se vende)` : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
+          {whs.map((w) => <div key={w.id} className={filter === w.id ? "hot" : ""} onClick={() => setFilter(filter === w.id ? "" : w.id)} style={{ cursor: "pointer" }}><b>{activos.filter((l) => l.warehouse_id === w.id).reduce((a, l) => a + Number(l.quantity), 0)}</b><span>{w.name}{w.is_default ? " · predeterminada" : ""}{w.kind && w.kind !== "venta" ? ` · ${WH_KIND[w.kind]} (no se vende)` : ""}{w.location ? ` · ${w.location}` : ""}</span></div>)}
           <div><b>{total}</b><span>Unidades {filter ? "en la ubicación" : "en bodegas de venta"}</span></div>
           <div><b>{comprometido}</b><span>Comprometidas en reservas</span></div>
-          <div className={low.length ? "hot" : ""}><b>{low.length}</b><span>Productos bajo mínimo</span></div>
+          <div className={low.length ? "hot" : ""}><b>{low.length}</b><span>Productos activos bajo mínimo</span></div>
+          {enArchivados !== 0 && <div title="Productos archivados o inactivos que todavía tienen unidades en bodega: no se venden ni cuentan en los totales. Cuéntelas y ajústelas con un movimiento documentado."><b>{enArchivados}</b><span>{enArchivados === 1 ? "Unidad" : "Unidades"} en productos archivados (fuera del total)</span></div>}
         </div>
 
         {onlyLow && (
@@ -157,11 +164,11 @@ export default function Inventory() {
           <Card title={onlyLow ? "Existencias de los productos bajo mínimo" : "Existencias por ubicación"} flush extra={allows("reports.exportar") ? <AuthLink path="/reports/inventario?format=xlsx" download="inventario.xlsx"><Icon d={I.reports} />Excel</AuthLink> : undefined}>
             {levelsSt === null ? <Loading /> : shown.length === 0 ? <Empty hint={onlyLow ? "Ningún producto bajo mínimo tiene existencias registradas en bodega." : "Registrá una entrada para empezar; las ventas descuentan solas de la ubicación predeterminada."} /> : (
               <table className="table"><thead><tr><th>Producto</th><th>Ubicación</th><th className="num">Cantidad</th><th className="num" title="Reservas confirmadas y vigentes">Comprometido</th><th className="num">Disponible</th><th className="num">Mínimo</th><th /></tr></thead>
-                <tbody>{shown.map((l, i) => <tr key={i}><td><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}<div className="meta mono">{l.code}</div></td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted">{l.min_stock}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => { setKardexProduct({ id: l.product_id, code: l.code, name: l.name }); setTab("movimientos"); }}>Movimientos</button></td></tr>)}</tbody></table>
+                <tbody>{shown.map((l, i) => <tr key={i}><td><b>{l.name}</b>{l.serialized && <span className="badge badge--muted" style={{ marginLeft: 6 }}>Serie</span>}{l.active === false && <span className="badge badge--warn" style={{ marginLeft: 6 }} title="Inactivo o archivado: no se vende ni cuenta en los totales">Archivado</span>}<div className="meta mono">{l.code}</div></td><td className="muted">{l.warehouse}</td><td className="num mono" style={{ color: Number(l.quantity) <= l.min_stock ? "var(--bad)" : undefined, fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono" style={{ color: n(l.committed) > 0 ? "var(--warn)" : "var(--text-3)" }}>{n(l.committed) || "—"}</td><td className="num mono" style={{ color: n(l.available ?? l.quantity) < 0 ? "var(--bad)" : undefined }}>{n(l.available ?? l.quantity)}</td><td className="num mono muted">{l.min_stock}</td><td className="num"><button className="btn btn--ghost btn--sm" onClick={() => { setKardexProduct({ id: l.product_id, code: l.code, name: l.name }); setTab("movimientos"); }}>Movimientos</button></td></tr>)}</tbody></table>
             )}
           </Card>
           <Card title="Alertas de stock mínimo" flush>
-            {lowSt === null ? <Loading /> : low.length === 0 ? <Empty title="Todo en nivel" hint="Ningún producto está por debajo de su mínimo." /> : (
+            {lowSt === null ? <Loading /> : low.length === 0 ? <Empty title="Ningún producto activo bajo su mínimo" hint="Se revisan los productos activos con mínimo configurado, en bodegas de venta. Los archivados no alertan." /> : (
               <table className="table"><thead><tr><th>Producto</th><th className="num">Total</th><th className="num">Mínimo</th></tr></thead>
                 <tbody>{low.map((l) => <tr key={l.product_id}><td><b>{l.name}</b><div className="meta">{l.code}</div></td><td className="num mono" style={{ color: "var(--bad)", fontWeight: 700 }}>{Number(l.quantity)}</td><td className="num mono muted">{l.min_stock}</td></tr>)}</tbody></table>
             )}

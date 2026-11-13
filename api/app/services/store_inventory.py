@@ -742,6 +742,8 @@ def fulfill_for_order(
             r.status, r.closed_note = ("consumida" if _dec(r.consumed_quantity) > 0 else "cancelada"), f"Pedido {o.number} despachado; el resto se liberó"
     if n:
         audit(db, o.tenant_id, user_id, "fulfill", "order", o.id, {"movimientos": n, "factura": inv_id})
+    if dispatching and not pending:
+        close_unneeded_requests(db, o, user_id)
     if pending:
         from . import store_orders as so
 
@@ -749,6 +751,27 @@ def fulfill_for_order(
         so._note(o, "sistema", f"Despachado sin la compra bajo pedido recibida: {txt} sale de bodega al recibirse la compra (no se deja la existencia en negativo).")
         audit(db, o.tenant_id, user_id, "fulfill_pending_purchase", "order", o.id, {str(k): str(v) for k, v in pending.items()})
     return n
+
+
+def close_unneeded_requests(db: Session, o: Order, user_id: int | None = None) -> list[str]:
+    """Auditoria 10/11 (SC-2026-0006 / ORD-000003): un pedido despachado sin nada pendiente de la compra ya no necesita
+    la solicitud de compra que sigue en BORRADOR (se atendio con existencia de bodega). Se cancela con la razon escrita
+    en la solicitud y en el pedido, para que no siga "prometiendo" existencia del proveedor. Lo ya pedido al proveedor
+    (solicitada / recibida) no se toca: esa compra sigue. Devuelve los numeros cerrados. Sin commit."""
+    if o.status not in DISPATCHED:
+        return []
+    closed = []
+    for req in db.scalars(select(PurchaseRequest).where(PurchaseRequest.order_id == o.id, PurchaseRequest.status == "borrador")):
+        req.status = "cancelada"
+        motivo = f"Cerrada sola: el pedido {o.number} se despachó con existencia de bodega y no quedó nada por comprar."
+        req.notes = ((req.notes + "\n") if req.notes else "") + motivo
+        closed.append(req.number)
+    if closed:
+        from . import store_orders as so
+
+        so._note(o, "sistema", f"Solicitud de compra {', '.join(closed)} cerrada: el pedido se atendió con existencia de bodega.")
+        audit(db, o.tenant_id, user_id, "close_purchase_request", "order", o.id, {"solicitudes": closed})
+    return closed
 
 
 def _managed(db: Session, o: Order) -> bool:

@@ -78,7 +78,7 @@ export default function Health() {
       </div>
       <p className="muted" style={{ fontSize: 12.5, margin: "0 20px 8px" }}>Compara lo que cada documento debió mover con lo que registró el kardex; corregir escribe solo la diferencia, con documento y usuario.</p>
       {data.total === 0
-        ? <Empty title="Todo cuadra" hint="Cada factura, proyecto y pedido web coincide con el kardex y no hay existencias negativas." />
+        ? <Empty title={`Documentos y movimientos conciliados · últimos ${data.days} días`} hint="Cada factura, proyecto y pedido web de ese período coincide con el kardex y no hay existencias negativas. No reemplaza el conteo físico ni revisa mínimos, vigencia del proveedor o el catálogo." />
         : <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 20px 12px" }}>
               {KIND_ORDER.filter((k) => (data.counts[k] ?? 0) > 0).map((k) => <span key={k} className="badge badge--warn">{KIND_LABEL[k]} · {data.counts[k]}</span>)}

@@ -21,7 +21,7 @@ type Settings = {
   hold_hours_manual: number; hold_minutes_card: number; cancel_unpaid_on_expiry: boolean; warehouses: WhRow[];
 };
 type Hold = { id: number; order_id: number | null; order: string | null; order_status: string | null; product_id: number; name: string; warehouse: string; quantity: string; expires_at: string | null };
-type Summary = { publicados: number; en_bodega: number; bajo_pedido: number; consultar: number; agotado: number; alertas: number; reservado_pedidos: string; avisos: number };
+type Summary = { publicados: number; en_bodega: number; bajo_pedido: number; consultar: number; agotado: number; alertas: number; reservado_pedidos: string; avisos: number; ocultos?: number };
 type Data = { summary: Summary; items: Row[]; settings: Settings; holds: Hold[] };
 
 const ESTADO: Record<string, { label: string; tone: string }> = {
@@ -98,13 +98,13 @@ export default function WebInventory() {
         Disponible web = existencias en las bodegas de venta que alimentan la tienda menos lo reservado (proyectos, bodega y pedidos web), más lo que el proveedor confirma con dato vigente como «bajo pedido». Un pedido web reserva solo; si no se paga a tiempo, la reserva vence y se libera. Al despachar o facturar sale del inventario una sola vez.
       </span>
       <div className="pending">
-        {pill("", "Publicados", s.publicados)}
+        {pill("", s.ocultos ? `Publicados (${s.publicados - s.ocultos} visibles, ${s.ocultos} ocultos por agotados)` : "Publicados", s.publicados)}
         {pill("en_bodega", "En bodega", s.en_bodega)}
         {pill("bajo_pedido", "Bajo pedido", s.bajo_pedido)}
         {pill("consultar", "Proveedor sin dato reciente", s.consultar)}
         {pill("agotado", "Agotados", s.agotado)}
         {pill("reservado", "Reservado por pedidos", n(s.reservado_pedidos))}
-        {pill("alertas", "Alertas", s.alertas, s.alertas > 0)}
+        {pill("alertas", "Requieren acción", s.alertas, s.alertas > 0)}
       </div>
       {data.settings.enabled && (
         <div className="list-filter card" role="status">
@@ -113,7 +113,7 @@ export default function WebInventory() {
       )}
 
       <Card
-        title={estado === "alertas" ? "Publicados sin stock ni proveedor" : "Inventario de la tienda"}
+        title={estado === "alertas" ? "No se pueden comprar y tienen demanda (clientes esperando, pedidos o destacados)" : "Inventario de la tienda"}
         flush
         extra={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -122,7 +122,7 @@ export default function WebInventory() {
           </div>
         }
       >
-        {data.items.length === 0 ? <Empty hint={estado === "alertas" ? "Todo lo publicado tiene existencia o proveedor que lo respalde." : "No hay productos con ese filtro."} /> : (
+        {data.items.length === 0 ? <Empty hint={estado === "alertas" ? "Nada que requiera acción: ningún producto sin venta tiene clientes esperando, pedidos ni está destacado." : "No hay productos con ese filtro."} /> : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
               <thead><tr><th>Producto</th><th>Estado en la tienda</th><th className="num">En bodegas web</th><th className="num" title="Reservado por pedidos web (y total reservado)">Reservado</th><th className="num">Libre</th><th>Proveedor</th>{verPrecio && <th className="num">Precio web</th>}<th /></tr></thead>

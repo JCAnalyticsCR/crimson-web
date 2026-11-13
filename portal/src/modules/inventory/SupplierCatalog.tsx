@@ -22,6 +22,8 @@ type Sup = {
     last_stock_at?: string; last_stock_error?: string | null; last_stock_summary?: Record<string, number>;
     /* ultimo cambio REAL (algo entro, cambio de precio o de existencia); last_*_at es la ultima consulta exitosa */
     last_change_at?: string; last_stock_change_at?: string;
+    /* auditoria 10/11: vigencia del dato (services/supplier_sync.freshness) */
+    last_error?: string | null; last_success_at?: string | null; next_run_at?: string; max_age_hours?: number; age_hours?: number | null; stale?: boolean;
   };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
@@ -159,7 +161,7 @@ export default function SupplierCatalog() {
         <span className="muted" style={{ fontSize: 13 }}>{withItems.length ? `${withItems.length} con catálogo cargado` : "Ninguno con catálogo todavía"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {canLink && withItems.length > 0 && <button className="btn btn--soft btn--sm" onClick={() => setSugOpen(true)}><Icon d={I.link} />Sugerencias de vínculo</button>}
-          {apiSup && !pausado && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana">{apiSup.name.split(" ")[0]} se actualiza solo los lunes, 3:17 a. m.</span>}
+          {apiSup && !pausado && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana (lunes 3:17 a. m.)">{apiSup.name.split(" ")[0]}: próxima consulta {apiSup.api.next_run_at ? when(apiSup.api.next_run_at) : "el lunes, 3:17 a. m."}</span>}
           {apiSup && pausado && <span style={{ fontSize: 12, alignSelf: "center", color: "var(--bad)", fontWeight: 600 }}>{apiSup.name.split(" ")[0]} en pausa: nos bloqueó el acceso</span>}
           {apiSup && pausado && me?.role === "admin" && <button className="btn btn--soft btn--sm" onClick={resume} disabled={resuming}>{resuming ? "Reanudando…" : "Eurocomp ya nos desbloqueó"}</button>}
           {canAdd && <button className="btn btn--crimson btn--sm" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button>}
@@ -180,6 +182,15 @@ export default function SupplierCatalog() {
                 <span className="meta">
                   {s.api.last_ok_at ? `Catálogo consultado: ${when(s.api.last_ok_at)}` : "Catálogo: sin sincronizar"}
                   {s.api.last_stock_at ? ` · Existencias consultadas ${hace(s.api.last_stock_at)} (${when(s.api.last_stock_at)})` : " · Existencias: sin refrescar"}
+                </span>
+              )}
+              {s.api.label && s.api.max_age_hours != null && (
+                <span className="meta" style={s.api.stale ? { color: "var(--bad)", fontWeight: 600 } : undefined} title="Pasada la vigencia, la tienda no ofrece lo del proveedor como «bajo pedido» sino «por confirmar»">
+                  {s.api.last_success_at ? `Última consulta buena ${hace(s.api.last_success_at)}` : "Nunca se consultó con éxito"}
+                  {` · vigencia permitida ${Math.round(s.api.max_age_hours / 24)} días`}
+                  {s.api.stale ? " · DATO VENCIDO" : ""}
+                  {s.api.status !== "bloqueado" && s.api.next_run_at ? ` · próximo intento ${when(s.api.next_run_at)}` : s.api.status === "bloqueado" ? " · sin intentos hasta que Eurocomp desbloquee" : ""}
+                  {s.api.last_error && (s.api.last_try_at || "") > (s.api.last_ok_at || "") ? ` · último error: ${s.api.last_error}` : ""}
                 </span>
               )}
               {s.api.label && (s.api.last_change_at || s.api.last_stock_change_at) && (
