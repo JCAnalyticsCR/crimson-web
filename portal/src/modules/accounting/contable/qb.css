@@ -1,0 +1,11 @@
+/* QuickBooks (QbSetup + PaqueteMensual): avisos con el mismo tono que las insignias. Solo dentro de .qb. */
+.qb .notice { padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.45; border: 1px solid transparent; background: var(--bg-2); color: var(--text); }
+.qb .notice--ok { background: var(--ok-soft); border-color: var(--ok-soft); }
+.qb .notice--warn { background: var(--warn-soft); border-color: var(--warn-soft); }
+.qb .notice--bad { background: var(--bad-soft); border-color: var(--bad-soft); }
+.qb .notice--info { background: var(--info-soft); border-color: var(--info-soft); }
+.qb .qb-steps { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 20px; }
+.qb details > summary { list-style-position: inside; }
+@media (max-width: 820px) {
+  .qb .card__body { padding: 14px 14px !important; }
+}

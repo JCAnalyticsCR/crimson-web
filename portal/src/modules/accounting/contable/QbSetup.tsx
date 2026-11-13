@@ -1,11 +1,12 @@
-/* QuickBooks Online – pasos guiados:
+/* QuickBooks Online – paquete mensual para la contadora. Crimson NO escribe en QuickBooks: entrega archivos.
    1) Importar plan de cuentas
-   2) Mapear roles contables
-   3) Revisar mes
-   4) Exportar (descarga ZIP) con historial de exportaciones
+   2) Mapear roles contables (categorías de gasto → cuenta de QBO)
+   3) Revisar mes (Excel de control en borrador + «Marcar revisado»)          → PaqueteMensual.tsx
+   4) Generar paquete (ZIP con CSV de importación, Excel y respaldos)       → PaqueteMensual.tsx
+   Asientos (avanzado): revisión y exportación de asientos de diario (respaldo manual de siempre).
 
-   Permisos: accounting.ver para leer / accounting.exportar para exportar /
-             admin para reabrir mes.
+   Permisos: accounting.ver para leer / accounting.editar marca revisado / accounting.exportar genera /
+             admin para reabrir mes o regenerar un mes cerrado.
    Tablet 768 px: tablas con table--stack. */
 
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +14,8 @@ import { api } from "../../../lib/api";
 import type { ToastAction } from "../../../app/session";
 import { useSession } from "../../../app/session";
 import { Empty, Field, Icon, I, Loading, Modal } from "../../../ui/components";
+import { StepGenerarPaquete, StepRevisarPaquete } from "./PaqueteMensual";
+import "./qb.css";
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -21,16 +24,17 @@ import { Empty, Field, Icon, I, Loading, Modal } from "../../../ui/components";
 type QboAccount = { id: number; full_name: string; number: string | null; account_type: string | null; currency: string };
 type RoleRow = { role_key: string; label: string; qbo_account_id: number | null; qbo_account_name: string | null };
 type MappingData = { roles: RoleRow[]; unmapped: number };
-type Period = { month: string; status: "abierto" | "exportado"; exported_at: string | null };
+type Period = { month: string; status: "abierto" | "revisado" | "exportado"; exported_at: string | null };
 type Issue = { severity: "error" | "warning"; code: string; message: string };
 type ReviewData = { month: string; status: string; entry_count: number; issues: Issue[]; can_export: boolean; generated: { created: number; skipped: number; errors: string[] } };
-type Export = { id: number; month: string; entry_count: number; line_count: number; is_reexport: boolean; created_at: string };
+type Export = { id: number; month: string; kind?: "asientos" | "paquete"; entry_count: number; line_count: number; is_reexport: boolean; created_at: string };
 
 const STEPS = [
   { key: "cuentas", label: "1. Plan de cuentas" },
-  { key: "mapeo", label: "2. Mapeo de roles" },
-  { key: "revision", label: "3. Revisar mes" },
-  { key: "exportar", label: "4. Exportar" },
+  { key: "mapeo", label: "2. Mapeo" },
+  { key: "revisar", label: "3. Revisar mes" },
+  { key: "paquete", label: "4. Generar paquete" },
+  { key: "asientos", label: "Asientos (avanzado)" },
 ] as const;
 type Step = (typeof STEPS)[number]["key"];
 
@@ -89,7 +93,8 @@ function StepCuentas({ toast }: { toast: (msg: string, tone?: "ok" | "bad", acti
       <p className="muted" style={{ marginBottom: 16 }}>
         Exportá el reporte <b>Lista de cuentas</b> de QuickBooks Online (Informes → Lista de cuentas) en CSV o Excel y
         subilo aquí. El sistema importa la jerarquía completa <code>Padre:Hijo</code> tal como QBO la muestra.
-        Puede reimportarlo las veces que necesités sin perder el mapeo.
+        Sirve el archivo tal como lo baja QuickBooks en español (<i>Nombre de la cuenta, Tipo de cuenta, Tipo de detalles,
+        Moneda…</i>). Podés reimportarlo las veces que necesités sin perder el mapeo.
       </p>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 20 }}>
         <label className="btn btn--crimson btn--sm" style={{ cursor: "pointer" }}>
@@ -315,7 +320,7 @@ function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: 
   const load = async () => {
     const [p, e, cfg] = await Promise.all([
       api<Period[]>("/qb/periods").catch(() => [] as Period[]),
-      api<Export[]>("/qb/exports").catch(() => [] as Export[]),
+      api<Export[]>("/qb/exports").then((r) => r.filter((e) => (e.kind ?? "asientos") === "asientos")).catch(() => [] as Export[]),
       api<QbConfig>("/qb/config").catch(() => null),
     ]);
     setPeriods(p);
@@ -487,7 +492,7 @@ function StepExportar({ toast, month, setMonth }: { toast: (msg: string, tone?: 
                     <td data-label="Estado">
                       {per.status === "exportado"
                         ? <span className="badge badge--ok">Cerrado</span>
-                        : <span className="badge badge--muted">Abierto</span>}
+                        : per.status === "revisado" ? <span className="badge badge--info">Revisado</span> : <span className="badge badge--muted">Abierto</span>}
                     </td>
                     <td data-label="Exportado">{fmt(per.exported_at)}</td>
                     <td className="stack-actions">
@@ -542,18 +547,19 @@ export default function QbSetup() {
   }, []);
 
   return (
-    <div style={{ paddingBottom: 40 }}>
+    <div className="qb" style={{ paddingBottom: 40 }}>
       {/* Encabezado */}
       <div style={{ marginBottom: 20 }}>
         <div className="meta">QuickBooks Online</div>
         <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-          Genera los asientos de diario del mes y los exporta en el formato de importación de QBO.
-          Los asientos no se registran en QuickBooks automáticamente: la contadora los importa manualmente.
+          Cada mes Crimson arma un <b>paquete para la contadora</b>: clientes, proveedores, facturas de venta y de
+          proveedor listos para <i>Importar datos</i> de QuickBooks, un Excel de control con el IVA por tarifa y los
+          XML de respaldo. Crimson no escribe en QuickBooks: la contadora revisa e importa.
         </div>
       </div>
 
       {/* Pasos */}
-      <nav style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 20 }}>
+      <nav className="qb-steps">
         {STEPS.map((s) => (
           <button
             key={s.key}
@@ -569,8 +575,18 @@ export default function QbSetup() {
       <div className="card"><div className="card__body" style={{ padding: "20px 24px" }}>
         {step === "cuentas" && <StepCuentas toast={toast} />}
         {step === "mapeo" && <StepMapeo toast={toast} accounts={accounts} />}
-        {step === "revision" && <StepRevision toast={toast} month={month} setMonth={setMonth} />}
-        {step === "exportar" && <StepExportar toast={toast} month={month} setMonth={setMonth} />}
+        {step === "revisar" && <StepRevisarPaquete toast={toast} month={month} setMonth={setMonth} onReviewed={() => setStep("paquete")} />}
+        {step === "paquete" && <StepGenerarPaquete toast={toast} month={month} setMonth={setMonth} />}
+        {step === "asientos" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <div className="notice notice--info">
+              Opción avanzada: asientos de diario del mes en el formato de importación de QBO (respaldo manual).
+              Lo normal es el paquete mensual de los pasos 3 y 4.
+            </div>
+            <StepRevision toast={toast} month={month} setMonth={setMonth} />
+            <StepExportar toast={toast} month={month} setMonth={setMonth} />
+          </div>
+        )}
       </div></div>
     </div>
   );
