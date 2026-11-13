@@ -13,11 +13,16 @@
   .prd-filtros.is-open .select { flex: 1 1 180px; }
 }
 
-/* Telefono: resultados como tarjetas con la foto del producto (pedido 21/10). En tablet y escritorio, la tabla. */
+/* Telefono y tablet: resultados como tarjetas con la foto del producto (pedido 21/10). La tabla de 14 columnas
+   obligaba a deslizar de lado en tablet (auditoria de inventarios 10/11, regla de 768 px): solo en escritorio. */
 .prd-cards { display: none; list-style: none; margin: 0; padding: 0; }
-@media (max-width: 640px) {
+@media (max-width: 1024px) {
   .prd-tabla { display: none; }
   .prd-cards { display: block; }
+}
+@media (min-width: 641px) and (max-width: 1024px) {
+  .prd-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prd-card:nth-child(odd) { border-right: 1px solid var(--hair); }
 }
 .prd-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--hair); }
 .prd-card__sel { flex: none; width: 18px; height: 18px; }
