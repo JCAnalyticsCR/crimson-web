@@ -34,6 +34,7 @@ const Categories = lazy(() => import("../modules/accounting/contable/Categories"
 const Suppliers = lazy(() => import("../modules/accounting/contable/Suppliers"));
 const Banks = lazy(() => import("../modules/accounting/contable/Banks"));
 const CxP = lazy(() => import("../modules/accounting/contable/CxP"));
+const Results = lazy(() => import("../modules/accounting/contable/Results"));
 const TaxPanel = lazy(() => import("../modules/accounting/tributario/TaxPanel"));
 const QbSetup = lazy(() => import("../modules/accounting/contable/QbSetup"));
 const Reports = lazy(() => import("../modules/reports/Reports"));
@@ -237,6 +238,7 @@ function App() {
           <Route path="contable/bancos" element={<Banks />} />
           <Route path="contable/bancos/:id/conciliacion" element={<Banking />} />
           <Route path="contable/cuentas-por-pagar" element={<CxP />} />
+          <Route path="contable/resultados" element={<Results />} />
           <Route path="tributario" element={<TaxPanel />} />
           <Route path="quickbooks" element={<QbSetup />} />
         </Route>

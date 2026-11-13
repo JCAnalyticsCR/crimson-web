@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..core.texto import forma, plural
 from ..models import EInvoiceDocument, FiscalCredential, Invoice, ReceivedDocument, ReceptionResponse, Tenant, TenantUser
 from . import hacienda_config as hc
+from .corte_fygaro import antes_del_corte
 from .reception_calc import business_days_left
 
 log = logging.getLogger("crimson.hacienda")
@@ -84,9 +85,11 @@ def alerts_for(db: Session, t: Tenant, today: date | None = None) -> list[str]:
             # 05/11: lo de Pruebas (ensayo o un -29) no es un rechazo: sigue pendiente ante la Hacienda real
             if left is not None and 0 <= left <= 2:
                 fecha = d.deadline.strftime("%d/%m") if d.deadline else ""
-                out.append(f"Respondida solo en Pruebas: envíela en Producción o respóndala en Fygaro antes del {fecha} ({d.issuer_name or d.issuer_id})")
+                out.append(f"Respondida solo en Pruebas: envíela en Producción antes del {fecha} ({d.issuer_name or d.issuer_id})")
             elif left is not None and -3 <= left <= -1:
-                out.append(f"{'Venció ayer' if left == -1 else 'Ya venció'} el plazo y solo se respondió en Pruebas: confirme que consta en Fygaro ({d.issuer_name or d.issuer_id})")
+                # Fygaro quedo hasta el 31/10/2026: solo lo de antes del corte pudo responderse alla (services/corte_fygaro)
+                que = "confirme que consta en Fygaro" if antes_del_corte(d.issue_date) else "la respuesta no llegó a Hacienda (lo decide el contador)"
+                out.append(f"{'Venció ayer' if left == -1 else 'Ya venció'} el plazo y solo se respondió en Pruebas: {que} ({d.issuer_name or d.issuer_id})")
         elif r.mode != "produccion":
             continue
         elif r.status == "rechazado" and recent(r.resolved_at):

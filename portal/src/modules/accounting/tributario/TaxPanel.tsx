@@ -9,8 +9,9 @@ import { Card, Empty, Loading } from "../../../ui/components";
 import AuthLink from "../../../ui/AuthLink";
 import { MODE_LABEL, plazo, type Mode } from "../hacienda";
 
-type Pend = { id: number; issuer_name: string | null; clave: string; credit_crc: string };
-type Sp = { id: number; issuer_name: string | null; clave: string; deadline: string | null; business_days_left: number | null };
+/* antes_corte: comprobante de antes del 1/11/2026 (services/corte_fygaro): solo esos pudieron responderse en Fygaro */
+type Pend = { id: number; issuer_name: string | null; clave: string; credit_crc: string; antes_corte?: boolean };
+type Sp = { id: number; issuer_name: string | null; clave: string; deadline: string | null; business_days_left: number | null; antes_corte?: boolean };
 type Tax = {
   month: string;
   iva: {
@@ -57,7 +58,7 @@ export default function TaxPanel() {
               {Number(t.iva.credito_por_confirmar_crc) !== 0 && row("de ese, por confirmar", t.iva.credito_por_confirmar_crc, { muted: true })}
               {Number(t.iva.credito_falta_respuesta_produccion_crc ?? 0) !== 0 && row("· falta su respuesta en Producción", t.iva.credito_falta_respuesta_produccion_crc!, { muted: true })}
               {Number(t.iva.credito_falta_acuse_proveedor_crc ?? 0) !== 0 && row("· falta el acuse de Hacienda al proveedor", t.iva.credito_falta_acuse_proveedor_crc!, { muted: true })}
-              {Number(t.iva.credito_sin_mensaje_en_plazo_crc ?? 0) !== 0 && row("· sin mensaje receptor en el plazo: confirme que consta en Fygaro", t.iva.credito_sin_mensaje_en_plazo_crc!, { muted: true, warn: true })}
+              {Number(t.iva.credito_sin_mensaje_en_plazo_crc ?? 0) !== 0 && row(`· sin mensaje receptor en el plazo: lo decide el contador${(t.iva.sin_mensaje_en_plazo ?? []).some((c) => c.antes_corte) ? " (lo de antes del 1/11: confirme que consta en Fygaro)" : ""}`, t.iva.credito_sin_mensaje_en_plazo_crc!, { muted: true, warn: true })}
               {row("Crédito de gastos sin factura electrónica vinculada", t.iva.credito_manual_crc, { minus: true, warn: Number(t.iva.credito_manual_crc) !== 0 })}
               {Number(t.iva.credito_sin_respaldo_crc) !== 0 && row("Excluido: rechazados por Hacienda al proveedor (no entra)", t.iva.credito_sin_respaldo_crc, { muted: true })}
               {Number(t.iva.rechazado_produccion_crc ?? 0) !== 0 && row("Excluido: su respuesta fue rechazada por Hacienda", t.iva.rechazado_produccion_crc!, { muted: true })}
@@ -67,13 +68,13 @@ export default function TaxPanel() {
             </tbody></table>
             {Number(t.iva.credito_manual_crc) !== 0 && <p className="muted" style={{ padding: "8px 18px", fontSize: 12, margin: 0 }}>⚠ Gastos sin factura electrónica vinculada: sin comprobante aceptado no hay crédito (Res. 0027-2024 art. 11). Se suman al «a pagar» para que usted decida.</p>}
             {([
-              ["Falta su respuesta en Producción", t.iva.falta_respuesta_produccion, "envíela en Producción o respóndala en Fygaro"],
+              ["Falta su respuesta en Producción", t.iva.falta_respuesta_produccion, "envíela en Producción desde su ficha"],
               ["Falta el acuse de Hacienda al proveedor", t.iva.falta_acuse_proveedor, "pídalo al proveedor"],
-              ["Sin mensaje receptor dentro del plazo", t.iva.sin_mensaje_en_plazo, "confirme que se respondió en Fygaro (lo decide el contador)"],
+              ["Sin mensaje receptor dentro del plazo", t.iva.sin_mensaje_en_plazo, "la respuesta no llegó a Hacienda (lo decide el contador)"],
               ["Su respuesta fue rechazada por Hacienda", t.iva.rechazado_produccion, "revise el motivo en la ficha"],
             ] as [string, Pend[] | undefined, string][]).filter(([, l]) => l && l.length).map(([titulo, l, hacer]) => (
               <details key={titulo} style={{ padding: "8px 18px" }}><summary className="meta" style={{ cursor: "pointer" }}>{titulo} ({l!.length}): {hacer}</summary>
-                <ul style={{ fontSize: 13 }}>{l!.map((c) => <li key={c.id}><Link to={`/contabilidad/facturas/${c.id}`}>{c.issuer_name || "—"}</Link> · {fmtMoney(c.credit_crc)}</li>)}</ul>
+                <ul style={{ fontSize: 13 }}>{l!.map((c) => <li key={c.id}><Link to={`/contabilidad/facturas/${c.id}`}>{c.issuer_name || "—"}</Link> · {fmtMoney(c.credit_crc)}{titulo.startsWith("Sin mensaje") && c.antes_corte && <span className="muted"> · de antes del 1/11: confirme que consta en Fygaro</span>}</li>)}</ul>
               </details>
             ))}
             {allows("accounting.editar") && (
@@ -94,7 +95,7 @@ export default function TaxPanel() {
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
                   {t.mensajes.rechazados.map((r) => <li key={r.id}>Respuesta rechazada por Hacienda: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link>{r.detail ? ` · ${r.detail}` : ""}</li>)}
                   {(t.mensajes.solo_pruebas_vencen_pronto ?? []).map((r) => <li key={`sp${r.id}`} style={{ color: "var(--warn)" }}>Respondida solo en Pruebas, vence {fmtDate(r.deadline)}: <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link></li>)}
-                  {(t.mensajes.solo_pruebas_vencidas ?? []).map((r) => <li key={`spv${r.id}`}>Solo en Pruebas y plazo vencido (confirme que consta en Fygaro): <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link></li>)}
+                  {(t.mensajes.solo_pruebas_vencidas ?? []).map((r) => <li key={`spv${r.id}`}>Solo en Pruebas y plazo vencido ({r.antes_corte ? "de antes del 1/11: confirme que consta en Fygaro" : "no se respondió en Producción"}): <Link to={`/contabilidad/facturas/${r.id}`}>{r.issuer_name || "—"}</Link></li>)}
                   {t.mensajes.errores > 0 && <li>{t.mensajes.errores} mensaje(s) con error</li>}
                   {t.mensajes.por_enviar > 0 && <li>{t.mensajes.por_enviar} mensaje(s) por enviar</li>}
                   {t.emision.rechazadas > 0 && <li>{t.emision.rechazadas === 1 ? "1 factura rechazada por Hacienda, sin reemitir" : `${t.emision.rechazadas} facturas rechazadas por Hacienda, sin reemitir`}{t.emision.rechazadas_facturas?.length ? ": " : ""}{t.emision.rechazadas_facturas?.map((f, i) => <span key={f.invoice_id}>{i ? ", " : ""}<Link to={`/facturas/${f.invoice_id}`}>{f.number || `#${f.invoice_id}`}</Link></span>)}</li>}
