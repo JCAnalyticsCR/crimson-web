@@ -112,6 +112,8 @@ _ACCOUNT_HEADERS: dict[str, str] = {
 
 def _rows_from_file(content: bytes, filename: str) -> list[list[str]]:
     """Filas crudas de un CSV (coma, punto y coma o tabulador; UTF-8 o Latin-1) o de un XLSX."""
+    if content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # Excel 97-2003 (.xls): no es texto ni xlsx
+        raise HTTPException(422, "El archivo es un Excel antiguo (.xls): abrilo y guardalo como .xlsx, o exportalo como CSV")
     is_xlsx = (filename or "").lower().endswith((".xlsx", ".xlsm")) or content[:2] == b"PK"
     if is_xlsx:
         try:
@@ -120,6 +122,10 @@ def _rows_from_file(content: bytes, filename: str) -> list[list[str]]:
             wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
             try:
                 ws = wb.active
+                # Los Excel que generan sistemas de informes (como QuickBooks) a veces declaran que la hoja mide
+                # solo «A1»; en modo de solo lectura openpyxl confía en ese dato y devuelve una sola celda (el
+                # importador decía «No se encontraron cuentas»). reset_dimensions() hace que lea la hoja real.
+                ws.reset_dimensions()
                 return [["" if c is None else str(c) for c in row] for row in ws.iter_rows(values_only=True)]
             finally:
                 wb.close()
@@ -212,8 +218,12 @@ async def import_accounts(
 
     rows = _parse_accounts(content, file.filename or "")  # CSV o XLSX
     if not rows:
+        # decir qué trae el archivo: así se sabe al momento si es otro informe, otro formato o columnas con otro nombre
+        first = next((r for r in _rows_from_file(content, file.filename or "")[:15] if sum(1 for c in r if str(c).strip()) >= 2), None)
+        seen = ", ".join(f"«{str(c).strip()[:40]}»" for c in (first or []) if str(c).strip())[:300]
         raise HTTPException(422, "No se encontraron cuentas en el archivo. Exportá la «Lista de cuentas» de QuickBooks "
-                            "(con la columna «Nombre de la cuenta» o «Cuenta») en CSV o Excel.")
+                            "(con la columna «Nombre de la cuenta» o «Cuenta») en CSV o Excel."
+                            + (f" Columnas que trae el archivo: {seen}." if seen else " El archivo no trae filas con columnas."))
 
     batch = str(uuid.uuid4())[:8]
     tid = p.tenant.id

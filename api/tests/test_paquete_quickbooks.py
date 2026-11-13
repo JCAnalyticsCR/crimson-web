@@ -475,3 +475,42 @@ def test_respaldo_pdf_de_compra(client, auth, db_session):
     compras = [n for n in zf.namelist() if n.startswith("respaldos/compras/")]
     assert any(n.endswith(".pdf") for n in compras) and any(n.endswith(".xml") for n in compras)
     assert zf.read(next(n for n in compras if n.endswith(".pdf"))) == pdf
+
+
+def _xlsx_dimension_a1(rows) -> bytes:
+    """Excel como los que generan algunos sistemas de informes (QuickBooks): la hoja declara medir solo «A1»."""
+    import re
+
+    wb = openpyxl.Workbook()
+    for r in rows:
+        wb.active.append(list(r))
+    buf = io.BytesIO()
+    wb.save(buf)
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            b = zin.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet"):
+                b = re.sub(rb'<dimension ref="[^"]+"/>', b'<dimension ref="A1"/>', b)
+            zout.writestr(item, b)
+    return out.getvalue()
+
+
+def test_plan_de_cuentas_excel_con_dimension_mal_declarada(client, auth, db_session):
+    """El reporte de Andrés (13/11): el Excel exportado decía medir solo A1 y el importador leía una celda."""
+    data = _xlsx_dimension_a1(
+        [("", "Grupo Empresarial Crimson"), ("", "Lista de cuentas"), ("", "")]
+        + [("", "Cuenta", "Tipo", "Tipo de detalle", "Descripción", "Saldo total")]
+        + [("", "Bac Colones", "Efectivo y equivalentes de efectivo", "Banco", "", 0),
+           ("", "Cuenta por Pagar CRC", "Cuentas por pagar (C/P)", "Cuentas por pagar (C/P)", "", 0)]
+    )
+    r = client.post("/qb/accounts/import", files={"file": ("Lista de cuentas.xlsx", data, "application/octet-stream")})
+    assert r.status_code == 201, r.text
+    assert r.json()["inserted"] == 2
+
+
+def test_plan_de_cuentas_error_dice_que_columnas_trae(client, auth, db_session):
+    r = client.post("/qb/accounts/import", files={"file": ("otro.csv", b"Fecha,Monto,Detalle\n01/11/2026,100,x\n", "text/csv")})
+    assert r.status_code == 422 and "«Fecha», «Monto», «Detalle»" in r.json()["detail"]
+    r = client.post("/qb/accounts/import", files={"file": ("viejo.xls", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 64, "application/vnd.ms-excel")})
+    assert r.status_code == 422 and ".xls" in r.json()["detail"]
