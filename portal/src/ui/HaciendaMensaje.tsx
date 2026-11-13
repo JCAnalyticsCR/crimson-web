@@ -8,7 +8,7 @@ type Item = { code: string; text: string };
 /* que hacer con cada codigo que ya vimos; los demas se muestran tal cual */
 const QUE_HACER: Record<string, string> = {
   "-37": "Es un aviso, no impide la factura. Revise que provincia, cantón y distrito en Ajustes → Hacienda → Ubicación sean los del domicilio fiscal en TRIBU-CR (el código postal los da: 20110 = provincia 2, cantón 01, distrito 10). Si ya coinciden y el aviso sigue, el registro de comprobantes de Hacienda no tiene aún su domicilio actualizado: consúltelo con Hacienda.",
-  "-29": "Es normal en Pruebas: la factura del proveedor es real y Pruebas no la conoce. Su respuesta está bien armada. Cuando active Producción use «Enviar en Producción»; si vence antes, respóndala en Fygaro.",
+  "-29": "Es normal en Pruebas: la factura del proveedor es real y Pruebas no la conoce. Su respuesta está bien armada: use «Enviar en Producción» en la ficha para mandarla a la Hacienda real antes de que venza el plazo.",
   "-111":"Los totales de servicios y mercancías no cuadran con las líneas. Lo corrige Crimson: si vuelve a salir, envíenos la clave del documento.",
 };
 

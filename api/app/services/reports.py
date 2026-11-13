@@ -199,6 +199,7 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
     gastos. Los gastos ligados a una recepcion no aportan credito propio (sin doble conteo); los gastos manuales sin
     comprobante van en su propia linea con aviso (art. 11). Todo en colones."""
     from ..models import EInvoiceDocument, ReceivedDocument
+    from .corte_fygaro import antes_del_corte
     from .documents import local_date
 
     # ---- debito: facturas del periodo (las anuladas por NC siguen en su mes; la NC resta en el suyo)
@@ -266,13 +267,15 @@ def iva_breakdown(db: Session, tid: int, a: date, b: date, prorrata_pct=None) ->
         # historico de Fygaro). Solo cambia la etiqueta "por confirmar", no el total acreditado (lo valida el contador)
         acuse_ok = d.supplier_hacienda_status == "aceptado"
         resp_ok = d.status == "historico" or (r is not None and (r.status == "historico" or (r.status == "aceptado" and r.mode == "produccion")))
-        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amount)}
+        # antes_corte: solo lo de antes del 1/11/2026 pudo responderse en Fygaro (services/corte_fygaro)
+        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "credit_crc": _q2(amount), "antes_corte": antes_del_corte(d.issue_date)}
         if not (acuse_ok and resp_ok):
             por_confirmar += amount
             sin_confirmar.append({**row, "falta_respuesta": not resp_ok, "falta_acuse": not acuse_ok})
         if not resp_ok:
             if d.deadline and d.deadline < hoy and (r is None or r.mode != "produccion"):
-                # solo en Pruebas (o simulado) y ya no se puede enviar: aceptacion presunta, pero que conste en Fygaro
+                # solo en Pruebas (o simulado) y ya no se puede enviar: aceptacion presunta (lo decide el contador); si
+                # es de antes del corte, pudo responderse en Fygaro
                 sin_plazo += amount
                 l_sin_plazo.append(row)
             else:
@@ -331,7 +334,7 @@ def iva(db: Session, tid: int, a: date, b: date) -> Report:
         ["   · de ellas, por confirmar", x["credito_por_confirmar_crc"]],
         ["      · falta su respuesta en Producción", x["credito_falta_respuesta_produccion_crc"]],
         ["      · falta el acuse de Hacienda al proveedor", x["credito_falta_acuse_proveedor_crc"]],
-        ["      · sin mensaje receptor dentro del plazo: confirme que se respondió en Fygaro", x["credito_sin_mensaje_en_plazo_crc"]],
+        ["      · sin mensaje receptor dentro del plazo (lo decide el contador; si es de antes del 1/11/2026, confirme que consta en Fygaro)", x["credito_sin_mensaje_en_plazo_crc"]],
         ["IVA crédito de gastos sin factura electrónica vinculada (sin comprobante aceptado no hay crédito)", x["credito_manual_crc"]],
         ["IVA crédito (compras, genera crédito)", x["credito_crc"]],
         ["Excluido: comprobantes rechazados por Hacienda al proveedor", x["credito_sin_respaldo_crc"]],
@@ -780,6 +783,7 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
 
     from ..models import EInvoiceDocument, FiscalCredential, ReceivedDocument, ReceptionMailbox, ReceptionResponse
     from . import hacienda_config as hc
+    from .corte_fygaro import antes_del_corte
     from .reception_calc import business_days_left
 
     y, m = (int(x) for x in month.split("-"))
@@ -813,7 +817,7 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
         if r.mode != "pruebas" or d is None or d.status != "respondido":
             continue
         left = business_days_left(today, d.deadline)
-        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "deadline": d.deadline, "business_days_left": left}
+        row = {"id": d.id, "issuer_name": d.issuer_name, "clave": d.clave, "deadline": d.deadline, "business_days_left": left, "antes_corte": antes_del_corte(d.issue_date)}
         if d.deadline and d.deadline < today:
             solo_pruebas_vencidas.append(row)
         elif left is not None and left <= 2:
@@ -843,7 +847,8 @@ def tax_summary(db: Session, tenant, month: str) -> dict:
             "rechazados": rech[:30],
             "errores": sum(1 for r in last if r.status == "error" and r.mode == "produccion"),
             "por_enviar": sum(1 for r in last if r.status == "por_enviar"),
-            # respondidas solo en Pruebas: vencen en <= 2 dias habiles, o ya vencieron (que consten en Fygaro)
+            # respondidas solo en Pruebas: vencen en <= 2 dias habiles, o ya vencieron (las de antes del corte pudieron
+            # responderse en Fygaro: antes_corte)
             "solo_pruebas_vencen_pronto": solo_pruebas[:30],
             "solo_pruebas_vencidas": solo_pruebas_vencidas[:30],
         },
