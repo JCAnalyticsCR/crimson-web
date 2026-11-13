@@ -105,7 +105,7 @@ def test_proveedor_fresco_viejo_sin_fecha_y_excel_sin_vincular(db_session):
     sin_fecha = _prod(db_session, "AV-SINFECHA")
     excel = _prod(db_session, "AV-EXCEL")
     supplier_item(db_session, fresco.id, 12, hours_ago=5)
-    supplier_item(db_session, viejo.id, 12, hours_ago=200)  # mas de 8 dias (192 h: Eurocomp es semanal)
+    supplier_item(db_session, viejo.id, 12, hours_ago=200)  # mas de 8 dias (el umbral por defecto es 96 h)
     supplier_item(db_session, sin_fecha.id, 12, dated=False)
     # lo que dejaba el importador Excel viejo: existencia en el producto, sin item vinculado
     excel.supplier_stock, excel.supplier_updated_at = 40, datetime.now(UTC)

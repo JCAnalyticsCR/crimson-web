@@ -61,12 +61,32 @@ def test_despacho_con_bodega_cierra_la_solicitud_en_borrador(client, auth, db_se
 
 
 def test_proxima_consulta_y_vigencia():
-    # martes 11/11/2026 10:00 en CR (16:00 UTC) -> lunes 16/11 03:17 CR = 09:17 UTC
-    assert ss.next_run_at(datetime(2026, 11, 11, 16, 0, tzinfo=UTC)) == datetime(2026, 11, 16, 9, 17, tzinfo=UTC)
-    # lunes 02:00 CR -> ese mismo lunes 03:17
+    # sin consulta previa: la proxima pasada del beat (03:17 CR = 09:17 UTC)
+    assert ss.next_run_at(datetime(2026, 11, 11, 16, 0, tzinfo=UTC)) == datetime(2026, 11, 12, 9, 17, tzinfo=UTC)
     assert ss.next_run_at(datetime(2026, 11, 16, 8, 0, tzinfo=UTC)) == datetime(2026, 11, 16, 9, 17, tzinfo=UTC)
-    # lunes 04:00 CR -> el lunes siguiente
-    assert ss.next_run_at(datetime(2026, 11, 16, 10, 0, tzinfo=UTC)) == datetime(2026, 11, 23, 9, 17, tzinfo=UTC)
+
+
+def test_catalogo_completo_cada_tres_dias(db_session, auth, monkeypatch):
+    """13/11 (audio de Eurocomp): el beat pasa a diario a las 03:17 y la consulta global solo corre cada 3 dias."""
+    t = db_session.get(Tenant, auth["tenant"]["id"])
+    ultima = datetime(2026, 11, 13, 9, 17, tzinfo=UTC)  # 13/11 03:17 CR
+    ss._save_state(t, last_global_at=ultima)
+    assert ss.every_days(t) == 3
+    assert not ss.due(t, datetime(2026, 11, 14, 9, 17, tzinfo=UTC))  # al dia siguiente no
+    assert not ss.due(t, datetime(2026, 11, 15, 9, 17, tzinfo=UTC))
+    assert ss.due(t, datetime(2026, 11, 16, 9, 17, tzinfo=UTC))  # a los 3 dias si
+    assert ss.next_run_at(datetime(2026, 11, 13, 12, 0, tzinfo=UTC), t) == datetime(2026, 11, 16, 9, 17, tzinfo=UTC)
+    # ajustable por empresa
+    t.settings = {**(t.settings or {}), "supplier_sync_every_days": 1}
+    assert ss.due(t, datetime(2026, 11, 14, 9, 17, tzinfo=UTC))
+    # la pasada programada no llama a Eurocomp si no toca
+    t.settings = {**(t.settings or {}), "supplier_sync_every_days": 3}
+    ss._save_state(t, last_global_at=datetime.now(UTC))  # consulto hace un rato
+    db_session.commit()
+    monkeypatch.setattr(ss, "targets", lambda db: [t])
+    monkeypatch.setattr(ss, "fetch", lambda client: (_ for _ in ()).throw(AssertionError("no debia consultar")))
+    out = ss.sync_all(db_session, client=object(), scheduled=True)
+    assert "todavía no toca" in out.get("skipped", "")
 
 
 def test_dato_del_proveedor_vencido(db_session, auth):

@@ -189,7 +189,7 @@ def test_stock_refresh_updates_only_linked_products(client, auth, db_session, eu
     db_session.refresh(prod)
     assert prod.supplier_stock == 0
     st = next(x for x in client.get("/supplier-catalog/suppliers").json() if x["name"].lower().startswith("eurocomp"))["api"]
-    assert st["last_stock_at"] and "una vez por semana" in st["label"]
+    assert st["last_stock_at"] and "una vez cada 3 días" in st["label"]
 
 
 def test_without_credentials_nothing_runs(client, auth, db_session, monkeypatch):

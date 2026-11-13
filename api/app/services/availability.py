@@ -75,7 +75,7 @@ DEFAULTS: dict = {
     "backorder_lead": "3-5 días hábiles",  # plazo de "bajo pedido" que ve el cliente
     # dato del proveedor mas viejo -> "Consultar disponibilidad". 04/11 (decision del usuario): Eurocomp se sincroniza una
     # vez por semana (lunes), asi que el dato vale 8 dias (192 h): la tienda vende toda la semana con el del lunes
-    "supplier_max_age_hours": 192,
+    "supplier_max_age_hours": 96,  # 13/11: catalogo cada 3 dias (72 h) + 1 dia de holgura (antes 192 h, semanal)
     "out_of_stock": "mostrar",  # mostrar | ocultar (agotados en el catalogo, destacados y kits)
     # agotado en el proveedor por API (Eurocomp) y sin existencia propia: "ocultar" lo saca de la tienda (lista, busqueda,
     # destacados y kits) desde la sincronizacion siguiente y sigue en el panel; "mostrar" lo deja visible como agotado.

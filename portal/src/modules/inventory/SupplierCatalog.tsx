@@ -23,7 +23,7 @@ type Sup = {
     /* ultimo cambio REAL (algo entro, cambio de precio o de existencia); last_*_at es la ultima consulta exitosa */
     last_change_at?: string; last_stock_change_at?: string;
     /* auditoria 10/11: vigencia del dato (services/supplier_sync.freshness) */
-    last_error?: string | null; last_success_at?: string | null; next_run_at?: string; max_age_hours?: number; age_hours?: number | null; stale?: boolean;
+    last_error?: string | null; last_success_at?: string | null; next_run_at?: string; every_days?: number; max_age_hours?: number; age_hours?: number | null; stale?: boolean;
   };
 };
 type LinkedProduct = { id: number; code: string; name: string; active: boolean; price?: Num; currency?: string };
@@ -101,17 +101,17 @@ export default function SupplierCatalog() {
     setSid((cur) => (cur && r.some((s) => s.id === cur) ? cur : (r.find((s) => s.items > 0)?.id ?? null)));
   }).catch((e) => { toastRef.current(e instanceof Error ? e.message : "Error", "bad"); setSups([]); }), []);
   useEffect(() => { loadSups(); }, [loadSups]);
-  /* Proveedor conectado por API (SiReTT de Eurocomp): se sincroniza SOLO una vez por semana (lunes 3:17 a. m.). Sin
+  /* Proveedor conectado por API (SiReTT de Eurocomp): el catálogo completo se baja SOLO una vez cada 3 días (3:17 a. m.). Sin
      boton de sincronizar (04/11, decision del usuario): no se le llenan de solicitudes a Eurocomp ni de datos la tienda. */
   const apiSup = (sups || []).find((s) => ["conectado", "listo", "error", "bloqueado"].includes(s.api.status));
   /* 10/11: con la cuenta bloqueada por Eurocomp (26/27) Crimson deja de consultarlo; el administrador confirma aqui el
-     desbloqueo (no llama a Eurocomp: solo deja que la corrida semanal vuelva a consultar) */
+     desbloqueo (no llama a Eurocomp: solo deja que la corrida programada vuelva a consultar) */
   const pausado = apiSup?.api.status === "bloqueado";
   const [resuming, setResuming] = useState(false);
   const resume = async () => {
     if (!apiSup || !confirm("¿Eurocomp ya confirmó que desbloqueó la cuenta de Crimson? Si todavía no lo ha hecho, la próxima consulta vuelve a quedar bloqueada.")) return;
     setResuming(true);
-    try { await api(`/supplier-catalog/suppliers/${apiSup.id}/resume`, { method: "POST" }); toast("Listo: la consulta semanal a Eurocomp se reanuda el próximo lunes"); loadSups(); }
+    try { await api(`/supplier-catalog/suppliers/${apiSup.id}/resume`, { method: "POST" }); toast("Listo: la consulta a Eurocomp se reanuda en la próxima pasada programada (3:17 a. m.)"); loadSups(); }
     catch (e) { toast(e instanceof Error ? e.message : "Error", "bad"); }
     finally { setResuming(false); }
   };
@@ -161,7 +161,7 @@ export default function SupplierCatalog() {
         <span className="muted" style={{ fontSize: 13 }}>{withItems.length ? `${withItems.length} con catálogo cargado` : "Ninguno con catálogo todavía"}</span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           {canLink && withItems.length > 0 && <button className="btn btn--soft btn--sm" onClick={() => setSugOpen(true)}><Icon d={I.link} />Sugerencias de vínculo</button>}
-          {apiSup && !pausado && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title="Sin sincronización manual: una sola consulta por semana (lunes 3:17 a. m.)">{apiSup.name.split(" ")[0]}: próxima consulta {apiSup.api.next_run_at ? when(apiSup.api.next_run_at) : "el lunes, 3:17 a. m."}</span>}
+          {apiSup && !pausado && <span className="muted" style={{ fontSize: 12, alignSelf: "center" }} title={`Sin sincronización manual: el catálogo completo una vez cada ${apiSup.api.every_days ?? 3} días, a las 3:17 a. m. (Eurocomp cobra por consulta)`}>{apiSup.name.split(" ")[0]}: próxima consulta {apiSup.api.next_run_at ? when(apiSup.api.next_run_at) : "a las 3:17 a. m."}</span>}
           {apiSup && pausado && <span style={{ fontSize: 12, alignSelf: "center", color: "var(--bad)", fontWeight: 600 }}>{apiSup.name.split(" ")[0]} en pausa: nos bloqueó el acceso</span>}
           {apiSup && pausado && me?.role === "admin" && <button className="btn btn--soft btn--sm" onClick={resume} disabled={resuming}>{resuming ? "Reanudando…" : "Eurocomp ya nos desbloqueó"}</button>}
           {canAdd && <button className="btn btn--crimson btn--sm" onClick={() => setImporting(true)}><Icon d={I.upload} />Importar lista</button>}
@@ -629,7 +629,7 @@ function AutoCatalogCard({ supplierId }: { supplierId: number }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
           <input type="checkbox" style={{ marginTop: 2, flexShrink: 0 }} checked={cfg.enabled} disabled={saving} onChange={() => toggle("enabled")} />
-          <span><b>Activo</b> — crea productos automáticamente en cada sincronización semanal de Eurocomp</span>
+          <span><b>Activo</b> — crea productos automáticamente en cada sincronización de Eurocomp (cada 3 días)</span>
         </label>
         <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
           <input type="checkbox" style={{ marginTop: 2, flexShrink: 0 }} checked={cfg.publish_web} disabled={saving} onChange={() => toggle("publish_web")} />

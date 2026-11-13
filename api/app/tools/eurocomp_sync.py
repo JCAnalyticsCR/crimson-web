@@ -28,7 +28,7 @@ def main() -> None:
     from app.services import supplier_sync
 
     with SessionLocal() as db:
-        out = supplier_sync.sync_all(db)
+        out = supplier_sync.sync_all(db, scheduled=True)  # la pasada diaria: solo si toca (cada 3 dias)
 
     peak_kb = _peak_kb()
 

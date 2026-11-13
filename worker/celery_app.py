@@ -555,7 +555,8 @@ celery.conf.beat_schedule = {
     # Eurocomp UNA vez por semana (04/11): catalogo completo los lunes de madrugada, que trae precio y existencia de todo
     # lo vinculado. Ya no hay refresco cada 6 horas (saturaba SiReTT). Minuto 17: lejos del :00 de las demas tareas y
     # antes del :25 de back-in-stock (avisos de "volvio a haber")
-    "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(day_of_week=1, hour=3, minute=17)},
+    # a diario 03:17; supplier_sync.sync_all decide si toca (cada supplier_sync_every_days, 3 por defecto: 13/11)
+    "suppliers-sync-eurocomp": {"task": "suppliers.sync_eurocomp", "schedule": crontab(hour=3, minute=17)},
     "mark-overdue": {"task": "sales.mark_overdue", "schedule": crontab(hour=0, minute=30)},
     # plan 1.8: latido cada 5 min (/health/deep da 503 si pasan 15 sin latido) y correo de Salud a las 07:00
     "salud-latido": {"task": "salud.latido", "schedule": crontab(minute="*/5")},

@@ -11,14 +11,17 @@ costo y la existencia del proveedor pasan a los productos vinculados. Nunca toca
 PROPIA de Crimson (eso solo lo mueve el kardex). Ademas, al producto vinculado que no los tiene le completa el CABYS
 (13 digitos, lo recomienda el propio SiReTT) y las fotos.
 
-Cuando corre: el catalogo completo UNA vez por semana (lunes 03:17); es la consulta pesada (34 MB) y solo hace falta
+Cuando corre: el catalogo completo UNA vez cada 3 dias (13/11; antes semanal), a las 03:17: el beat pasa a diario y
+`due` decide (Ajustes: supplier_sync_every_days). Eurocomp (audio 13/11): 60 000 creditos por hora; el catalogo completo
+cuesta ~24 000 y esta pensado para hasta 3 veces al dia; lotes de 50 para confirmar un pedido y articulos sueltos al
+agregar al carrito. Es la consulta pesada (34 MB) y solo hace falta
 para descubrir articulos nuevos, CABYS y fotos. De lo que YA estaba solo actualiza precio y existencia (pedido 21/10:
 nunca vuelve a traer fotos ni descripciones; apply_list(only_price_stock=True)), y el CABYS y las fotos se completan
 una sola vez por vinculo (lo recien vinculado o creado desde el panel, si le faltan). Lo que se agota en Eurocomp sale de la tienda en la
 sincronizacion siguiente (Ajustes de la tienda: "supplier_out_of_stock", ver services/availability) y sigue en el
 panel: nunca se desactiva ni se despublica el producto. NO hay refresco cada 6 horas (apagado el 04/11: esas
 llamadas seguidas hicieron que Eurocomp bloqueara a Crimson, codigo 27) ni sincronizacion manual.
-BLOQUEO (10/11): si Eurocomp respondio 26 o 27, la tarea semanal NO vuelve a llamar (`blocked`) hasta que un
+BLOQUEO (10/11): si Eurocomp respondio 26 o 27, la tarea programada NO vuelve a llamar (`blocked`) hasta que un
 administrador confirme en el catalogo de proveedores que Eurocomp levanto el bloqueo (`resume`).
 
 Seguridad de datos: si Eurocomp responde una lista sospechosamente corta (menos de la mitad de lo que habia) no se
@@ -163,15 +166,47 @@ def _save_state(t: Tenant, **vals) -> None:
     t.settings = st
 
 
-SYNC_WEEKDAY, SYNC_HOUR, SYNC_MINUTE = 0, 3, 17  # lunes 03:17 hora de Costa Rica (worker/celery_app.py, crontab)
+SYNC_HOUR, SYNC_MINUTE = 3, 17  # 03:17 hora de Costa Rica: el beat revisa todos los dias (worker/celery_app.py)
+# Cada cuantos dias se baja el catalogo completo (13/11, pedido del usuario tras el audio de Eurocomp: "60 000 creditos
+# por hora; el catalogo completo cuesta ~24 000; esta pensado para refrescarse unas 3 veces al dia"). Crimson va mas
+# holgado: una vez cada 3 dias. Ajustes: supplier_sync_every_days (1 a 14).
+SYNC_EVERY_DAYS = 3
+SYNC_SLACK = timedelta(hours=2)  # la corrida de hace 3 dias pudo empezar unos minutos mas tarde: no saltarse un ciclo
 
 
-def next_run_at(now: datetime | None = None) -> datetime:
-    """Proxima consulta semanal programada (lunes 03:17 en Costa Rica), en UTC."""
-    now = (now or datetime.now(UTC)).astimezone(CR)
-    cand = now.replace(hour=SYNC_HOUR, minute=SYNC_MINUTE, second=0, microsecond=0) + timedelta(days=(SYNC_WEEKDAY - now.weekday()) % 7)
-    if cand <= now:
-        cand += timedelta(days=7)
+def every_days(t: Tenant | None) -> int:
+    try:
+        n = int(((t.settings or {}) if t is not None else {}).get("supplier_sync_every_days") or SYNC_EVERY_DAYS)
+    except (TypeError, ValueError):
+        n = SYNC_EVERY_DAYS
+    return min(max(n, 1), 14)
+
+
+def _last_global(t: Tenant) -> datetime | None:
+    raw = _state(t).get("last_global_at")
+    try:
+        return _aware(datetime.fromisoformat(raw)) if raw else None
+    except ValueError:
+        return None
+
+
+def due(t: Tenant, now: datetime | None = None) -> bool:
+    """Ya toca la consulta global: nunca se hizo, o pasaron `every_days` dias (menos el margen) desde la ultima."""
+    last = _last_global(t)
+    return last is None or (now or datetime.now(UTC)) >= last + timedelta(days=every_days(t)) - SYNC_SLACK
+
+
+def next_run_at(now: datetime | None = None, t: Tenant | None = None) -> datetime:
+    """Proxima consulta global programada, en UTC: la primera pasada del beat (03:17 en Costa Rica) en que `due` sea
+    verdad. Sin empresa (o sin consulta previa) es la proxima pasada del beat."""
+    now = now or datetime.now(UTC)
+    earliest = now
+    if t is not None and (last := _last_global(t)) is not None:
+        earliest = max(now, last + timedelta(days=every_days(t)) - SYNC_SLACK)
+    local = earliest.astimezone(CR)
+    cand = local.replace(hour=SYNC_HOUR, minute=SYNC_MINUTE, second=0, microsecond=0)
+    if cand < local:
+        cand += timedelta(days=1)
     return cand.astimezone(UTC)
 
 
@@ -193,7 +228,8 @@ def freshness(t: Tenant, now: datetime | None = None) -> dict:
             age_h = None
     return {
         "last_success_at": last_ok,
-        "next_run_at": next_run_at(now).isoformat(),
+        "next_run_at": next_run_at(now, t).isoformat(),
+        "every_days": every_days(t),
         "max_age_hours": max_h,
         "age_hours": age_h,
         "stale": age_h is None or age_h > max_h,
@@ -212,7 +248,7 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if s.get("last_code") in BLOCKED_CODES:
         return {
             "status": "bloqueado",
-            "label": "En pausa: Eurocomp bloqueó el acceso de Crimson a su servicio web. Crimson ya no los consulta. Cuando Eurocomp confirme el desbloqueo, toque «Eurocomp ya nos desbloqueó» para reanudar la consulta semanal.",
+            "label": "En pausa: Eurocomp bloqueó el acceso de Crimson a su servicio web. Crimson ya no los consulta. Cuando Eurocomp confirme el desbloqueo, toque «Eurocomp ya nos desbloqueó» para reanudar la consulta programada (cada 3 días).",
             **s,
         }
     if s.get("last_stock_error") and (s.get("last_stock_try_at") or "") > (s.get("last_stock_at") or ""):
@@ -222,7 +258,7 @@ def status(t: Tenant, supplier: Supplier | None) -> dict:
     if s.get("last_ok_at") or s.get("last_stock_at"):
         return {
             "status": "conectado",
-            "label": "Conectado por API (SiReTT) · se sincroniza una vez por semana (lunes de madrugada): precios y existencias de lo que ya está",
+            "label": f"Conectado por API (SiReTT) · catálogo completo una vez cada {every_days(t)} días (3:17 a. m.): precios y existencias de lo que ya está",
             **s,
         }
     return {"status": "listo", "label": "Conectado por API (SiReTT) · todavía no se sincroniza", **s}
@@ -463,8 +499,10 @@ def sync_tenant(
     return out
 
 
-def sync_all(db: Session, client: SirettClient | None = None) -> dict:
-    """Catalogo completo (lunes 03:17): UNA descarga aplicada a cada empresa que trabaja con Eurocomp."""
+def sync_all(db: Session, client: SirettClient | None = None, *, scheduled: bool = False) -> dict:
+    """Catalogo completo cada `every_days` dias (el beat pasa a diario a las 03:17 y aqui se decide si toca): UNA
+    descarga aplicada a cada empresa que trabaja con Eurocomp. scheduled=True (la pasada diaria del beat) respeta la
+    frecuencia; una llamada directa (pruebas, herramientas) no."""
     tenants = targets(db)
     if not tenants:
         return {"skipped": "ninguna empresa con el proveedor"}
@@ -474,6 +512,9 @@ def sync_all(db: Session, client: SirettClient | None = None) -> dict:
         log.warning("Eurocomp: %s", BLOCKED_SKIP)
         return {"skipped": BLOCKED_SKIP}
     now = datetime.now(UTC)
+    if scheduled and not all(due(t, now) for t in tenants):  # la credencial es una sola: manda la consulta mas reciente
+        nxt = max(next_run_at(now, t) for t in tenants)
+        return {"skipped": f"todavía no toca: catálogo completo cada {every_days(tenants[0])} días; próxima {nxt.astimezone(CR):%d/%m %H:%M}"}
     _mark_global(tenants, now)
     db.commit()
     try:

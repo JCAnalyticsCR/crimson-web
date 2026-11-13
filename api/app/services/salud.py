@@ -36,7 +36,7 @@ BEAT_TASK = "salud.beat"  # fila que deja el beat al despachar el latido (no es 
 HEARTBEAT_MAX = timedelta(minutes=15)
 BUSY_MAX = timedelta(hours=1)  # una corrida sin terminar de mas de 1 h ya no es "ocupado": el proceso murio
 DEEP_CACHE_SECONDS = 30
-EUROCOMP_STOCK_MAX = timedelta(days=8)  # 04/11: Eurocomp se sincroniza una vez por semana (lunes 03:17): 1 dia de holgura
+EUROCOMP_STOCK_MAX = timedelta(days=4)  # 13/11: el catalogo completo se baja cada 3 dias (03:17): 1 dia de holgura
 FX_MAX_BUSINESS_DAYS = 2
 POR_EMITIR_MAX = timedelta(hours=24)
 # "Por emitir" (plan 1.7): facturas pagadas o enviadas que no tienen comprobante electronico
