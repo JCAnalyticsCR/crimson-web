@@ -8,18 +8,22 @@ Cada escritura queda en la bitacora (audit / audit_change con antes y despues).
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from ..core.config import settings as cfg
 from ..core.db import get_db
 from ..core.deps import ALLY_USER_ROLES, Principal, get_principal, require
-from ..core.ratelimit import admin_users_limiter
+from ..core.ratelimit import admin_users_limiter, login_limiter
+from ..core.reauth import require_reauth
+from ..core.security import MAX_PASSWORD, hash_password, new_temp_password, password_is_strong
 from ..models import (
     AllyCompany,
     AllyParticipation,
@@ -39,11 +43,22 @@ from ..models import (
 from ..models.allies import CONTACT_FUNCTIONS
 from ..schemas.sales import DocumentIn, LineInSchema
 from ..services import ally_access, ally_pricing
+from ..services.accounts import (
+    ADMIN_LINK_HOURS,
+    TEMP_PASSWORD_HOURS,
+    end_sessions,
+    invalidate_resets,
+    is_shared,
+    issue_reset,
+    reset_email_html,
+)
 from ..services.archive import live
 from ..services.bitacora import audit_change, jsonable
 from ..services.documents import audit
 from ..services.fx import rate_or_none
+from ..services.mail import queue_email
 from ..services.totals import d
+from .users_admin import avisar_contrasena_temporal
 
 router = APIRouter(prefix="/allies", tags=["aliados"])
 
@@ -727,6 +742,100 @@ def ally_member(cid: int, uid: int, data: AllyMemberIn, p: Principal = Depends(r
     audit_change(db, p, "permissions", "user", uid, antes, {"role": m.role_code, "active": m.active}, company=c.name)
     db.commit()
     return ally_access.users_out(db, c)
+
+
+class AllyResetIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["enlace", "temporal", "definir"]
+    new_password: str | None = Field(None, max_length=MAX_PASSWORD)  # solo con mode="definir"
+    admin_password: str = Field(max_length=MAX_PASSWORD)
+
+
+def _base_url() -> str:
+    return cfg.public_base_url.rstrip("/")
+
+
+@router.post("/{cid}/users/{uid}/reset-password")
+def ally_reset_password(
+    cid: int,
+    uid: int,
+    data: AllyResetIn,
+    response: Response,
+    p: Principal = Depends(require("settings", "configurar")),
+    db: Session = Depends(get_db),
+):
+    """Restablece la contraseña de un usuario del portal de aliados (lo hace el administrador). Mismo criterio que a un
+    usuario interno (users_admin.reset_password): reautenticación con la contraseña del administrador, sesiones
+    cerradas y aviso al usuario. «enlace» manda un correo y él mismo crea la contraseña; «temporal» la genera y se
+    muestra una sola vez; «definir» usa la que escribe el administrador. Las dos últimas obligan a crear una propia al
+    entrar y vencen en 48 horas."""
+    c = company(db, cid, p)
+    m = db.scalar(
+        select(TenantUser).where(TenantUser.tenant_id == p.tenant.id, TenantUser.user_id == uid, TenantUser.ally_company_id == c.id)
+    )
+    if not m:
+        raise HTTPException(404, "Usuario no encontrado")
+    u = m.user
+    if not m.active or not u.active:
+        raise HTTPException(409, "El usuario está desactivado: activalo primero")
+    if is_shared(db, uid, p.tenant.id):
+        raise HTTPException(409, "Este usuario también entra a otra empresa: su contraseña no se restablece desde aquí")
+    if data.mode == "definir" and not (data.new_password and password_is_strong(data.new_password)):
+        raise HTTPException(422, "Mínimo 10 caracteres con letras y números")
+    admin_users_limiter.hit(f"{p.tenant.id}:{p.user.id}")
+    require_reauth(p, data.admin_password)
+    tid = p.tenant.id
+    now = datetime.now(UTC)
+
+    if data.mode == "enlace":
+        invalidate_resets(db, uid)
+        raw, pr = issue_reset(db, u, tid, "admin", p.user.id, timedelta(hours=ADMIN_LINK_HOURS), p.ip)
+        link = f"{_base_url()}/restablecer/{raw}"
+        mail = queue_email(
+            db, p.tenant, u.email, f"Cree su nueva contraseña · {p.tenant.name}", reset_email_html(p.tenant, u.full_name, link, "24 horas"),
+            "password_reset", pr.id,
+        )  # fmt: skip
+        u.failed_logins, u.locked_until = 0, None
+        login_limiter.forget_account(u.email)
+        audit(
+            db, tid, p.user.id, "password_reset_link", "user", uid,
+            {"correo": mail.status, "empresa": c.name, "vence": pr.expires_at.isoformat()}, ip=p.ip,
+        )  # fmt: skip
+        emailed = mail.status == "enviado"
+        out = {
+            "mode": "enlace",
+            "emailed": emailed,
+            "email_error": mail.error if mail.status == "error" else None,
+            "link": None if emailed else link,
+            "expires_at": pr.expires_at,
+        }
+        db.commit()
+        response.headers["Cache-Control"] = "no-store"
+        return out
+
+    clave = new_temp_password() if data.mode == "temporal" else data.new_password
+    u.password_hash = hash_password(clave)
+    u.must_change_password = True
+    u.temp_password_expires_at = now + timedelta(hours=TEMP_PASSWORD_HOURS)
+    u.temp_password_by, u.temp_password_tenant_id = p.user.id, tid  # el login revalida que quien la puso siga pudiendo
+    u.password_changed_at = now
+    u.failed_logins, u.locked_until = 0, None
+    login_limiter.forget_account(u.email)
+    invalidate_resets(db, uid)
+    end_sessions(db, u)  # todas sus sesiones y session_version + 1
+    audit(
+        db, tid, p.user.id, "password_reset", "user", uid,
+        {"modo": data.mode, "empresa": c.name, "vence": u.temp_password_expires_at.isoformat()}, ip=p.ip,
+    )  # fmt: skip
+    avisar_contrasena_temporal(db, p.tenant, u, p.user.full_name, now, definida=data.mode == "definir")
+    expira = u.temp_password_expires_at
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    base = {"expires_at": expira, "email": u.email, "name": u.full_name, "login_url": f"{_base_url()}/login"}
+    if data.mode == "temporal":
+        return {"mode": "temporal", "temp_password": clave, **base}
+    return {"mode": "definir", **base}
 
 
 class FromInternalIn(BaseModel):

@@ -212,15 +212,17 @@ def _send_invite(db: Session, tenant: Tenant, inv: Invitation, raw: str) -> tupl
     return link, m
 
 
-def avisar_contrasena_temporal(db: Session, tenant: Tenant, u: User, admin: str, now: datetime) -> None:
-    """Aviso de seguridad: el administrador le puso una contrasena temporal (nunca la lleva el correo)."""
+def avisar_contrasena_temporal(db: Session, tenant: Tenant, u: User, admin: str, now: datetime, definida: bool = False) -> None:
+    """Aviso de seguridad: el administrador le puso una contrasena temporal (nunca la lleva el correo). Con definida=True
+    el administrador eligio la contrasena y la paso el; igual al entrar tiene que crear una propia."""
+    como = "le definió una contraseña" if definida else "le va a pasar una contraseña temporal"
     notify_security(
         db,
         tenant,
         u,
         f"Se restableció su contraseña · {tenant.name}",
         f"<p>El administrador {_esc(admin)} restableció su contraseña de Crimson el {fecha_cr(now)}. "
-        "Le va a pasar una contraseña temporal; al entrar va a crear una propia. Si no lo esperaba, avísele.</p>",
+        f"Le {como}; al entrar va a crear una propia. Si no lo esperaba, avísele.</p>",
     )
 
 

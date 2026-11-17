@@ -11,6 +11,7 @@ import { Lookup, searchCustomers, searchProducts, type LookupItem } from "../../
 import { InviteLink, type InviteOut } from "../cliente/InviteLink";
 import { STATE_LABEL, STATE_TONE, searchSuppliers, type AllyRow } from "./Allies";
 import { MarkupFormula } from "./markup";
+import AllyResetModal, { type AllyResetTarget } from "./AllyResetPassword";
 import "../crm/opportunities.css";
 
 type Contact = { name?: string | null; email?: string | null; phone?: string | null };
@@ -130,6 +131,8 @@ function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | nu
   const load = useCallback(() => { api<Users>(`/allies/${a.id}/users`).then(setD).catch(() => setD(null)); }, [a.id]);
   useEffect(load, [load]);
   const puede = allows("aliados.usuarios");
+  const admin = allows("settings.configurar"); // restablecer contraseñas: como en Ajustes → Usuarios, solo administrador
+  const [reseteo, setReseteo] = useState<AllyResetTarget | null>(null);
   const invitar = async () => {
     try { setInv(await api<InviteOut>(`/allies/${a.id}/invitations`, { method: "POST", json: { email: f.email, role: f.role, name: f.name || null } })); load(); }
     catch (e) { toast(e instanceof Error ? e.message : "No se pudo invitar", "bad"); }
@@ -148,7 +151,10 @@ function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | nu
                 <td><b>{u.name}</b><div className="meta">{u.email}{u.last_login ? ` · último ingreso ${fmtDate(u.last_login)}` : ""}</div></td>
                 <td>{puede ? <select className="select" value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}>{Object.entries(ROL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : ROL[u.role]}</td>
                 <td><span className={`badge badge--${u.active ? "ok" : "muted"}`}>{u.active ? "Activo" : "Inactivo"}</span></td>
-                <td>{puede && <button className="btn btn--ghost btn--sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? "Desactivar" : "Activar"}</button>}</td>
+                <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {admin && u.active && <button className="btn btn--soft btn--sm" onClick={() => setReseteo({ id: u.id, name: u.name, email: u.email })}><Icon d={I.shield} size={14} />Restablecer contraseña</button>}
+                  {puede && <button className="btn btn--ghost btn--sm" onClick={() => patch(u.id, { active: !u.active })}>{u.active ? "Desactivar" : "Activar"}</button>}
+                </td>
               </tr>
             ))}
             {d.invitations.map((i) => (
@@ -157,6 +163,7 @@ function Usuarios({ a, first, onPreview }: { a: Detail; first?: FirstInvite | nu
           </tbody>
         </table>
       </Card>
+      {reseteo && <AllyResetModal allyId={a.id} user={reseteo} onClose={() => { setReseteo(null); load(); }} />}
       {puede && (
         <Card title="Invitar al portal de aliados">
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>

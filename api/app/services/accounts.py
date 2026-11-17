@@ -118,24 +118,23 @@ def issuer_still_allowed(db: Session, tenant_id: int | None, issuer_id: int | No
     a admin y quien lo emitio no lo es, lo que tiene en la mano deja de servir (si no, entraria con esa cuenta)."""
     if not issuer_id or tenant_id is None:
         return False
-    roles = dict(
-        db.execute(
-            select(TenantUser.user_id, TenantUser.role_code)
-            .join(User, User.id == TenantUser.user_id)
-            .join(Tenant, Tenant.id == TenantUser.tenant_id)
-            .where(
-                TenantUser.tenant_id == tenant_id,
-                TenantUser.user_id.in_([issuer_id, user_id]),
-                TenantUser.active,
-                TenantUser.customer_id.is_(None),
-                TenantUser.ally_company_id.is_(None),
-                User.active,
-                Tenant.active,
-            )
-        ).all()
-    )
-    quien, destino = roles.get(issuer_id), roles.get(user_id)
-    if quien is None or destino is None:
+    # El emisor tiene que ser un usuario interno. La persona puede ser interna, de un cliente o de una empresa aliada
+    # (el administrador le restablece la contraseña desde su ficha): basta que tenga membresia activa en esa empresa.
+    filas = db.execute(
+        select(TenantUser.user_id, TenantUser.role_code, TenantUser.customer_id, TenantUser.ally_company_id)
+        .join(User, User.id == TenantUser.user_id)
+        .join(Tenant, Tenant.id == TenantUser.tenant_id)
+        .where(
+            TenantUser.tenant_id == tenant_id,
+            TenantUser.user_id.in_([issuer_id, user_id]),
+            TenantUser.active,
+            User.active,
+            Tenant.active,
+        )
+    ).all()
+    internos = {f.user_id: f.role_code for f in filas if f.customer_id is None and f.ally_company_id is None}
+    quien, destino = internos.get(issuer_id), internos.get(user_id)
+    if quien is None or user_id not in {f.user_id for f in filas}:
         return False
     if destino == "admin" and quien != "admin":
         return False
